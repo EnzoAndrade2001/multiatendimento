@@ -127,6 +127,32 @@ def compose_brazil_phone(area_code: Any, number: Any) -> str | None:
     return local
 
 
+def normalize_company_info(record: dict[str, Any]) -> dict[str, Any]:
+    """Converte IEMPRESA em um perfil seguro e estável para o CRM."""
+    code = record.get("cdempresa")
+    address = first_non_empty(record.get("endereco"), record.get("logradouro"))
+    number = first_non_empty(record.get("num"), record.get("numero"))
+    phone = compose_brazil_phone(record.get("ddd"), record.get("fone1")) or normalize_phone(
+        record.get("fone1"), record.get("fone"), record.get("telefone"), record.get("celular")
+    )
+    return {
+        "companyCode": str(code).strip() if code is not None else None,
+        "name": first_non_empty(record.get("nmempresa"), record.get("razaosocial"), record.get("razao_social")),
+        "tradeName": first_non_empty(record.get("fantasia"), record.get("nmfantasia"), record.get("nomefantasia")),
+        "cnpj": first_non_empty(record.get("cnpj"), record.get("cpfcnpj")),
+        "stateRegistration": first_non_empty(record.get("inscest"), record.get("ie"), record.get("inscricaoestadual")),
+        "address": address,
+        "number": number,
+        "neighborhood": first_non_empty(record.get("bairro")),
+        "zipCode": first_non_empty(record.get("cep")),
+        "city": first_non_empty(record.get("cidade")),
+        "state": first_non_empty(record.get("uf"), record.get("estado")),
+        "areaCode": first_non_empty(record.get("ddd")),
+        "phone": phone,
+        "capturedAt": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
 def json_safe(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat(timespec="seconds")
@@ -171,6 +197,7 @@ class AppConfig:
     firebird_user: str = "SYSDBA"
     firebird_password: str = ""
     firebird_charset: str = "WIN1252"
+    firebird_company_id: int = 1
     crm_base_url: str = ""
     crm_tenant_slug: str = ""
     crm_sync_token: str = ""
@@ -252,6 +279,7 @@ class AppConfig:
             firebird_user=os.getenv("FIREBIRD_USER", "SYSDBA"),
             firebird_password=os.getenv("FIREBIRD_PASSWORD", ""),
             firebird_charset=os.getenv("FIREBIRD_CHARSET", "WIN1252"),
+            firebird_company_id=env_int("FIREBIRD_COMPANY_ID", 1),
             crm_base_url=os.getenv("CRM_BASE_URL", "").rstrip("/"),
             crm_tenant_slug=os.getenv("CRM_TENANT_SLUG", ""),
             crm_sync_token=os.getenv("CRM_SYNC_TOKEN", ""),
@@ -525,6 +553,14 @@ class CRMClient:
                         command_result = repo.fetch_billing_document(payload)
                         self.report_command_result(cmd_id, success=True, result=command_result)
                         logging.info("Documento financeiro %s gerado com sucesso.", document_type)
+                    elif cmd_type == "FETCH_COMPANY_PROFILE":
+                        logging.info("Consultando cadastro da empresa no iLux (IEMPRESA)...")
+                        company = repo.fetch_company_info(payload.get("companyCode"))
+                        self.report_command_result(cmd_id, success=True, result={"company": company})
+                        logging.info(
+                            "Cadastro da empresa sincronizado: %s.",
+                            company.get("name") or company.get("companyCode") or "sem nome",
+                        )
                     else:
                         logging.warning("Tipo de comando desconhecido: %s", cmd_type)
                 except Exception as e:
@@ -770,6 +806,24 @@ class FirebirdRepository:
                 con.close()
             except Exception:
                 pass
+
+    def fetch_company_info(self, company_id: int | None = None) -> dict[str, Any]:
+        """Lê o cadastro oficial da empresa no iLux (IEMPRESA).
+
+        O código da empresa é configurável porque algumas instalações possuem
+        mais de um cadastro. Quando não houver código válido, usamos o primeiro
+        cadastro disponível, mantendo o agente útil em bases antigas.
+        """
+        selected_id = int(company_id or self.config.firebird_company_id or 1)
+        rows = list(self._rows(
+            "select first 1 * from IEMPRESA where CDEMPRESA = ?",
+            (selected_id,),
+        ))
+        if not rows:
+            rows = list(self._rows("select first 1 * from IEMPRESA order by CDEMPRESA", ()))
+        if not rows:
+            raise RuntimeError("Nenhum cadastro encontrado na tabela IEMPRESA.")
+        return normalize_company_info(rows[0])
 
     def inspect_schema(self, sample_rows: int = 3) -> dict[str, Any]:
         con = self.connect()
@@ -1751,7 +1805,7 @@ class FirebirdRepository:
                 "osType": pick(os_type_rows[0] if os_type_rows else {}, "cdostp", "nmostp"),
                 "company": pick(
                     company_rows[0] if company_rows else {},
-                    "cdempresa", "nmempresa", "cnpj", "inscest", "endereco", "num", "bairro", "cidade",
+                    "cdempresa", "nmempresa", "fantasia", "nmfantasia", "nomefantasia", "cnpj", "inscest", "endereco", "num", "bairro", "cidade",
                     "uf", "cep", "ddd", "fone", "fone1",
                 ),
                 "history": history_rows,
@@ -2129,6 +2183,27 @@ def sync_static_entities(repo: FirebirdRepository, crm: CRMClient) -> None:
         logging.error("Falha ao sincronizar entidades estáticas (tipos/técnicos): %s", e)
 
 
+def sync_company_profile(repo: FirebirdRepository, crm: CRMClient, config: AppConfig) -> None:
+    """Mantém o cadastro oficial da empresa disponível no CRM.
+
+    É uma leitura pequena e idempotente, executada junto ao ciclo normal. O
+    botão da tela Empresa usa o mesmo caminho, mas por comando imediato, para
+    não depender do próximo ciclo de sincronização.
+    """
+    try:
+        company = repo.fetch_company_info(config.firebird_company_id)
+        crm.push("companyInfo", [company])
+        logging.info(
+            "Empresa iLux sincronizada: %s (código %s)",
+            company.get("name") or "sem nome",
+            company.get("companyCode") or "N/A",
+        )
+    except Exception as exc:
+        # A empresa não deve impedir contatos, contratos ou O.S. de serem
+        # sincronizados. O status geral/ping continuará identificando o agente.
+        logging.warning("Não foi possível sincronizar IEMPRESA: %s", exc)
+
+
 def sync_entity(
     repo: FirebirdRepository,
     crm: CRMClient,
@@ -2413,6 +2488,7 @@ def run_cycle(
 
     # Sync static support metadata
     sync_static_entities(repo, crm)
+    sync_company_profile(repo, crm, config)
 
     entities = ["contacts", "equipments", "contracts"]
     if full:

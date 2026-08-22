@@ -7,6 +7,7 @@ const { sendServiceOrderManagerCopy } = require('../services/serviceOrderManager
 const { mapEquipmentType } = require('../utils/equipmentMapper');
 const { mediaPath } = require('../utils/uploads');
 const billingDocumentService = require('../services/billingDocumentService');
+const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
 
 function pick(...values) {
   for (const value of values) {
@@ -427,12 +428,16 @@ async function pushBatch(req, res) {
       contacts: 0,
       equipments: 0,
       serviceOrders: 0,
+      companyInfo: 0,
       skipped: 0,
       errors: [],
     };
 
     for (const record of records) {
       try {
+        const payloadToStore = entity === COMPANY_ENTITY
+          ? normalizeCompanyProfile(record)
+          : record;
         const externalId = pick(
           record.externalId,
           record.cdCliente,
@@ -440,6 +445,9 @@ async function pushBatch(req, res) {
           record.seqOs,
           record.idAtendimento,
           record.id_atendimento,
+          record.companyCode,
+          record.cdEmpresa,
+          record.cdeempresa,
           record.code,
           record.cdOstp,
           record.name,
@@ -447,7 +455,7 @@ async function pushBatch(req, res) {
           record.nmsuporte
         ) || crypto.randomUUID();
 
-        await upsertRawRecord(tenant.id, source, entity, externalId, record);
+        await upsertRawRecord(tenant.id, source, entity, externalId, payloadToStore);
         stats.stored += 1;
 
         if (entity === 'contacts') {
@@ -463,6 +471,8 @@ async function pushBatch(req, res) {
         } else if (entity === 'serviceOrders') {
           await upsertServiceOrder(tenant, instance, record);
           stats.serviceOrders += 1;
+        } else if (entity === COMPANY_ENTITY) {
+          stats.companyInfo += 1;
         } else {
           stats.skipped += 1;
         }
@@ -553,6 +563,7 @@ async function getPendingCommands(req, res) {
     let pendingOS = [];
     let pendingBillingPdf = null;
     let pendingBillingDocument = null;
+    let pendingCompanyProfile = null;
 
     do {
       const leaseExpiredAt = new Date(Date.now() - 45_000);
@@ -644,7 +655,31 @@ async function getPendingCommands(req, res) {
         });
       }
 
-      if (pendingOS.length > 0 || pendingBillingPdf || pendingBillingDocument || tenant.settings?.firebirdQueueBillingProcess || Date.now() >= deadline) break;
+      const companyCandidate = await prisma.externalSyncRecord.findFirst({
+        where: {
+          tenantId: tenant.id,
+          source: 'crm',
+          entity: COMPANY_REQUEST_ENTITY,
+          payload: { path: ['status'], equals: 'pending' },
+        },
+        orderBy: { receivedAt: 'asc' },
+        select: { id: true, payload: true },
+      });
+      if (companyCandidate) {
+        pendingCompanyProfile = await prisma.externalSyncRecord.update({
+          where: { id: companyCandidate.id },
+          data: {
+            payload: {
+              ...companyCandidate.payload,
+              status: 'processing',
+              processingAt: new Date().toISOString(),
+            },
+          },
+          select: { id: true, payload: true },
+        });
+      }
+
+      if (pendingOS.length > 0 || pendingBillingPdf || pendingBillingDocument || pendingCompanyProfile || tenant.settings?.firebirdQueueBillingProcess || Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, 350));
     } while (true);
 
@@ -720,6 +755,14 @@ async function getPendingCommands(req, res) {
       });
     }
 
+    if (pendingCompanyProfile) {
+      commands.push({
+        id: pendingCompanyProfile.id,
+        type: 'FETCH_COMPANY_PROFILE',
+        payload: pendingCompanyProfile.payload,
+      });
+    }
+
     res.json(commands);
   } catch (err) {
     console.error('[pending-commands] erro:', err.message);
@@ -744,6 +787,42 @@ async function commandCallback(req, res) {
         data: { firebirdQueueBillingProcess: false }
       });
       console.log(`[pending-commands] Comando PROCESS_BILLING concluído.`);
+      return res.json({ ok: true });
+    }
+
+    const companyRequest = await prisma.externalSyncRecord.findFirst({
+      where: { id, tenantId: tenant.id, source: 'crm', entity: COMPANY_REQUEST_ENTITY },
+      select: { id: true, payload: true },
+    });
+    if (companyRequest) {
+      if (success && result?.company && typeof result.company === 'object') {
+        const company = normalizeCompanyProfile(result.company);
+        const externalId = company.code || result.company.companyCode || result.company.cdeempresa || '1';
+        await upsertRawRecord(tenant.id, 'firebird', COMPANY_ENTITY, String(externalId), company);
+        await prisma.externalSyncRecord.update({
+          where: { id: companyRequest.id },
+          data: {
+            payload: {
+              ...companyRequest.payload,
+              status: 'success',
+              completedAt: new Date().toISOString(),
+              companyCode: String(externalId),
+            },
+          },
+        });
+      } else {
+        await prisma.externalSyncRecord.update({
+          where: { id: companyRequest.id },
+          data: {
+            payload: {
+              ...companyRequest.payload,
+              status: 'failed',
+              completedAt: new Date().toISOString(),
+              error: String(error || 'Nao foi possivel consultar os dados da empresa no Firebird.'),
+            },
+          },
+        });
+      }
       return res.json({ ok: true });
     }
 

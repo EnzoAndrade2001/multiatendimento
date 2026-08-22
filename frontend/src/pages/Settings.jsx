@@ -20,6 +20,7 @@ import {
   syncFirebirdContacts,
   getBillingLogs,
   getSystemPromptPreview,
+  syncCompanyFromFirebird,
 } from '../services/api';
 import Users from './Users';
 import Teams from './Teams';
@@ -82,6 +83,11 @@ export default function Settings() {
     firebirdLastSyncAt: '',
     firebirdLastSyncStatus: 'idle',
     firebirdLastSyncError: '',
+    firebirdCompany: null,
+    firebirdCompanySyncStatus: 'not_synced',
+    firebirdCompanySyncRequestedAt: '',
+    firebirdCompanySyncRequestId: '',
+    firebirdCompanySyncError: '',
     kpiContractValue: 1200.0,
     kpiServiceValue: 350.0,
     kpiSlaLimitHours: 24,
@@ -107,6 +113,7 @@ export default function Settings() {
   const [loadingPromptPreview, setLoadingPromptPreview] = useState(false);
   const [testingIntegration, setTestingIntegration] = useState(false);
   const [syncingIntegration, setSyncingIntegration] = useState(false);
+  const [syncingCompany, setSyncingCompany] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => !TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index]));
 
@@ -186,6 +193,36 @@ export default function Settings() {
       toast.error(`Erro ao salvar: ${message}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleCompanySync() {
+    setSyncingCompany(true);
+    try {
+      await syncCompanyFromFirebird();
+      toast.success('Consulta da empresa enviada ao agente iLux.');
+
+      // O agente responde por HTTPS no próximo polling de comandos. Atualiza
+      // somente as configurações para não reiniciar toda a tela.
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const response = await getSettings();
+        const next = response.data || {};
+        setForm((current) => ({ ...current, ...next }));
+        if (next.firebirdCompanySyncStatus !== 'pending') {
+          if (next.firebirdCompanySyncStatus === 'ok') {
+            toast.success('Dados da empresa atualizados pelo iLux.');
+          } else {
+            toast.error('O agente não confirmou a consulta da empresa.');
+          }
+          return;
+        }
+      }
+      toast.info('A consulta ficou pendente. O agente atualizará assim que estiver online.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível solicitar a sincronização da empresa.');
+    } finally {
+      setSyncingCompany(false);
     }
   }
 
@@ -339,6 +376,15 @@ export default function Settings() {
   const AGENT_STALE_AFTER_MS = 10 * 60 * 1000; // 2x o intervalo padrão de sync (5 min)
   const agentLastSeenMs = form.firebirdLastSyncAt ? Date.now() - new Date(form.firebirdLastSyncAt).getTime() : null;
   const agentIsOnline = form.firebirdLastSyncStatus === 'online' && agentLastSeenMs != null && agentLastSeenMs < AGENT_STALE_AFTER_MS;
+  const firebirdCompany = form.firebirdCompany && typeof form.firebirdCompany === 'object' ? form.firebirdCompany : null;
+  const companySyncStatus = form.firebirdCompanySyncStatus || 'not_synced';
+  const companySyncLabel = companySyncStatus === 'pending'
+    ? 'Aguardando o agente'
+    : companySyncStatus === 'ok'
+      ? 'Sincronizado com o iLux'
+      : companySyncStatus === 'failed'
+        ? 'Falha na última consulta'
+      : 'Ainda não sincronizado';
 
   const firebirdEnvPreview = [
     'FIREBIRD_HOST=127.0.0.1',
@@ -347,6 +393,7 @@ export default function Settings() {
     'FIREBIRD_USER=SYSDBA',
     'FIREBIRD_PASSWORD=preencha_a_senha_do_firebird',
     'FIREBIRD_CHARSET=WIN1252',
+    'FIREBIRD_COMPANY_ID=1',
     '',
     'CRM_BASE_URL=https://api-crm.lcddigital.com.br',
     `CRM_TENANT_SLUG=${tenant?.slug || 'lcddigital'}`,
@@ -719,6 +766,65 @@ export default function Settings() {
         <div style={s.sections}>
           <div style={s.card}>
             <h2 style={s.cardTitle}>Dados da empresa</h2>
+            <div
+              style={{
+                marginBottom: '1.25rem',
+                padding: '1rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: 12,
+                background: 'var(--bg-panel)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ ...s.label, marginBottom: '.35rem' }}>Cadastro oficial do iLux</div>
+                  <div style={{ fontWeight: 700, color: companySyncStatus === 'ok' ? 'var(--success)' : companySyncStatus === 'pending' ? 'var(--accent)' : 'var(--text-dim)' }}>
+                    {companySyncLabel}
+                  </div>
+                  <p style={{ ...s.hint, margin: '.35rem 0 0' }}>
+                    A leitura vem da tabela IEMPRESA pelo agente local. Os dados manuais abaixo continuam como fallback.
+                  </p>
+                  {firebirdCompany?.syncedAt && (
+                    <p style={{ ...s.hint, margin: '.25rem 0 0' }}>
+                      Última leitura: {new Date(firebirdCompany.syncedAt).toLocaleString('pt-BR')}
+                    </p>
+                  )}
+                  {companySyncStatus === 'failed' && form.firebirdCompanySyncError && (
+                    <p style={{ ...s.hint, margin: '.25rem 0 0', color: 'var(--danger)' }}>
+                      {form.firebirdCompanySyncError}
+                    </p>
+                  )}
+                </div>
+                <button type="button" style={{ ...s.saveBtn, width: 'auto', minWidth: 190, marginTop: 0 }} onClick={handleCompanySync} disabled={syncingCompany}>
+                  {syncingCompany ? 'Consultando iLux...' : 'Sincronizar agora'}
+                </button>
+              </div>
+
+              {firebirdCompany && (
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '.75rem', marginTop: '1rem' }}>
+                  {[
+                    ['Razão social', firebirdCompany.name],
+                    ['Nome fantasia', firebirdCompany.tradeName],
+                    ['CNPJ / CPF', firebirdCompany.cnpj],
+                    ['Inscrição estadual', firebirdCompany.stateRegistration],
+                    ['Endereço', firebirdCompany.addressFull || firebirdCompany.address],
+                    ['Bairro', firebirdCompany.neighborhood],
+                    ['CEP', firebirdCompany.zipCode],
+                    ['Cidade / UF', [firebirdCompany.city, firebirdCompany.state].filter(Boolean).join(' / ')],
+                    ['Telefone', firebirdCompany.phone
+                      ? (firebirdCompany.areaCode && !String(firebirdCompany.phone).replace(/\D/g, '').startsWith(String(firebirdCompany.areaCode).replace(/\D/g, ''))
+                        ? `(${firebirdCompany.areaCode}) ${firebirdCompany.phone}`
+                        : firebirdCompany.phone)
+                      : null],
+                  ].map(([label, value]) => (
+                    <div key={label} style={{ padding: '.65rem .75rem', borderRadius: 8, background: 'var(--bg-panel-hover)', minWidth: 0 }}>
+                      <div style={{ ...s.label, fontSize: 'var(--text-xs)', marginBottom: '.2rem' }}>{label}</div>
+                      <div style={{ color: 'var(--text-main)', fontWeight: 600, overflowWrap: 'anywhere' }}>{value || 'Não informado'}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div style={s.form}>
               <div style={s.field}>
                 <label style={s.label}>Razão social / nome da empresa</label>

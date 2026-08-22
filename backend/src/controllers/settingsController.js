@@ -2,15 +2,36 @@ const prisma = require('../lib/prisma');
 const { normalizePhoneNumber } = require('../services/evolutionService');
 const botPromptService = require('../services/botPromptService');
 const { filterSettingsOutput } = require('../auth/settingsAccess');
+const { getLatestCompanyProfile, getPendingCompanyRequest, getLatestCompanyRequest, requestCompanySync } = require('../services/companyProfileService');
 
 async function getSettings(req, res) {
-  const settings = await prisma.tenantSettings.findUnique({
-    where: { tenantId: req.user.tenantId },
-  });
+  const [settings, firebirdCompany, pendingCompanyRequest, latestCompanyRequest] = await Promise.all([
+    prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } }),
+    getLatestCompanyProfile(req.user.tenantId),
+    getPendingCompanyRequest(req.user.tenantId),
+    getLatestCompanyRequest(req.user.tenantId),
+  ]);
+
+  const requestStatus = latestCompanyRequest?.payload?.status;
+  const requestFailed = requestStatus === 'failed' && (
+    !firebirdCompany || !latestCompanyRequest?.receivedAt || new Date(firebirdCompany.receivedAt) < new Date(latestCompanyRequest.receivedAt)
+  );
+  const companySync = {
+    firebirdCompany,
+    firebirdCompanySyncStatus: pendingCompanyRequest
+      ? 'pending'
+      : requestFailed
+        ? 'failed'
+        : (firebirdCompany ? 'ok' : 'not_synced'),
+    firebirdCompanySyncRequestedAt: latestCompanyRequest?.payload?.requestedAt || null,
+    firebirdCompanySyncRequestId: pendingCompanyRequest?.id || null,
+    firebirdCompanySyncError: latestCompanyRequest?.payload?.error || null,
+  };
 
   if (!settings) return res.json(filterSettingsOutput(req.user, {
     evolutionUrl: process.env.DEFAULT_EVOLUTION_URL || '',
     evolutionKey: process.env.DEFAULT_EVOLUTION_KEY || '',
+    ...companySync,
   }));
 
   // Injeta os padrões do servidor se o tenant não tiver configurado
@@ -20,8 +41,14 @@ async function getSettings(req, res) {
     evolutionKey: settings.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY || '',
     systemPrompt: settings.botSystemPrompt,
     transferKeyword: settings.botTransferWord,
-    outOfOfficeMessage: settings.outOfOfficeMessage
+    outOfOfficeMessage: settings.outOfOfficeMessage,
+    ...companySync,
   }));
+}
+
+async function syncCompanyFromFirebird(req, res) {
+  const result = await requestCompanySync(req.user.tenantId, req.user.userId);
+  res.status(result.alreadyQueued ? 200 : 202).json({ ok: true, ...result });
 }
 
 async function saveSettings(req, res) {
@@ -229,4 +256,4 @@ async function uploadLogo(req, res) {
   res.json({ url });
 }
 
-module.exports = { getSettings, saveSettings, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };
+module.exports = { getSettings, saveSettings, syncCompanyFromFirebird, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };

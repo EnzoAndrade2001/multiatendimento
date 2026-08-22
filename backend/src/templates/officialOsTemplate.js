@@ -48,7 +48,7 @@ function renderOfficialOsTemplate(model) {
     ? `<img class="logo-lcd" src="${model.logoDataUri}" alt="LCD">`
     : '<span class="logo-fallback">LCD</span>';
 
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
@@ -176,7 +176,12 @@ function renderOfficialOsTemplate(model) {
     </div>
   </main>
 </body>
-</html>`;
+  </html>`;
+
+  // O layout antigo trazia o nome da LCD fixo no HTML. O conteúdo exibido
+  // deve acompanhar o cadastro oficial da empresa sem reescrever o template.
+  const brand = text(model.company.brand || model.company.name);
+  return html.replace(/<span class="company-brand">[^<]*<\/span>/, `<span class="company-brand">${brand}</span>`);
 }
 
 module.exports = { renderOfficialOsTemplate };

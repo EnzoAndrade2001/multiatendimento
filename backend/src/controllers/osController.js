@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { draftServiceOrder } = require('../services/geminiService');
 const { renderOfficialOsTemplate } = require('../templates/officialOsTemplate');
+const { getLatestCompanyProfile } = require('../services/companyProfileService');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -493,8 +494,10 @@ async function generatePdf(req, res) {
   }
 
   let osPrintData = null;
+  let cachedCompanyProfile = null;
   let previousOrders = [];
   try {
+    cachedCompanyProfile = await getLatestCompanyProfile(req.user.tenantId);
     if (os.externalId) {
       const printRecord = await prisma.externalSyncRecord.findUnique({
         where: {
@@ -593,31 +596,44 @@ async function generatePdf(req, res) {
     const firebirdEquipment = osPrintData?.equipment || {};
     const firebirdContract = osPrintData?.contract || {};
     const firebirdOsType = osPrintData?.osType || {};
-    const firebirdCompany = osPrintData?.company || {};
+    // A foto da O.S. tem prioridade para preservar o documento histórico;
+    // o perfil sincronizado completa campos que uma base antiga não retornou.
+    const firebirdCompany = {
+      ...(cachedCompanyProfile || {}),
+      ...(osPrintData?.company || {}),
+    };
     const firstValue = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
-    const joinAddress = (record = {}) => [
-      firstValue(record.endereco, record.address),
-      firstValue(record.num, record.numero),
-      record.complemento,
-    ].filter((value) => value !== undefined && value !== null && String(value).trim()).join(', ');
+    const joinAddress = (record = {}) => {
+      const full = firstValue(record.addressFull);
+      const base = full || firstValue(record.endereco, record.address);
+      return [
+        base,
+        full ? null : firstValue(record.num, record.numero),
+        record.complemento,
+      ].filter((value) => value !== undefined && value !== null && String(value).trim()).join(', ');
+    };
     const joinPhone = (record = {}) => {
-      const phone = firstValue(record.fone1, record.fone, record.telefone, record.celular);
-      const ddd = firstValue(record.ddd, record.dddfone);
+      const phone = firstValue(record.fone1, record.fone, record.telefone, record.celular, record.phone);
+      const ddd = firstValue(record.ddd, record.dddfone, record.areaCode);
       if (!phone) return '';
+      const phoneDigits = String(phone).replace(/\D/g, '');
+      const dddDigits = String(ddd || '').replace(/\D/g, '');
+      if (dddDigits && phoneDigits.startsWith(dddDigits) && phoneDigits.length >= 10) return phoneDigits;
       return ddd && !String(phone).startsWith('(') ? `(${ddd}) ${phone}` : String(phone);
     };
 
     // Fallback inteligente para dados da empresa
     const company = {
-      name: firstValue(firebirdCompany.nmempresa, settings?.companyName, 'CLAUDIA CARDINALI DOS SANTOS FONTOURA LTDA'),
+      brand: firstValue(firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, settings?.companyName, 'Empresa'),
+      name: firstValue(firebirdCompany.nmempresa, firebirdCompany.name, settings?.companyName, 'CLAUDIA CARDINALI DOS SANTOS FONTOURA LTDA'),
       cnpj: firstValue(firebirdCompany.cnpj, settings?.companyCnpj, '35.692.721/0001-94'),
-      ie: firstValue(firebirdCompany.inscest, settings?.companyIE, '0963799100'),
-      address: firstValue(joinAddress(firebirdCompany), settings?.companyAddress, 'RUA VINTE E QUATRO DE AGOSTO, 103'),
-      bairro: firstValue(firebirdCompany.bairro, settings?.companyBairro, 'JARDIM SABARA'),
-      cep: firstValue(firebirdCompany.cep, settings?.companyCep, '91.215-280'),
-      city: firstValue(firebirdCompany.cidade, settings?.companyCity, 'PORTO ALEGRE'),
-      state: firstValue(firebirdCompany.uf, settings?.companyState, 'RS'),
-      phone: firstValue(joinPhone(firebirdCompany), settings?.companyPhone, '(051) 3028-3222')
+      ie: firstValue(firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE, '0963799100'),
+      address: firstValue(joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress, 'RUA VINTE E QUATRO DE AGOSTO, 103'),
+      bairro: firstValue(firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro, 'JARDIM SABARA'),
+      cep: firstValue(firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep, '91.215-280'),
+      city: firstValue(firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity, 'PORTO ALEGRE'),
+      state: firstValue(firebirdCompany.uf, firebirdCompany.state, settings?.companyState, 'RS'),
+      phone: firstValue(joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone, '(051) 3028-3222')
     };
 
     // Identificação do atendente com fallback para o usuário atual que está gerando o documento
@@ -820,6 +836,7 @@ async function generatePdf(req, res) {
       isBudget,
       logoDataUri,
       company: {
+        brand: company.brand,
         name: company.name,
         cnpj: company.cnpj,
         stateRegistration: company.ie,
@@ -1426,6 +1443,19 @@ async function generatePdf(req, res) {
       },
       defaultStyle: { font: 'Roboto' }
     };
+
+    const replaceCompanyBrand = (node) => {
+      if (Array.isArray(node)) {
+        node.forEach(replaceCompanyBrand);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      if (typeof node.text === 'string' && node.text.startsWith('LCD DIGITAL OUTSOURCING')) {
+        node.text = company.brand || company.name;
+      }
+      Object.values(node).forEach(replaceCompanyBrand);
+    };
+    replaceCompanyBrand(fullIluxContent);
 
     const doc = pdfmake.createPdf({ ...docDefinition, footer: () => ({ text: '' }), content: fullIluxContent });
     const stream = await doc.getStream();
