@@ -208,7 +208,22 @@ export default function Settings() {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         const response = await getSettings();
         const next = response.data || {};
-        setForm((current) => ({ ...current, ...next }));
+        const company = next.firebirdCompany;
+        setForm((current) => ({
+          ...current,
+          ...next,
+          ...(company ? {
+            companyName: company.name || current.companyName,
+            companyCnpj: company.cnpj || current.companyCnpj,
+            companyIE: company.stateRegistration || current.companyIE,
+            companyAddress: company.addressFull || company.address || current.companyAddress,
+            companyBairro: company.neighborhood || current.companyBairro,
+            companyCep: company.zipCode || current.companyCep,
+            companyPhone: company.phone || current.companyPhone,
+            companyCity: company.city || current.companyCity,
+            companyState: company.state || current.companyState,
+          } : {}),
+        }));
         if (next.firebirdCompanySyncStatus !== 'pending') {
           if (next.firebirdCompanySyncStatus === 'ok') {
             toast.success('Dados da empresa atualizados pelo iLux.');
@@ -782,7 +797,7 @@ export default function Settings() {
                     {companySyncLabel}
                   </div>
                   <p style={{ ...s.hint, margin: '.35rem 0 0' }}>
-                    A leitura vem da tabela IEMPRESA pelo agente local. Os dados manuais abaixo continuam como fallback.
+                    A leitura vem da tabela IEMPRESA pelo agente local. Ao sincronizar, os campos abaixo são preenchidos e salvos como fallback.
                   </p>
                   {firebirdCompany?.syncedAt && (
                     <p style={{ ...s.hint, margin: '.25rem 0 0' }}>

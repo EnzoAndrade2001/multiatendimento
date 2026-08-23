@@ -799,6 +799,35 @@ async function commandCallback(req, res) {
         const company = normalizeCompanyProfile(result.company);
         const externalId = company.code || result.company.companyCode || result.company.cdeempresa || '1';
         await upsertRawRecord(tenant.id, 'firebird', COMPANY_ENTITY, String(externalId), company);
+        // A consulta explícita também atualiza o cadastro manual de fallback.
+        // Assim, se o agente ficar temporariamente offline, os documentos
+        // continuam usando os últimos dados oficiais conhecidos do iLux.
+        await prisma.tenantSettings.upsert({
+          where: { tenantId: tenant.id },
+          update: {
+            companyName: company.name || undefined,
+            companyCnpj: company.cnpj || undefined,
+            companyIE: company.stateRegistration || undefined,
+            companyAddress: company.addressFull || company.address || undefined,
+            companyBairro: company.neighborhood || undefined,
+            companyCep: company.zipCode || undefined,
+            companyPhone: company.phone || undefined,
+            companyCity: company.city || undefined,
+            companyState: company.state || undefined,
+          },
+          create: {
+            tenantId: tenant.id,
+            companyName: company.name || null,
+            companyCnpj: company.cnpj || null,
+            companyIE: company.stateRegistration || null,
+            companyAddress: company.addressFull || company.address || null,
+            companyBairro: company.neighborhood || null,
+            companyCep: company.zipCode || null,
+            companyPhone: company.phone || null,
+            companyCity: company.city || null,
+            companyState: company.state || null,
+          },
+        });
         await prisma.externalSyncRecord.update({
           where: { id: companyRequest.id },
           data: {
