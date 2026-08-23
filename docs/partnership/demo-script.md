@@ -76,7 +76,7 @@ Em seguida:
 - mostrar técnico, atendente, cliente, equipamento e histórico;
 - confirmar a mensagem ao cliente e, se configurado, a cópia ao gestor.
 
-**Aceite:** uma única O.S. é criada, o número coincide com o iLux e o PDF usa o modelo homologado.
+**Aceite:** uma única O.S. é criada, o número coincide com o iLux e o PDF usa o modelo previamente validado no cenário demonstrado.
 
 ### 5. Financeiro e segunda via — 3 minutos
 
@@ -121,4 +121,3 @@ Se WhatsApp, internet ou Agente Local estiver indisponível:
 3. Usar gravação curta do fluxo completo.
 4. Mostrar um PDF de O.S. e um pacote financeiro previamente gerados.
 5. Retomar a arquitetura e os critérios de segurança.
-

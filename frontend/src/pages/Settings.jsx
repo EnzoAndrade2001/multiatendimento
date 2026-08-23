@@ -41,6 +41,11 @@ const TAB_GROUPS = [
   { label: 'Sistema', indexes: [8, 9] },
 ];
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const MASKED_SECRET_PATTERN = /^\*{4,}$/;
+
+function isMaskedSecret(value) {
+  return MASKED_SECRET_PATTERN.test(String(value || '').trim());
+}
 
 export default function Settings() {
   const { can } = usePermissions();
@@ -182,7 +187,13 @@ export default function Settings() {
     setSaveError('');
 
     try {
-      await saveSettings(form);
+      const settingsToSave = { ...form };
+      // The API masks stored secrets in read responses. Never send that visual
+      // placeholder back as if it were a real agent token.
+      if (isMaskedSecret(settingsToSave.firebirdClientToken)) {
+        delete settingsToSave.firebirdClientToken;
+      }
+      await saveSettings(settingsToSave);
       if (tab === 1) {
         await saveBusinessHours({ hours });
       }
@@ -370,6 +381,10 @@ export default function Settings() {
       toast.info('Nenhum token para copiar');
       return;
     }
+    if (isMaskedSecret(form.firebirdClientToken)) {
+      toast.info('O token já está configurado e protegido. Mantenha o token atual no agente ou gere e salve um novo.');
+      return;
+    }
     navigator.clipboard.writeText(form.firebirdClientToken);
     toast.success('Token copiado para a área de transferência!');
   }
@@ -438,6 +453,7 @@ export default function Settings() {
   const AGENT_STALE_AFTER_MS = 10 * 60 * 1000; // 2x o intervalo padrão de sync (5 min)
   const agentLastSeenMs = form.firebirdLastSyncAt ? Date.now() - new Date(form.firebirdLastSyncAt).getTime() : null;
   const agentIsOnline = form.firebirdLastSyncStatus === 'online' && agentLastSeenMs != null && agentLastSeenMs < AGENT_STALE_AFTER_MS;
+  const firebirdTokenIsMasked = isMaskedSecret(form.firebirdClientToken);
   const firebirdCompany = form.firebirdCompany && typeof form.firebirdCompany === 'object' ? form.firebirdCompany : null;
   const companySyncStatus = form.firebirdCompanySyncStatus || 'not_synced';
   const companySyncLabel = companySyncStatus === 'pending'
@@ -459,7 +475,12 @@ export default function Settings() {
     '',
     'CRM_BASE_URL=https://api-crm.lcddigital.com.br',
     `CRM_TENANT_SLUG=${tenant?.slug || 'lcddigital'}`,
-    `CRM_SYNC_TOKEN=${form.firebirdClientToken || 'gere_um_token_no_crm_e_salve'}`,
+    ...(firebirdTokenIsMasked
+      ? [
+          '# CRM_SYNC_TOKEN já configurado e protegido pelo CRM.',
+          '# Mantenha no agente o token atual ou gere e salve um novo nesta tela.',
+        ]
+      : [`CRM_SYNC_TOKEN=${form.firebirdClientToken || 'gere_um_token_no_crm_e_salve'}`]),
     'SYNC_INTERVAL_SECONDS=300',
     'BATCH_SIZE=250',
     'STATE_FILE=state.json',
@@ -1234,18 +1255,22 @@ export default function Settings() {
                         value={form.firebirdClientToken}
                         onChange={(e) => setForm({ ...form, firebirdClientToken: e.target.value })}
                         placeholder="Gere um token e salve a integração"
+                        readOnly={firebirdTokenIsMasked}
+                        title={firebirdTokenIsMasked ? 'Token já configurado e protegido pelo CRM' : undefined}
                       />
                       <button
                         type="button"
                         style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
                         onClick={() => setShowToken(!showToken)}
+                        disabled={firebirdTokenIsMasked}
                       >
-                        {showToken ? 'Ocultar' : 'Mostrar'}
+                        {firebirdTokenIsMasked ? 'Protegido' : showToken ? 'Ocultar' : 'Mostrar'}
                       </button>
                       <button
                         type="button"
                         style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
                         onClick={handleCopyToken}
+                        disabled={firebirdTokenIsMasked}
                       >
                         Copiar
                       </button>
@@ -1253,6 +1278,11 @@ export default function Settings() {
                         Gerar token
                       </button>
                     </div>
+                    {firebirdTokenIsMasked && (
+                      <p style={s.hint}>
+                        O token já está configurado e não pode ser exibido novamente. Mantenha o valor atual no agente instalado ou clique em <strong>Gerar token</strong>, salve as configurações e copie o novo valor.
+                      </p>
+                    )}
                   </div>
 
                   <div style={s.field}>

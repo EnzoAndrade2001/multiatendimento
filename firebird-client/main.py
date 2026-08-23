@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.0"
+DEFAULT_AGENT_VERSION = "1.0.1"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",

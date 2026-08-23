@@ -101,9 +101,8 @@
 A apresentação está pronta quando:
 
 - o fluxo completo passa três vezes consecutivas em ambiente controlado;
-- não há alteração pendente em produção;
+- não há alteração relacionada à apresentação aguardando deploy ou validação em produção;
 - contingências estão acessíveis;
 - todas as ações utilizam telefones autorizados;
 - os números apresentados no scorecard têm fonte e período identificados;
 - a proposta termina com uma decisão clara sobre homologação ou piloto.
-

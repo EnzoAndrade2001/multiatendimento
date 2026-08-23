@@ -45,7 +45,7 @@ Depois preencha o arquivo `.env` com:
 
 O agente também informa sua identificação em cada heartbeat enviado ao CRM:
 
-- `AGENT_VERSION`: versão do executável instalado (por exemplo, `1.0.0`)
+- `AGENT_VERSION`: versão do executável instalado (release atual: `1.0.1`)
 - `AGENT_PROTOCOL_VERSION`: versão do contrato de comunicação com o backend
 
 Além do `tenantSlug` usado pelas versões atuais do backend, o heartbeat inclui

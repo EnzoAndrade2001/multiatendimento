@@ -58,6 +58,14 @@ test('webhook falha fechado e aceita header ou bearer quando secret esta configu
     verifyWebhookSecret(requestWithHeaders(), denied, () => assert.fail('nao deveria autorizar'));
     assert.equal(denied.statusCode, 401);
 
+    const wrongSecret = responseRecorder();
+    verifyWebhookSecret(
+      requestWithHeaders({ 'x-webhook-secret': 'segredo-incorreto' }),
+      wrongSecret,
+      () => assert.fail('nao deveria autorizar segredo incorreto'),
+    );
+    assert.equal(wrongSecret.statusCode, 401);
+
     for (const headers of [
       { 'x-webhook-secret': 'webhook-test-secret' },
       { authorization: 'Bearer webhook-test-secret' },

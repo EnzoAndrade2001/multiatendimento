@@ -7,8 +7,10 @@ Esta proposta apresenta uma camada conversacional e operacional integrada ao iLu
 O iLux permanece como fonte oficial dos cadastros e processos administrativos. A solução complementar organiza o atendimento, consulta o contexto do cliente e executa fluxos autorizados no iLux por meio do Agente Local.
 
 **Responsável pela proposta:** Diego Cabral  
-**Ambiente demonstrado:** tenant LCD DIGITAL, em operação real e conectado ao iLux  
+**Ambiente demonstrado:** tenant LCD DIGITAL ativo, integrado ao iLux; a conexão deve ser confirmada no preflight do dia
 **Público da apresentação:** direção, produto e responsáveis técnicos do iLux
+
+**Prontidão para demonstração ao vivo:** condicionada à aprovação do smoke test descrito no [runbook da apresentação](./presentation-runbook.md).
 
 ## Proposta de valor
 
@@ -70,4 +72,3 @@ As modalidades abaixo são alternativas para discussão, não compromissos já f
 - [Matriz de capacidades](./capability-matrix.md)
 - [Scorecard do piloto](./pilot-scorecard.md)
 - [Runbook da apresentação](./presentation-runbook.md)
-
