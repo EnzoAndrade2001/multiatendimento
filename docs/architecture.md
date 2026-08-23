@@ -315,16 +315,24 @@ flowchart TD
 
 ## Cloud-Agent Communication
 
-The product does not currently run a separate local agent binary. The effective communication pattern is application-to-cloud-provider and provider-to-application webhook return.
+The product uses a local Firebird/iLux agent as the execution boundary for the
+desktop database and network document folders. The cloud application remains the
+orchestration, authorization and multi-tenant control plane.
 
 ```mermaid
 flowchart LR
     App[Application Runtime]
+    Agent[Firebird/iLux Local Agent]
+    Firebird[(Firebird / iLux Desktop DB)]
+    Files[UNC Financial Documents]
     Gemini[Gemini Cloud]
     Evolution[Evolution Provider]
     UI[Frontend]
 
     UI --> App
+    Agent --> Firebird
+    Agent --> Files
+    Agent --> App
     App --> Gemini
     App --> Evolution
     Evolution --> App

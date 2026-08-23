@@ -43,6 +43,17 @@ Depois preencha o arquivo `.env` com:
 - slug do tenant
 - token de sincronização
 
+O agente também informa sua identificação em cada heartbeat enviado ao CRM:
+
+- `AGENT_VERSION`: versão do executável instalado (por exemplo, `1.0.0`)
+- `AGENT_PROTOCOL_VERSION`: versão do contrato de comunicação com o backend
+
+Além do `tenantSlug` usado pelas versões atuais do backend, o heartbeat inclui
+versão, protocolo, capacidades suportadas e saúde básica do processo. Os campos
+são adicionais e mantêm compatibilidade com backends que ainda leem somente o
+`tenantSlug`. Atualize `AGENT_VERSION` junto com a publicação de um novo EXE;
+altere `AGENT_PROTOCOL_VERSION` apenas quando houver mudança de compatibilidade.
+
 As pastas financeiras podem ser escolhidas diretamente na aba **Documentos financeiros** da interface. Use caminhos UNC (`\\servidor\pasta`) para compartilhamentos de rede. A primeira indexação lê todos os PDFs em segundo plano; as seguintes processam somente arquivos novos ou alterados.
 
 ## Execução

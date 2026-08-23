@@ -1,5 +1,10 @@
 const { hasPermission } = require('./permissions');
 
+const SECRET_PLACEHOLDER = '********';
+const SECRET_SETTINGS_FIELDS = new Set([
+  'evolutionKey', 'geminiKey', 'serpApiKey', 'firebirdApiKey', 'firebirdClientToken',
+]);
+
 const SETTINGS_FIELDS = Object.freeze({
   'settings.bot.manage': ['botEnabled', 'geminiKey', 'botName', 'systemPrompt', 'transferKeyword'],
   'settings.attendance.manage': [
@@ -32,14 +37,23 @@ function allowedSettingsFields(user) {
 
 function filterSettingsInput(user, input = {}) {
   const allowed = allowedSettingsFields(user);
-  return Object.fromEntries(Object.entries(input).filter(([key]) => allowed.has(key)));
+  return Object.fromEntries(Object.entries(input).filter(([key, value]) => {
+    if (!allowed.has(key)) return false;
+    if (!SECRET_SETTINGS_FIELDS.has(key)) return true;
+    return typeof value === 'string'
+      ? Boolean(value.trim()) && value !== SECRET_PLACEHOLDER
+      : value !== null && value !== undefined;
+  }));
 }
 
 function filterSettingsOutput(user, output = {}) {
   const allowed = allowedSettingsFields(user);
-  return Object.fromEntries(Object.entries(output).filter(([key]) => (
-    allowed.has(key) || ['id', 'tenantId', 'createdAt', 'updatedAt'].includes(key)
-  )));
+  return Object.fromEntries(Object.entries(output)
+    .filter(([key]) => allowed.has(key) || ['id', 'tenantId', 'createdAt', 'updatedAt'].includes(key))
+    .map(([key, value]) => [key, SECRET_SETTINGS_FIELDS.has(key) && value ? SECRET_PLACEHOLDER : value]));
 }
 
-module.exports = { SETTINGS_FIELDS, allowedSettingsFields, filterSettingsInput, filterSettingsOutput };
+module.exports = {
+  SETTINGS_FIELDS, SECRET_PLACEHOLDER, SECRET_SETTINGS_FIELDS,
+  allowedSettingsFields, filterSettingsInput, filterSettingsOutput,
+};

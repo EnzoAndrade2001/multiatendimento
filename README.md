@@ -32,7 +32,7 @@ Um sistema SaaS Multi-tenant completo para gestão de atendimento ao cliente via
 - **Disparo em Massa e Prospecção:** Módulo de lead scraper (SerpAPI) integrado com envio de mensagens formatadas (com anexo e intervalos para proteção de banimento).
 - **Controle de SLA & CSAT:** Acompanhamento de tempo de resposta e pesquisas de satisfação após o encerramento do atendimento.
 - **Chat Interno da Equipe:** Chat lateral persistente para comunicação rápida entre agentes.
-- **CRM e Painel Kanban:** Acompanhamento e link de contatos do WhatsApp com o CRM nativo de funil de vendas.
+- **CRM 360 iLux:** Clientes, unidades, contatos, equipamentos, contratos, O.S., financeiro e histórico operacional em um único atendimento.
 
 ## 🛠️ Como Executar o Projeto Localmente
 
@@ -97,6 +97,13 @@ Sempre que uma nova versão do agente for compilada:
 5. Confirme que a tela mostra **Baixar agente**, a versão correta e o SHA-256 esperado.
 
 O volume persistente não é apagado pelos novos deploys. O download pela Central do Agente Local é protegido pela permissão `settings.agent.manage`.
+
+## 🤝 Parceria iLux / Diego Cabral
+
+Os materiais de apresentação, roteiro da demonstração, matriz de capacidades,
+scorecard do piloto e runbook estão em [`docs/partnership/`](docs/partnership/).
+O ambiente LCD DIGITAL é usado apenas como tenant demonstrado; a identidade da
+proposta é iLux / Diego Cabral.
 
 ## 📝 Licença
 Sistema de uso privado. Todos os direitos reservados.

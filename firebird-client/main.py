@@ -44,6 +44,21 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
+DEFAULT_AGENT_VERSION = "1.0.0"
+DEFAULT_AGENT_PROTOCOL_VERSION = "1"
+AGENT_CAPABILITIES = (
+    "sync.contacts",
+    "sync.equipments",
+    "sync.contracts",
+    "sync.service-orders",
+    "sync.financial",
+    "commands.create-os",
+    "commands.process-billing",
+    "commands.fetch-billing-document",
+    "commands.fetch-company-profile",
+)
+
+
 def digits(value: Any) -> str | None:
     if value is None:
         return None
@@ -191,6 +206,8 @@ def safe_pdf_filename_part(value: Any, fallback: str = "CLIENTE") -> str:
 
 @dataclass
 class AppConfig:
+    agent_version: str = DEFAULT_AGENT_VERSION
+    agent_protocol_version: str = DEFAULT_AGENT_PROTOCOL_VERSION
     firebird_host: str = "127.0.0.1"
     firebird_port: int = 3050
     firebird_database: str = ""
@@ -273,6 +290,11 @@ class AppConfig:
         log_file = resolve_path(os.getenv("LOG_FILE", "logs/client.log"), ROOT / "logs" / "client.log")
 
         return cls(
+            agent_version=os.getenv("AGENT_VERSION", DEFAULT_AGENT_VERSION).strip() or DEFAULT_AGENT_VERSION,
+            agent_protocol_version=(
+                os.getenv("AGENT_PROTOCOL_VERSION", DEFAULT_AGENT_PROTOCOL_VERSION).strip()
+                or DEFAULT_AGENT_PROTOCOL_VERSION
+            ),
             firebird_host=os.getenv("FIREBIRD_HOST", "127.0.0.1"),
             firebird_port=env_int("FIREBIRD_PORT", 3050),
             firebird_database=os.getenv("FIREBIRD_DATABASE", ""),
@@ -340,10 +362,17 @@ class StateStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        temporary = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
         )
+        try:
+            temporary.write_text(
+                json.dumps(self.data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            replace_with_retry(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def get_cursor(self, key: str) -> int:
         return int(self.data.get("cursors", {}).get(key, 0) or 0)
@@ -600,7 +629,20 @@ class CRMClient:
         try:
             self.session.post(
                 url,
-                json={"tenantSlug": self.config.crm_tenant_slug},
+                json={
+                    # Keep tenantSlug unchanged for compatibility with current
+                    # backend versions. The remaining fields are additive.
+                    "tenantSlug": self.config.crm_tenant_slug,
+                    "version": self.config.agent_version,
+                    "protocolVersion": self.config.agent_protocol_version,
+                    "capabilities": list(AGENT_CAPABILITIES),
+                    "health": {
+                        "status": "online",
+                        "reportedAt": datetime.now().isoformat(timespec="seconds"),
+                        "processId": os.getpid(),
+                        "runtime": "executable" if getattr(sys, "frozen", False) else "python",
+                    },
+                },
                 timeout=10
             )
         except Exception as e:

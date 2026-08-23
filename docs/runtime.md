@@ -32,7 +32,10 @@ Operational implications:
 
 ## Agent Lifecycle
 
-The product does not currently implement a standalone local agent process. The closest equivalent is the application runtime plus provider-backed messaging sessions.
+The product includes a standalone local Firebird/iLux agent used for synchronization,
+service-order commands and financial-document monitoring. The cloud runtime remains
+the orchestration and authorization layer; the agent is the local execution boundary
+for the Firebird database and UNC document folders.
 
 Lifecycle phases:
 
@@ -46,7 +49,8 @@ Lifecycle phases:
 
 ## Heartbeat System
 
-Current heartbeat behavior is implemented primarily through Socket.IO transport settings in `backend/src/app.js`.
+Current heartbeat behavior is implemented through the Firebird agent ping endpoint and
+Socket.IO transport settings in `backend/src/app.js`.
 
 Observed settings:
 
