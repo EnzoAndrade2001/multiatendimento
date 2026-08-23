@@ -18,7 +18,8 @@ import {
   getMediaUrl,
   testFirebirdConnection,
   syncFirebirdContacts,
-  getBillingLogs,
+  getAgentInfo,
+  downloadAgent,
   getSystemPromptPreview,
   syncCompanyFromFirebird,
 } from '../services/api';
@@ -94,7 +95,8 @@ export default function Settings() {
     kpiReincidentThreshold: 2,
     billingMessageTemplate: '',
   });
-  const [billingLogs, setBillingLogs] = useState([]);
+  const [agentInfo, setAgentInfo] = useState(null);
+  const [agentInfoLoading, setAgentInfoLoading] = useState(false);
   const [tenant, setTenant] = useState(null);
   const [hours, setHours] = useState([]);
   const [instances, setInstances] = useState([]);
@@ -130,14 +132,14 @@ export default function Settings() {
     // o tempo total era a SOMA de todas -- por isso a tela demorava ~15s. Elas
     // não dependem uma da outra, então rodam em paralelo agora: o tempo total
     // passa a ser o da mais lenta, não a soma de todas.
-    const [settingsResult, meResult, instancesResult, quickResponsesResult, tagsResult, hoursResult, billingLogsResult] = await Promise.allSettled([
+    const [settingsResult, meResult, instancesResult, quickResponsesResult, tagsResult, hoursResult, agentInfoResult] = await Promise.allSettled([
       getSettings(),
       getMe(),
       getInstances(),
       getQuickResponses(),
       getTags(),
       getBusinessHours(),
-      getBillingLogs(),
+      can('settings.agent.manage') ? getAgentInfo() : Promise.resolve({ data: null }),
     ]);
 
     if (settingsResult.status === 'fulfilled') {
@@ -169,8 +171,8 @@ export default function Settings() {
       setHours([0, 1, 2, 3, 4, 5, 6].map((day) => ({ dayOfWeek: day, start: '08:00', end: '18:00', active: true })));
     }
 
-    if (billingLogsResult.status === 'fulfilled') {
-      setBillingLogs(billingLogsResult.value.data);
+    if (agentInfoResult.status === 'fulfilled') {
+      setAgentInfo(agentInfoResult.value.data);
     }
   }
 
@@ -370,6 +372,51 @@ export default function Settings() {
     }
     navigator.clipboard.writeText(form.firebirdClientToken);
     toast.success('Token copiado para a área de transferência!');
+  }
+
+  async function handleCopyAgentCommand(command, label = 'Comando') {
+    try {
+      await navigator.clipboard.writeText(command);
+      toast.success(`${label} copiado.`);
+    } catch {
+      toast.error('Não foi possível copiar o comando.');
+    }
+  }
+
+  async function handleRefreshAgentInfo() {
+    setAgentInfoLoading(true);
+    try {
+      const { data } = await getAgentInfo();
+      setAgentInfo(data);
+      toast.success('Informações do agente atualizadas.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível carregar as informações do agente.');
+    } finally {
+      setAgentInfoLoading(false);
+    }
+  }
+
+  async function handleDownloadAgent() {
+    if (!agentInfo?.downloadAvailable) {
+      if (agentInfo?.externalDownloadUrl) window.open(agentInfo.externalDownloadUrl, '_blank', 'noopener,noreferrer');
+      else toast.info('O pacote do agente ainda não foi publicado.');
+      return;
+    }
+
+    try {
+      const { data } = await downloadAgent();
+      const url = window.URL.createObjectURL(data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = agentInfo.fileName || 'FirebirdCRMClient.exe';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Download do agente iniciado.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível baixar o agente.');
+    }
   }
 
   async function handleDeleteTag(id, name) {
@@ -1233,58 +1280,75 @@ export default function Settings() {
           </div>
 
           <div style={s.card}>
-            <h2 style={s.cardTitle}>Logs de Envio de Faturas (Últimos 100)</h2>
-            <div style={s.form}>
-              <p style={{ ...s.hint, marginBottom: '1rem' }}>O envio de cobranças agora é automático, a partir da pasta configurada no agente (Documentos financeiros). Este histórico mostra os envios feitos.</p>
-              <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'auto' }}>
-                {billingLogs.length === 0 ? (
-                  <p style={s.hint}>Nenhum log de envio registrado.</p>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ padding: '0.5rem', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>Data</th>
-                        <th style={{ padding: '0.5rem', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>Cliente</th>
-                        <th style={{ padding: '0.5rem', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>Arquivos</th>
-                        <th style={{ padding: '0.5rem', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {billingLogs.map((log) => {
-                        let badgeBg, badgeColor, badgeLabel;
-                        if (log.status === 'SUCCESS') {
-                          badgeBg = 'var(--success-light)'; badgeColor = 'var(--success-text)'; badgeLabel = 'Enviado';
-                        } else if (log.status === 'TEST') {
-                          badgeBg = 'var(--warning-light)'; badgeColor = 'var(--warning-text)'; badgeLabel = 'Teste';
-                        } else if (log.status === 'SKIPPED') {
-                          badgeBg = 'rgba(245, 158, 11, 0.12)'; badgeColor = '#d97706'; badgeLabel = 'Ignorado';
-                        } else {
-                          badgeBg = 'var(--danger-light)'; badgeColor = 'var(--danger-text)'; badgeLabel = 'Erro';
-                        }
-                        return (
-                          <tr key={log.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                            <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>{new Date(log.sentAt).toLocaleString('pt-BR')}</td>
-                            <td style={{ padding: '0.5rem' }}>{log.clientName || 'Desconhecido'} ({log.cpfCnpj})</td>
-                            <td style={{ padding: '0.5rem', fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{log.fileName}</td>
-                            <td style={{ padding: '0.5rem' }}>
-                              <span
-                                title={log.errorMessage || ''}
-                                style={{ padding: '2px 8px', borderRadius: '4px', fontSize: 'var(--text-xs)', cursor: log.errorMessage ? 'help' : 'default', backgroundColor: badgeBg, color: badgeColor }}
-                              >
-                                {badgeLabel}
-                              </span>
-                              {log.status === 'FAILED' && log.errorMessage && (
-                                <div style={{ fontSize: '0.68rem', color: 'var(--danger-text)', marginTop: '2px', maxWidth: '200px' }}>
-                                  {log.errorMessage}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
+              <div>
+                <h2 style={{ ...s.cardTitle, marginBottom: '0.35rem' }}>Central do Agente Local</h2>
+                <p style={{ ...s.hint, margin: 0 }}>Instalação, atualização e suporte do aplicativo que conecta o CRM ao iLux.</p>
+              </div>
+              <button type="button" style={s.iconButton} onClick={handleRefreshAgentInfo} disabled={agentInfoLoading} title="Atualizar informações">
+                {agentInfoLoading ? '...' : 'Atualizar'}
+              </button>
+            </div>
+
+            <div style={s.agentReleaseCard}>
+              <div>
+                <span style={s.integrationMetaLabel}>Pacote oficial</span>
+                <strong style={s.integrationMetaValue}>{agentInfo?.fileName || 'FirebirdCRMClient.exe'}</strong>
+                <p style={{ ...s.hint, margin: '0.35rem 0 0' }}>
+                  Versão {agentInfo?.version || 'não informada'}{agentInfo?.releasedAt ? ` · publicado em ${new Date(agentInfo.releasedAt).toLocaleDateString('pt-BR')}` : ''}
+                </p>
+              </div>
+              <button type="button" style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap' }} onClick={handleDownloadAgent}>
+                {agentInfo?.downloadAvailable ? 'Baixar agente' : 'Abrir download externo'}
+              </button>
+            </div>
+
+            {!agentInfo?.downloadAvailable && (
+              <div style={s.infoBox}>
+                <strong>Pacote local ainda não publicado</strong>
+                <p style={{ ...s.hint, margin: '0.35rem 0 0' }}>
+                  O download protegido fica disponível assim que o executável for colocado no volume persistente do EasyPanel em <code>/data/agent-releases</code>. Enquanto isso, o botão abre a cópia oficial de contingência.
+                </p>
+              </div>
+            )}
+
+            {agentInfo?.sha256 && (
+              <div style={s.checksumBox}>
+                <span style={s.integrationMetaLabel}>SHA-256</span>
+                <code>{agentInfo.sha256}</code>
+              </div>
+            )}
+
+            <div style={{ ...s.form, marginTop: '1.25rem' }}>
+              <div style={s.integrationGuide}>
+                <strong style={s.integrationGuideTitle}>Instalação rápida</strong>
+                <ol style={s.guideList}>
+                  <li>Baixe o executável e salve-o no servidor do iLux.</li>
+                  <li>Abra o agente, informe o token salvo nesta tela e configure o Firebird.</li>
+                  <li>Defina as pastas de Documentos financeiros e teste a conexão.</li>
+                  <li>Deixe o agente iniciado ou configure a tarefa automática do Windows.</li>
+                </ol>
+              </div>
+
+              <div style={s.integrationGuide}>
+                <strong style={s.integrationGuideTitle}>Quando o agente travar</strong>
+                <p style={{ ...s.hint, margin: '0 0 0.75rem' }}>Abra o PowerShell no servidor e execute os comandos abaixo.</p>
+                {[
+                  ['Verificar processo', 'Get-Process -Name "FirebirdCRMClient" -ErrorAction SilentlyContinue'],
+                  ['Parar o agente', 'Stop-Process -Name "FirebirdCRMClient" -Force'],
+                  ['Iniciar o agente', 'Start-Process "C:\\ILUX\\firebird-client-package\\FirebirdCRMClient.exe"'],
+                ].map(([label, command]) => (
+                  <div key={label} style={s.commandRow}>
+                    <code>{command}</code>
+                    <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
+                  </div>
+                ))}
+              </div>
+
+              <div style={s.integrationGuide}>
+                <strong style={s.integrationGuideTitle}>Diagnóstico e suporte</strong>
+                <p style={{ ...s.hint, margin: 0 }}>Os logs ficam na pasta <code>logs\\client.log</code> dentro do diretório do agente. Antes de reiniciar, confirme se existe somente um processo FirebirdCRMClient.exe em execução.</p>
+                <p style={{ ...s.hint, margin: '0.6rem 0 0' }}>Última comunicação: {form.firebirdLastSyncAt ? new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR') : 'nunca registrada'}.</p>
               </div>
             </div>
           </div>
@@ -1473,6 +1537,73 @@ const s = {
     color: 'var(--text-main)',
     fontSize: '0.92rem',
     marginBottom: '0.35rem',
+  },
+  iconButton: {
+    background: 'var(--bg-surface)',
+    color: 'var(--text-main)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '10px',
+    padding: '0.65rem 0.8rem',
+    cursor: 'pointer',
+    fontWeight: 800,
+    whiteSpace: 'nowrap',
+  },
+  agentReleaseCard: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '1rem',
+    padding: '1rem 1.1rem',
+    borderRadius: '14px',
+    background: 'var(--accent-light)',
+    border: '1px solid var(--accent-border)',
+  },
+  infoBox: {
+    padding: '1rem 1.1rem',
+    borderRadius: '14px',
+    background: 'var(--bg-base)',
+    border: '1px solid var(--border-color)',
+    color: 'var(--text-main)',
+  },
+  checksumBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.35rem',
+    padding: '0.85rem 1rem',
+    borderRadius: '12px',
+    background: 'var(--bg-base)',
+    border: '1px solid var(--border-color)',
+    color: 'var(--text-dim)',
+    wordBreak: 'break-all',
+  },
+  guideList: {
+    margin: '0.7rem 0 0',
+    paddingLeft: '1.2rem',
+    color: 'var(--text-muted)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 1.7,
+  },
+  commandRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.65rem',
+    padding: '0.55rem 0.65rem',
+    marginTop: '0.55rem',
+    borderRadius: '10px',
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border-color)',
+  },
+  copyCommandBtn: {
+    marginLeft: 'auto',
+    flexShrink: 0,
+    padding: '0.4rem 0.6rem',
+    borderRadius: '8px',
+    border: '1px solid var(--border-color)',
+    background: 'var(--bg-panel)',
+    color: 'var(--text-main)',
+    cursor: 'pointer',
+    fontSize: 'var(--text-xs)',
+    fontWeight: 800,
   },
   codeArea: {
     minHeight: '260px',

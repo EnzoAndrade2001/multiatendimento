@@ -3,6 +3,7 @@ const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
 const filterSettingsAccess = require('../middlewares/filterSettingsAccess');
 const { getSettings, saveSettings, syncCompanyFromFirebird, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo } = require('../controllers/settingsController');
+const { getAgentInfo, downloadAgent } = require('../controllers/agentController');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -33,6 +34,8 @@ const upload = multer({
 router.use(authenticate);
 router.get('/', requirePermission('settings.bot.manage', 'settings.attendance.manage', 'settings.company.manage', 'settings.agent.manage', 'connections.manage', 'leads.manage', 'revenue.view'), getSettings);
 router.post('/', requirePermission('settings.bot.manage', 'settings.attendance.manage', 'settings.company.manage', 'settings.agent.manage', 'connections.manage', 'leads.manage', 'revenue.view'), filterSettingsAccess, saveSettings);
+router.get('/agent-info', requirePermission('settings.agent.manage'), getAgentInfo);
+router.get('/agent-download', requirePermission('settings.agent.manage'), downloadAgent);
 router.post('/company/sync', requirePermission('settings.company.manage'), syncCompanyFromFirebird);
 router.post('/system-prompt-preview', requirePermission('settings.bot.manage'), getSystemPromptPreview);
 router.get('/business-hours', getBusinessHours);
