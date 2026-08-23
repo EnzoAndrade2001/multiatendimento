@@ -63,5 +63,40 @@ Para o deploy Docker via Easypanel, utilize o Nixpacks. O sistema exige o mapeam
 /srv/multiatendimento/uploads → /app/uploads
 \`\`\`
 
+### Pacote do Agente Local iLux (persistente)
+
+O executável do agente **não deve ser salvo dentro do diretório do container** (`/app` ou `/backend`), pois esses diretórios são substituídos a cada deploy.
+
+Na instalação oficial do CRM em EasyPanel, o pacote deve ficar no volume persistente:
+
+\`\`\`
+Serviço:       multiatendimento_backend
+Volume Docker: multiatendimento_backend_agent-releases
+Pasta no host: /etc/easypanel/projects/multiatendimento/backend/volumes/agent-releases
+Pasta no app:  /data/agent-releases
+Arquivo:       /data/agent-releases/FirebirdCRMClient.exe
+\`\`\`
+
+Variáveis do backend:
+
+\`\`\`
+FIREBIRD_AGENT_RELEASE_DIR=/data/agent-releases
+FIREBIRD_AGENT_FILE_NAME=FirebirdCRMClient.exe
+FIREBIRD_AGENT_VERSION=1.0.0
+FIREBIRD_AGENT_SHA256=<hash-do-executavel>
+\`\`\`
+
+#### Atualização obrigatória do agente
+
+Sempre que uma nova versão do agente for compilada:
+
+1. Copie o novo `FirebirdCRMClient.exe` para a pasta persistente do host acima, substituindo o arquivo anterior.
+2. Confirme o hash com `sha256sum` e atualize `FIREBIRD_AGENT_SHA256`.
+3. Atualize `FIREBIRD_AGENT_VERSION` no serviço `multiatendimento_backend`.
+4. Reinicie/reimplante o backend e clique em **Atualizar** na Central do Agente Local.
+5. Confirme que a tela mostra **Baixar agente**, a versão correta e o SHA-256 esperado.
+
+O volume persistente não é apagado pelos novos deploys. O download pela Central do Agente Local é protegido pela permissão `settings.agent.manage`.
+
 ## 📝 Licença
 Sistema de uso privado. Todos os direitos reservados.
