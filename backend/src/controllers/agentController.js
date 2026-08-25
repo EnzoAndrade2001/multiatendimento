@@ -17,6 +17,12 @@ function getLocalAgentPath() {
 }
 
 function getAgentInfo(req, res) {
+  // Esta resposta depende do conteúdo do volume persistente. Nunca deixe um
+  // proxy ou o navegador reutilizar o estado "não publicado" de um deploy
+  // anterior depois que o executável foi colocado no volume.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const downloadUrl = String(process.env.FIREBIRD_AGENT_DOWNLOAD_URL || DEFAULT_AGENT_DOWNLOAD_URL).trim();
   const local = getLocalAgentPath();
   const downloadAvailable = Boolean(local && fs.existsSync(local.filePath));
@@ -36,6 +42,7 @@ function getAgentInfo(req, res) {
 }
 
 function downloadAgent(req, res) {
+  res.setHeader('Cache-Control', 'private, no-store');
   const local = getLocalAgentPath();
   if (!local || !fs.existsSync(local.filePath)) {
     return res.status(404).json({

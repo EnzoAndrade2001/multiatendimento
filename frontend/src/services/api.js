@@ -58,7 +58,10 @@ export const uploadFile = (file) => {
 
 // Settings
 export const getSettings = () => api.get('/settings');
-export const getAgentInfo = () => api.get('/settings/agent-info');
+export const getAgentInfo = () => api.get('/settings/agent-info', {
+  params: { _ts: Date.now() },
+  headers: { 'Cache-Control': 'no-cache' },
+});
 export const downloadAgent = () => api.get('/settings/agent-download', { responseType: 'blob', timeout: 120000 });
 export const saveSettings = (data) => api.post('/settings', data);
 export const syncCompanyFromFirebird = () => api.post('/settings/company/sync');
