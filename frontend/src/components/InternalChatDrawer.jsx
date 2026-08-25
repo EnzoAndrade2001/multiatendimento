@@ -176,7 +176,11 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
     if (!socket || !isOpen) return undefined;
     socket.emit('internal_viewing', { peerId: selected?.kind === 'direct' ? selected.target.id : null });
     setViewerUserIds([]);
-    return () => socket.emit('internal_viewing', { peerId: null });
+    // Cleanup must return a function. socket.emit() returns the socket
+    // instance, which React would later try to execute as a cleanup callback.
+    return () => {
+      socket.emit('internal_viewing', { peerId: null });
+    };
   }, [socket, selected?.key, isOpen]);
 
   useEffect(() => {
