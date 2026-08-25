@@ -199,7 +199,9 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
     }
   }, [incomingMessage, selected?.key, myId]);
 
-  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, thread?.replies?.length]);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, thread?.replies?.length]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
