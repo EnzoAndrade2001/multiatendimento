@@ -261,7 +261,7 @@ export default function Privacy() {
   );
 }
 
-+function PrivacyRightsPanel() {
+function PrivacyRightsPanel() {
   const [selector, setSelector] = useState('');
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(false);
