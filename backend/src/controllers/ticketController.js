@@ -700,7 +700,7 @@ async function resolve(req, res) {
         const waInstance = await prisma.waInstance.findUnique({ where: { id: ticket.instanceId } });
         
         if (waInstance) {
-          console.log(`[CSAT_SEND] Enviando para ${ticket.contact.phone} via ${waInstance.instanceName}`);
+          console.log(`[CSAT_SEND] Enviando para ${require('../utils/privacy').maskPhone(ticket.contact.phone)} via ${waInstance.instanceName}`);
           const ratingText = settings.ratingMessage || "Como você avalia nosso atendimento de 1 a 5?";
           const result = await evolutionService.sendText(
             settings.evolutionUrl, 

@@ -35,6 +35,8 @@ const revenueRoutes = require('./routes/revenue');
 const crmRoutes = require('./routes/crm');
 const integrationRoutes = require('./routes/integrations');
 const firebirdSyncRoutes = require('./routes/firebirdSync');
+const privacyRoutes = require('./routes/privacy');
+const mediaRoutes = require('./routes/media');
 
 const app = express();
 app.use('/api/report', require('./routes/report'));
@@ -75,7 +77,7 @@ app.use((req, res, next) => {
 
     const memoryMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
     console.warn(
-      `[perf] ${req.method} ${req.originalUrl} -> ${res.statusCode} em ${durationMs}ms | rss=${memoryMb}MB | uptime=${Math.round(process.uptime())}s`
+      `[perf] ${req.method} ${req.path} -> ${res.statusCode} em ${durationMs}ms | rss=${memoryMb}MB | uptime=${Math.round(process.uptime())}s`
     );
   });
 
@@ -84,7 +86,15 @@ app.use((req, res, next) => {
 
 // Serve arquivos estáticos ANTES das rotas da API
 const { uploadsPath } = require('./utils/uploads');
-app.use('/uploads', express.static(uploadsPath));
+// Mídias de atendimento/documentos exigem autorização tenant-aware em /api/media.
+// Arquivos públicos não sensíveis (ex.: logotipo da empresa) continuam em /uploads.
+app.use('/uploads/media', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+  },
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
@@ -109,6 +119,8 @@ app.use('/api/revenue', revenueRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/integrations/firebird', firebirdSyncRoutes);
 app.use('/api/integrations', integrationRoutes);
+app.use('/api/privacy', privacyRoutes);
+app.use('/api/media', mediaRoutes);
 
 const jwt = require('jsonwebtoken');
 const prisma = require('./lib/prisma');

@@ -516,11 +516,27 @@ async function upsertCrmOsType(tenant, data) {
         code,
       },
     },
-    update: { name },
+    update: {
+      name,
+      formulario: pick(data.formulario, data.formularioCode),
+      formularioObs: pick(data.formularioObs, data.formularioobs),
+      tipoOs: pick(data.tipoOs, data.tipo_os),
+      tipoChamado: pick(data.tipoChamado, data.tpchamado),
+      logoOs: pick(data.logoOs, data.logo_os),
+      inactive: Boolean(data.inactive),
+      reportBundle: pick(data.reportBundle, data.reportFile),
+    },
     create: {
       tenantId: tenant.id,
       code,
       name,
+      formulario: pick(data.formulario, data.formularioCode),
+      formularioObs: pick(data.formularioObs, data.formularioobs),
+      tipoOs: pick(data.tipoOs, data.tipo_os),
+      tipoChamado: pick(data.tipoChamado, data.tpchamado),
+      logoOs: pick(data.logoOs, data.logo_os),
+      inactive: Boolean(data.inactive),
+      reportBundle: pick(data.reportBundle, data.reportFile),
     },
   });
 }

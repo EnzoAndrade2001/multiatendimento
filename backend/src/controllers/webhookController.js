@@ -409,11 +409,11 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
 
   if (!phone || (!body && !media)) {
     if (fromMe) {
-      console.log(`[webhook] Ignorando mensagem fromMe sem body/media. Jid: ${remoteJid}, msg.message:`, JSON.stringify(msg.message || {}).substring(0, 300));
+      console.log(`[webhook] Ignorando mensagem fromMe sem body/media. jid=${require('../utils/privacy').maskPhone(remoteJid)}`);
     }
     return;
   }
-  console.log(`[webhook] mensagem ${fromMe ? 'ENVIADA para' : 'RECEBIDA de'} ${phone}: "${body}" ${media ? `[${media.type}]` : ''} | isHistorical: ${isHistorical}`);
+  console.log(`[webhook] mensagem ${fromMe ? 'ENVIADA para' : 'RECEBIDA de'} ${require('../utils/privacy').maskPhone(phone)} ${media ? `[${media.type}]` : ''} | isHistorical: ${isHistorical}`);
 
   const phoneCandidates = evolutionService.buildPhoneLookupCandidates(phone);
   const matchingContacts = await prisma.contact.findMany({
@@ -834,7 +834,7 @@ async function handleAutoTagging(tenant, ticket, contact) {
     
     const tags = await geminiService.generateTags(tenant.settings.geminiKey, history);
     if (tags.length > 0) {
-      console.log(`[webhook] auto-tags para ${contact.phone}:`, tags);
+      console.log(`[webhook] auto-tags para ${require('../utils/privacy').maskPhone(contact.phone)}:`, tags);
       await prisma.contact.update({
         where: { id: contact.id },
         data: { tags: JSON.stringify(tags) }

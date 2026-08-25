@@ -16,6 +16,15 @@ export const getMediaUrl = (url) => {
   // Se a URL contiver localhost (erro anterior), removemos para usar a BACKEND_URL correta
   const cleanUrl = url.replace('http://localhost:3002', '');
   if (cleanUrl.startsWith('http')) return cleanUrl;
+  // Mídias de atendimento passaram a ser entregues por uma rota tenant-aware.
+  // Como imagens/vídeos do navegador não enviam o header Bearer, o agente de
+  // autenticação aceita o token somente nessa rota de compatibilidade.
+  if (cleanUrl.startsWith('/uploads/media/')) {
+    const filename = cleanUrl.slice('/uploads/media/'.length).split('?')[0];
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : '';
+    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+    return `${BACKEND_URL}/api/media/${encodeURIComponent(filename)}${suffix}`;
+  }
   return `${BACKEND_URL}${cleanUrl}`;
 };
 
@@ -63,6 +72,13 @@ export const uploadLogo = (file) => {
 };
 export const testFirebirdConnection = () => api.post('/integrations/firebird/test');
 export const syncFirebirdContacts = (data = {}) => api.post('/integrations/firebird/sync/contacts', data);
+
+// Privacidade / LGPD
+export const getPrivacyPolicy = () => api.get('/privacy/policy');
+export const acceptPrivacyPolicy = (data) => api.post('/privacy/acceptance', data);
+export const searchPrivacySubjects = (params) => api.get('/privacy/admin/subjects', { params });
+export const exportPrivacySubject = (source, id) => api.get(`/privacy/admin/subjects/${encodeURIComponent(source)}/${encodeURIComponent(id)}/export`, { responseType: 'blob' });
+export const anonymizePrivacySubject = (source, id, data) => api.post(`/privacy/admin/subjects/${encodeURIComponent(source)}/${encodeURIComponent(id)}/anonymize`, data);
 
 // Instance
 export const getInstances = () => api.get('/instance/list');

@@ -75,7 +75,7 @@ async function sendBulk(req, res) {
 
         sent++;
       } catch (err) {
-        console.error(`[BulkSend] Erro para ${contact.phone}:`, err.message);
+        console.error(`[BulkSend] Erro para ${require('../utils/privacy').maskPhone(contact.phone)}:`, err.message);
         errors++;
       }
 

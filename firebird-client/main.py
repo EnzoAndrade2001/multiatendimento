@@ -1733,7 +1733,15 @@ class FirebirdRepository:
         return list(self._rows(sql, tuple(seq_os_values))), max_attendance
 
     def fetch_os_types(self) -> Iterator[dict[str, Any]]:
-        sql = "select CDOSTP, NMOSTP from IXLOSTP"
+        # O iLux associa cada tipo de O.S. a um formulario/modelo de
+        # impressao na propria IXLOSTP. Mantemos esse vinculo no CRM para
+        # que a selecao do atendimento permaneça identica à do desktop.
+        sql = """
+            select CDOSTP, NMOSTP, FORMULARIO, FORMULARIOOBS,
+                   TIPO_OS, TPCHAMADO, LOGO_OS, TFINATIVO
+              from IXLOSTP
+             order by CDOSTP
+        """
         yield from self._rows(sql, ())
 
     def fetch_technicians(self) -> Iterator[dict[str, Any]]:
@@ -1844,7 +1852,11 @@ class FirebirdRepository:
                     contract_group_rows[0] if contract_group_rows else {},
                     "seqcontratogrp", "nmcontratogrp", "cdterritorio",
                 ),
-                "osType": pick(os_type_rows[0] if os_type_rows else {}, "cdostp", "nmostp"),
+                "osType": pick(
+                    os_type_rows[0] if os_type_rows else {},
+                    "cdostp", "nmostp", "formulario", "formularioobs", "tipo_os",
+                    "tpchamado", "logo_os", "tfinativo",
+                ),
                 "company": pick(
                     company_rows[0] if company_rows else {},
                     "cdempresa", "nmempresa", "fantasia", "nmfantasia", "nomefantasia", "cnpj", "inscest", "endereco", "num", "bairro", "cidade",
@@ -2195,9 +2207,19 @@ def normalize_service_order(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_os_type(record: dict[str, Any]) -> dict[str, Any]:
+    formulario = first_non_empty(record.get("formulario"))
     return {
         "code": str(record["cdostp"]).strip(),
-        "name": str(record["nmostp"]).strip()
+        "name": str(record["nmostp"]).strip(),
+        "formulario": formulario,
+        "formularioObs": first_non_empty(record.get("formularioobs")),
+        "tipoOs": first_non_empty(record.get("tipo_os")),
+        "tipoChamado": first_non_empty(record.get("tpchamado")),
+        "logoOs": first_non_empty(record.get("logo_os")),
+        "inactive": str(record.get("tfinativo") or "").strip().upper() in {"S", "SIM", "1", "TRUE"},
+        # Os modelos cadastrados no Firebird ficam no bundle de relatorios
+        # do desktop; o nome exato do relatorio é mantido para o renderer.
+        "reportBundle": "IPR_OS_M064.rel" if formulario else None,
     }
 
 

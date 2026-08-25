@@ -71,7 +71,7 @@ async function syncMissedMessages(instanceName) {
         const exists = await prisma.message.findFirst({ where: { externalId } });
         
         if (!exists) {
-          console.log(`[syncMissedMessages] Mensagem recuperada via sync automático: ${externalId} (${contact.phone})`);
+          console.log(`[syncMissedMessages] Mensagem recuperada via sync automático: ${externalId} (${require('../utils/privacy').maskPhone(contact.phone)})`);
           try {
             await axios.post(`${backendUrl}/api/webhook`, {
               event: 'messages.upsert',

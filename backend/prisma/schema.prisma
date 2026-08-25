@@ -43,6 +43,10 @@ model Tenant {
   billingLogs       BillingLog[]
   revenueSnapshots  RevenueSnapshot[]
   userTicketStates  UserTicketState[]
+  privacyAuditLogs  PrivacyAuditLog[]
+  privacyRetentionPolicy PrivacyRetentionPolicy?
+  privacyPolicies   PrivacyPolicy[]
+  privacyAcceptances PrivacyAcceptance[]
 }
 
 model TenantSettings {
@@ -604,11 +608,18 @@ model Lead {
 }
 
 model CrmOsType {
-  id        String   @id @default(cuid())
-  tenantId  String
-  code      String // CDOSTP
-  name      String // NMOSTP
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  tenantId      String
+  code          String // CDOSTP
+  name          String // NMOSTP
+  formulario    String? // IXLOSTP.FORMULARIO (ex.: MODELO-001)
+  formularioObs String?
+  tipoOs        String?
+  tipoChamado   String?
+  logoOs        String?
+  inactive      Boolean  @default(false)
+  reportBundle  String? // arquivo .rel que contém o modelo no desktop
+  createdAt     DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -641,4 +652,75 @@ model BillingLog {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+model PrivacyAuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  actorId      String?
+  action       String
+  resourceType String
+  resourceId   String?
+  status       String   @default("SUCCESS")
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, action, createdAt])
+}
+
+model PrivacyRetentionPolicy {
+  id                 String   @id @default(cuid())
+  tenantId           String   @unique
+  enabled            Boolean  @default(false)
+  dryRun             Boolean  @default(true)
+  mediaRetentionDays Int      @default(365)
+  auditRetentionDays Int      @default(730)
+  billingRetentionDays Int    @default(2555)
+  agentLogRetentionDays Int   @default(30)
+  lastPreviewAt      DateTime?
+  lastPreview        Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model PrivacyPolicy {
+  id          String   @id @default(cuid())
+  tenantId    String
+  version     String
+  title       String
+  summary     String?  @db.Text
+  purposes    Json
+  channel     Json?
+  effectiveAt DateTime @default(now())
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, version])
+  @@index([tenantId, active, effectiveAt])
+}
+
+model PrivacyAcceptance {
+  id            String   @id @default(cuid())
+  tenantId      String
+  userId        String
+  policyVersion String
+  scopes        Json
+  ipAddress     String?
+  userAgent     String?
+  acceptedAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, policyVersion])
+  @@index([tenantId, userId, acceptedAt])
 }

@@ -5,7 +5,7 @@ const evolutionService = require('../services/evolutionService');
 async function list(req, res) {
   const q = req.query.q || req.query.search;
   const withoutDocument = ['1', 'true', 'yes'].includes(String(req.query.withoutDocument || '').toLowerCase());
-  console.log(`[Contacts] Buscando por: "${q}" | Tenant: ${req.user.tenantId}`);
+  console.log(`[Contacts] Busca executada | tenant=${req.user.tenantId} | comFiltro=${Boolean(q)}`);
   const where = { tenantId: req.user.tenantId };
   if (withoutDocument) {
     where.OR = [

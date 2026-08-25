@@ -259,7 +259,7 @@ async function sendBilling(req, res) {
     // explicacao ("Segue anexo...") antes de receber os PDFs, nao depois.
     const template = tenant.settings?.billingMessageTemplate || 'Olá! Seguem em anexo sua fatura, boleto e demonstrativo deste mês. Se tiver qualquer dúvida, estamos à disposição.';
 
-    console.log(`[billing] Enviando texto de cobrança para ${phone}...`);
+    console.log(`[billing] Enviando texto de cobrança para ${require('../utils/privacy').maskPhone(phone)}...`);
     const textResult = await evolutionService.sendText(evolutionUrl, evolutionKey, instanceName, phone, template);
     const textExternalId = textResult?.key?.id || textResult?.message?.key?.id;
 
@@ -279,7 +279,7 @@ async function sendBilling(req, res) {
       const mime = file.mimetype;
       const mediaUrl = `/uploads/media/${file.filename}`;
 
-      console.log(`[billing] Enviando ${file.originalname} para ${phone}...`);
+      console.log(`[billing] Enviando documento para ${require('../utils/privacy').maskPhone(phone)}...`);
       const result = await evolutionService.sendMedia(evolutionUrl, evolutionKey, instanceName, phone, {
         mediatype: 'document',
         media: base64,

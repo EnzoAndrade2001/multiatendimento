@@ -214,6 +214,7 @@ export default function Layout() {
     { to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', roles: ['admin', 'superadmin'] },
     { to: '/revenue', icon: <Coins size={18} />, label: 'iLux Sentinela', permission: 'revenue.view', roles: ['admin', 'superadmin'] },
+    { to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/superadmin', icon: <ShieldCheck size={18} />, label: 'Painel Admin', roles: ['superadmin'] },
   ], [setIsChatOpen]);

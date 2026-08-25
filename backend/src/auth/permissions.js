@@ -26,6 +26,7 @@ const PERMISSIONS = Object.freeze([
   'tags.manage',
   'settings.agent.manage',
   'internal_chat.view',
+  'privacy.manage',
 ]);
 
 const ATTENDANT = [

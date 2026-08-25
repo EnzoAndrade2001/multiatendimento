@@ -34,7 +34,7 @@ async function sendSystemAlert(tenantId, message) {
       `⚠️ *ALERTA DO SISTEMA - MULTIATENDIMENTO PRO*\n\n${message}`
     );
     
-    console.log(`[alertService] Alerta enviado para ${formattedPhone}`);
+      console.log(`[alertService] Alerta enviado para ${require('../utils/privacy').maskPhone(formattedPhone)}`);
   } catch (err) {
     console.error('[alertService] erro fatal ao enviar alerta:', err.message);
   }

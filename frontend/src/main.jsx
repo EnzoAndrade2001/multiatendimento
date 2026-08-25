@@ -25,6 +25,7 @@ const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
 const LeadScraper = lazy(() => import('./pages/LeadScraper'));
 const RevGuard = lazy(() => import('./pages/RevGuard'));
 const BillingReports = lazy(() => import('./pages/BillingReports'));
+const Privacy = lazy(() => import('./pages/Privacy'));
 // Interceptor global para tratar erros de autenticacao (401)
 api.interceptors.response.use(
   (response) => response,
@@ -185,6 +186,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/leads" element={<RequirePermission permission="leads.manage"><LeadScraper /></RequirePermission>} />
             <Route path="/revenue" element={<RequirePermission permission="revenue.view"><RevGuard /></RequirePermission>} />
             <Route path="/billing-reports" element={<RequirePermission permission="billing.view"><BillingReports /></RequirePermission>} />
+            <Route path="/privacy" element={<Privacy />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

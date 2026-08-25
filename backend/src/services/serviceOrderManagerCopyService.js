@@ -340,7 +340,7 @@ async function sendServiceOrderManagerCopy(tenantId, serviceOrderId, { force = f
           break;
         } catch (sendError) {
           lastError = sendError;
-          console.warn(`[serviceOrderManagerCopy] Falha ao tentar ${phone}: ${errorDetail(sendError)}`);
+          console.warn(`[serviceOrderManagerCopy] Falha ao tentar ${require('../utils/privacy').maskPhone(phone)}: ${errorDetail(sendError)}`);
         }
       }
       if (!sentTo) throw lastError || new Error('Nenhum formato de telefone foi aceito pelo WhatsApp.');
@@ -375,7 +375,7 @@ async function sendServiceOrderManagerCopy(tenantId, serviceOrderId, { force = f
       console.error(`[serviceOrderManagerCopy] ${chatWarning}`);
     }
 
-    console.log(`[serviceOrderManagerCopy] Cópia da O.S. ${order.externalId} enviada para ${sentTo} pela instância ${instance.instanceName}.`);
+    console.log(`[serviceOrderManagerCopy] Cópia da O.S. ${order.externalId} enviada para ${require('../utils/privacy').maskPhone(sentTo)} pela instância ${instance.instanceName}.`);
     return { sent: true, phone: sentTo, filename, chatRegistered, warning: chatWarning };
   } catch (error) {
     const detail = errorDetail(error).slice(0, 2000);
