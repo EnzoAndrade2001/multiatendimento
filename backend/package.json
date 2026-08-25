@@ -7,7 +7,8 @@
     "start": "prisma db push --accept-data-loss && node src/app.js",
     "build": "prisma generate",
     "test": "node --test test/*.test.js",
-    "dedupe:contacts": "node scripts/dedupeContacts.js"
+    "dedupe:contacts": "node scripts/dedupeContacts.js",
+    "reconcile:os-mirrors": "node scripts/reconcileServiceOrderMirrors.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

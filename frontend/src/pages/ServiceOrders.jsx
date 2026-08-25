@@ -296,6 +296,7 @@ export default function ServiceOrders() {
                 const days = daysSince(os.createdAt);
                 const clientName = getClientName(os);
                 const equipmentLabel = `${os.equipment?.manufacturer || ''} ${os.equipment?.model || ''}`.trim();
+                const printable = /^\d+$/.test(String(os.externalId || '')) && os.status !== 'ERRO_INTEGRACAO';
                 return (
                 <div
                   key={os.id}
@@ -306,8 +307,8 @@ export default function ServiceOrders() {
                 >
                   <div style={s.cardTitle}>
                     <div style={{display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0}}>
-                      <span>#{os.id.substring(os.id.length - 6).toUpperCase()}</span>
-                      <a
+                      <span>{printable ? `#${os.externalId}` : 'Aguardando iLux'}</span>
+                      {printable ? <a
                         href={`${BACKEND_URL}/api/os/${os.id}/pdf?token=${localStorage.getItem('token')}`}
                         target="_blank"
                         rel="noreferrer"
@@ -316,7 +317,7 @@ export default function ServiceOrders() {
                         title="Abrir e imprimir O.S."
                       >
                         <FileText size={12} />
-                      </a>
+                      </a> : null}
                     </div>
                     {os.status === 'FINALIZADA' && (
                       <button
@@ -445,7 +446,9 @@ export default function ServiceOrders() {
             </div>
 
             <div style={s.btnGroup}>
-              <a href={`${BACKEND_URL}/api/os/${selectedOs.id}/pdf?token=${localStorage.getItem('token')}`} target="_blank" rel="noreferrer" style={s.pdfBtn}>Abrir / Imprimir O.S.</a>
+              {/^\d+$/.test(String(selectedOs.externalId || '')) && selectedOs.status !== 'ERRO_INTEGRACAO'
+                ? <a href={`${BACKEND_URL}/api/os/${selectedOs.id}/pdf?token=${localStorage.getItem('token')}`} target="_blank" rel="noreferrer" style={s.pdfBtn}>Abrir / Imprimir O.S.</a>
+                : <span style={{ ...s.pdfBtn, opacity: 0.55, cursor: 'not-allowed' }}>Aguardando confirmacao do iLux</span>}
               <button style={{...s.saveBtn, opacity: saving ? 0.7 : 1, cursor: saving ? 'default' : 'pointer'}} onClick={() => handleUpdate()} disabled={saving}>
                 {saving ? 'Salvando...' : 'Salvar Atualizações'}
               </button>

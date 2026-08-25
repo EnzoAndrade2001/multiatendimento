@@ -44,6 +44,146 @@ async function waitForIluxConfirmation(id, tenantId) {
   });
 }
 
+function firstPdfValue(...values) {
+  return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+function pdfDate(value, fallback = new Date()) {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+function pdfOrderStatus(value) {
+  const normalized = String(value || '').toUpperCase();
+  if (normalized.includes('CONCLU') || normalized.includes('FINALIZ')) return 'FINALIZADA';
+  if (normalized.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
+  if (normalized.includes('ATEND')) return 'EM_ATENDIMENTO';
+  return 'PENDENTE';
+}
+
+async function resolveServiceOrderForPdf(tenantId, id) {
+  const persisted = await prisma.serviceOrder.findFirst({
+    where: {
+      tenantId,
+      OR: [{ id }, { externalId: String(id) }],
+    },
+    include: {
+      contact: { include: { crmCustomer: true } },
+      equipment: true,
+      tenant: { include: { settings: true } },
+      user: true,
+    },
+  });
+  if (persisted) return { order: persisted, historicalRecord: null };
+
+  // O CRM 360 mantem o historico completo em ExternalSyncRecord. Registros
+  // antigos podem nao existir mais na tabela operacional (por exemplo, apos
+  // uma desvinculacao/recriacao de equipamento), mas continuam validos no
+  // Firebird e devem permanecer reimprimiveis.
+  if (!/^\d+$/.test(String(id || ''))) return null;
+  const historicalRecord = await prisma.externalSyncRecord.findUnique({
+    where: {
+      tenantId_source_entity_externalId: {
+        tenantId,
+        source: 'firebird',
+        entity: 'serviceOrders',
+        externalId: String(id),
+      },
+    },
+  });
+  if (!historicalRecord) return null;
+
+  const payload = historicalRecord.payload && typeof historicalRecord.payload === 'object'
+    ? historicalRecord.payload
+    : {};
+  const raw = payload.raw && typeof payload.raw === 'object' ? payload.raw : {};
+  const clientExternalId = String(firstPdfValue(payload.clientExternalId, raw.cdcliente, '') || '');
+  const equipmentExternalId = String(firstPdfValue(payload.equipmentExternalId, raw.cdequipamento, '') || '');
+  const [customer, crmEquipment, tenant] = await Promise.all([
+    clientExternalId
+      ? prisma.crmCustomer.findFirst({
+        where: { tenantId, externalSource: 'firebird', externalId: clientExternalId },
+      })
+      : null,
+    equipmentExternalId
+      ? prisma.crmEquipment.findFirst({
+        where: { tenantId, externalSource: 'firebird', externalId: equipmentExternalId },
+      })
+      : null,
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { settings: true },
+    }),
+  ]);
+  if (!tenant) return null;
+
+  const createdAt = pdfDate(
+    firstPdfValue(raw.dtinclusao, payload.createdAt, historicalRecord.receivedAt),
+    historicalRecord.receivedAt,
+  );
+  const contact = {
+    id: customer?.id || `firebird-client-${clientExternalId || id}`,
+    tenantId,
+    externalSource: 'firebird',
+    externalId: clientExternalId || null,
+    crmCustomerId: customer?.id || null,
+    crmCustomer: customer || null,
+    name: firstPdfValue(customer?.name, payload.clientName, raw.nmcliente, `Cliente ${clientExternalId || id}`),
+    fantasyName: customer?.fantasyName || null,
+    phone: firstPdfValue(customer?.phone, payload.phone, raw.fone, `FB-${clientExternalId || id}`),
+    whatsapp: customer?.phone || null,
+    cpfCnpj: customer?.cpfCnpj || null,
+    email: firstPdfValue(customer?.email, raw.email, null),
+    address: firstPdfValue(customer?.address, payload.address, raw.endereco, null),
+    city: firstPdfValue(customer?.city, payload.city, raw.cidade, null),
+    state: firstPdfValue(customer?.state, payload.state, raw.uf, null),
+    zipCode: firstPdfValue(customer?.zipCode, payload.zipCode, raw.cep, null),
+  };
+  const equipment = {
+    id: crmEquipment?.id || `firebird-equipment-${equipmentExternalId || id}`,
+    tenantId,
+    contactId: contact.id,
+    externalSource: 'firebird',
+    externalId: equipmentExternalId || null,
+    model: firstPdfValue(crmEquipment?.model, payload.equipmentModel, raw.modeloe, `Equipamento ${equipmentExternalId || id}`),
+    manufacturer: firstPdfValue(crmEquipment?.manufacturer, payload.manufacturer, raw.fabricante, null),
+    serialNumber: firstPdfValue(crmEquipment?.serialNumber, payload.serialNumber, raw.serie, null),
+    sector: firstPdfValue(crmEquipment?.sector, payload.sector, raw.departamento, raw.localinstal, null),
+    address: firstPdfValue(crmEquipment?.address, payload.address, raw.endereco, null),
+    isActive: crmEquipment?.isActive ?? true,
+  };
+
+  return {
+    historicalRecord,
+    order: {
+      id: `firebird-history-${id}`,
+      tenantId,
+      contactId: contact.id,
+      equipmentId: equipment.id,
+      externalSource: 'firebird',
+      externalId: String(id),
+      externalUpdatedAt: historicalRecord.syncedAt,
+      requestKey: null,
+      ticketId: null,
+      cdOstp: null,
+      nmsuportet: firstPdfValue(payload.nmSuporteT, raw.nmsuportet, null),
+      defect: firstPdfValue(payload.defect, raw.obsdefeitocli, ''),
+      status: pdfOrderStatus(firstPdfValue(payload.status, raw.nmstatus, raw.status)),
+      technicalNotes: firstPdfValue(payload.action, payload.observacao, raw.obsdefeitoats, null),
+      meters: null,
+      userId: null,
+      createdAt,
+      updatedAt: pdfDate(historicalRecord.syncedAt, createdAt),
+      resolvedAt: payload.resolvedAt ? pdfDate(payload.resolvedAt, null) : null,
+      contact,
+      equipment,
+      tenant,
+      user: null,
+    },
+  };
+}
+
 async function getEquipments(req, res) {
   const { contactId } = req.params;
   const { tenantId } = req.user;
@@ -387,20 +527,16 @@ async function updateOS(req, res) {
 
 async function generatePdf(req, res) {
   const { id } = req.params;
-  const os = await prisma.serviceOrder.findFirst({
-    where: {
-      tenantId: req.user.tenantId,
-      OR: [{ id }, { externalId: String(id) }],
-    },
-    include: { 
-      contact: true, 
-      equipment: true, 
-      tenant: { include: { settings: true } },
-      user: true 
-    }
-  });
+  const resolvedOrder = await resolveServiceOrderForPdf(req.user.tenantId, id);
+  const os = resolvedOrder?.order || null;
 
   if (!os) return res.status(404).json({ error: 'O.S. não encontrada' });
+
+  if (!os.externalId || os.status === 'ERRO_INTEGRACAO') {
+    return res.status(409).json({
+      error: 'Esta O.S. ainda nao foi confirmada pelo iLux e nao pode ser impressa.',
+    });
+  }
 
   // Busca o cliente real (empresa vinculada)
   let clientData = os.contact;
@@ -447,10 +583,10 @@ async function generatePdf(req, res) {
   }
 
   // Busca dados estruturados adicionais do cliente e equipamento no CRM
-  let crmCustomer = null;
+  let crmCustomer = os.contact.crmCustomer || null;
   let crmEquipment = null;
   try {
-    if (clientData.externalId) {
+    if (!crmCustomer && clientData.externalId) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
@@ -498,7 +634,20 @@ async function generatePdf(req, res) {
   let previousOrders = [];
   try {
     cachedCompanyProfile = await getLatestCompanyProfile(req.user.tenantId);
-    if (os.externalId) {
+    if (resolvedOrder.historicalRecord) {
+      const historicalPayload = resolvedOrder.historicalRecord.payload || {};
+      const historicalRaw = historicalPayload.raw && typeof historicalPayload.raw === 'object'
+        ? historicalPayload.raw
+        : historicalPayload;
+      osPrintData = {
+        serviceOrder: historicalRaw,
+        client: crmCustomer?.raw || {},
+        equipment: crmEquipment?.raw || {},
+        osType: { nmostp: historicalRaw.nmostp || historicalPayload.osType || '' },
+        history: [],
+        attendances: [],
+      };
+    } else if (os.externalId) {
       const printRecord = await prisma.externalSyncRecord.findUnique({
         where: {
           tenantId_source_entity_externalId: {
@@ -1555,4 +1704,4 @@ async function draftOS(req, res) {
   }
 }
 
-module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, draftOS, getOSTypes, getOSTechnicians };
+module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians };

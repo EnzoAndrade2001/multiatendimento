@@ -349,26 +349,29 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
           {activeTab === 'os' ? (
             <div>
             {osHistory.length === 0 ? <div style={s.emptyText}>Nenhuma O.S. registrada para este cliente ainda.</div> : null}
-            {osHistory.map((os) => (
+            {osHistory.map((os) => {
+              const printable = /^\d+$/.test(String(os.externalId || '')) && os.status !== 'ERRO_INTEGRACAO';
+              return (
               <div key={os.id} style={s.osCard}>
                 <div>
-                  <div style={s.osTitle}>O.S. #{os.id.substring(os.id.length - 6).toUpperCase()}</div>
+                  <div style={s.osTitle}>{printable ? `O.S. #${os.externalId}` : 'O.S. aguardando confirmacao do iLux'}</div>
                   <div style={s.osMeta}>Data: {new Date(os.createdAt).toLocaleDateString()}</div>
                   <div style={s.osDefect}>Defeito: {os.defect}</div>
                 </div>
                 <div style={s.osRight}>
                   <span style={statusBadge(os.status)}>{os.status}</span>
-                  <a
+                  {printable ? <a
                     href={`${BACKEND_URL}/api/os/${os.id}/pdf?token=${localStorage.getItem('token')}`}
                     target="_blank"
                     rel="noreferrer"
                     style={s.osLink}
                   >
                     Ver O.S.
-                  </a>
+                  </a> : null}
                 </div>
               </div>
-            ))}
+              );
+            })}
             </div>
           ) : null}
         </div>

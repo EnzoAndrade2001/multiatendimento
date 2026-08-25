@@ -45,6 +45,52 @@ function normalizeStatus(value) {
   return 'PENDENTE';
 }
 
+function comparableText(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function isImportedServiceOrderMirror(pending, holder, seqOs) {
+  if (!pending || !holder) return false;
+  if (pending.id === holder.id || pending.externalId) return false;
+  if (String(holder.externalId || '') !== String(seqOs || '')) return false;
+  if (holder.externalSource !== 'firebird') return false;
+  // Um registro importado pelo historico nao carrega os vinculos exclusivos
+  // da solicitacao feita no CRM.
+  if (holder.requestKey || holder.ticketId || holder.userId) return false;
+  if (!pending.equipmentId || pending.equipmentId !== holder.equipmentId) return false;
+
+  const pendingDefect = comparableText(pending.defect);
+  const holderDefect = comparableText(holder.defect);
+  if (pendingDefect && holderDefect && pendingDefect !== holderDefect) return false;
+
+  const pendingCreatedAt = new Date(pending.createdAt).getTime();
+  const holderCreatedAt = new Date(holder.createdAt).getTime();
+  return Number.isFinite(pendingCreatedAt)
+    && Number.isFinite(holderCreatedAt)
+    && Math.abs(holderCreatedAt - pendingCreatedAt) <= 10 * 60 * 1000;
+}
+
+async function mergeImportedServiceOrderMirror(tenantId, pending, holder, seqOs) {
+  if (!isImportedServiceOrderMirror(pending, holder, seqOs)) return null;
+  return prisma.$transaction(async (tx) => {
+    // Exclui apenas o espelho sem ticket/requestKey. O registro original
+    // preserva auditoria, atendente, conversa e a chave idempotente.
+    await tx.serviceOrder.delete({ where: { id: holder.id, tenantId } });
+    return tx.serviceOrder.update({
+      where: { id: pending.id, tenantId },
+      data: {
+        externalId: String(seqOs),
+        status: 'PENDENTE',
+      },
+    });
+  });
+}
+
 async function resolveTenantContext(tenantSlug) {
   const tenant = await prisma.tenant.findUnique({
     where: { slug: tenantSlug },
@@ -946,7 +992,17 @@ async function commandCallback(req, res) {
       // nunca conseguir se resolver sozinho.
       const existingServiceOrder = await prisma.serviceOrder.findFirst({
         where: { id, tenantId: tenant.id },
-        select: { id: true },
+        select: {
+          id: true,
+          externalId: true,
+          externalSource: true,
+          requestKey: true,
+          ticketId: true,
+          userId: true,
+          equipmentId: true,
+          defect: true,
+          createdAt: true,
+        },
       });
       if (!existingServiceOrder) {
         console.warn(`[pending-commands] O.S. ${id} (SEQOS ${result.seqOs} ja criado no Firebird) nao existe mais no CRM - provavelmente o contato ou equipamento foi removido/mesclado. Confirmando o callback para o agente parar de reenviar.`);
@@ -972,19 +1028,43 @@ async function commandCallback(req, res) {
         if (updateError?.code === 'P2002') {
           const holder = await prisma.serviceOrder.findFirst({
             where: { tenantId: tenant.id, externalSource: 'firebird', externalId: String(result.seqOs) },
-            select: { id: true },
-          });
-          await prisma.serviceOrder.updateMany({
-            where: { id, tenantId: tenant.id },
-            data: {
-              status: 'ERRO_INTEGRACAO',
-              technicalNotes: `SEQOS ${result.seqOs} ja foi criado no Firebird, mas ja pertence a outra O.S. no CRM (id ${holder?.id || 'desconhecido'}) - provavelmente duas solicitacoes para o mesmo cliente/equipamento. Verifique manualmente no iLux.`,
+            select: {
+              id: true,
+              externalId: true,
+              externalSource: true,
+              requestKey: true,
+              ticketId: true,
+              userId: true,
+              equipmentId: true,
+              defect: true,
+              createdAt: true,
             },
           });
-          console.warn(`[pending-commands] O.S. ${id}: SEQOS ${result.seqOs} ja pertence a outra O.S. do CRM (${holder?.id}). Marcada como ERRO_INTEGRACAO para revisao manual em vez de reenfileirar para sempre.`);
-          return res.json({ ok: true, note: 'SEQOS ja associado a outra O.S. no CRM; marcada para revisao manual.' });
+          const merged = await mergeImportedServiceOrderMirror(
+            tenant.id,
+            existingServiceOrder,
+            holder,
+            result.seqOs,
+          );
+          if (merged) {
+            serviceOrder = merged;
+            console.log(
+              `[pending-commands] O.S. ${id}: espelho sincronizado ${holder.id} mesclado automaticamente no SEQOS ${result.seqOs}.`,
+            );
+          } else {
+            await prisma.serviceOrder.updateMany({
+              where: { id, tenantId: tenant.id },
+              data: {
+                status: 'ERRO_INTEGRACAO',
+                technicalNotes: `SEQOS ${result.seqOs} ja foi criado no Firebird, mas ja pertence a outra O.S. no CRM (id ${holder?.id || 'desconhecido'}) - provavelmente duas solicitacoes para o mesmo cliente/equipamento. Verifique manualmente no iLux.`,
+              },
+            });
+            console.warn(`[pending-commands] O.S. ${id}: SEQOS ${result.seqOs} ja pertence a outra O.S. do CRM (${holder?.id}). Marcada como ERRO_INTEGRACAO para revisao manual em vez de reenfileirar para sempre.`);
+            return res.json({ ok: true, note: 'SEQOS ja associado a outra O.S. no CRM; marcada para revisao manual.' });
+          }
+        } else {
+          throw updateError;
         }
-        throw updateError;
       }
       if (result.printData && typeof result.printData === 'object') {
         try {
@@ -1082,4 +1162,6 @@ module.exports = {
   getPendingCommands,
   commandCallback,
   agentPing,
+  isImportedServiceOrderMirror,
+  mergeImportedServiceOrderMirror,
 };

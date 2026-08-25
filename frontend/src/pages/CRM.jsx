@@ -1225,6 +1225,8 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
         {filtered.map((order, index) => {
           const closed = isOrderClosed(order);
           const identifier = order.id || order.externalId || order.number;
+          const printable = /^\d+$/.test(String(order.externalId || order.number || ''))
+            && order.status !== 'ERRO_INTEGRACAO';
           const sending = sendingId === identifier;
           return (
             <article key={order.id || order.externalId || index} style={s.osCard}>
@@ -1240,8 +1242,8 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
                 </div>
                 {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing') ? <div style={s.resolution}><strong>Fechamento:</strong> {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing')}</div> : null}
                 <div style={s.osActions}>
-                  <button type="button" style={s.osActionBtn} disabled={!identifier} onClick={() => openPdf(order)}><FileText size={14} /> Abrir O.S. / Reimprimir</button>
-                  <button type="button" style={s.osActionPrimary} disabled={!identifier || Boolean(sendingId)} onClick={() => sendToManager(order)}>
+                  <button type="button" style={s.osActionBtn} disabled={!printable} title={printable ? '' : 'Aguardando confirmacao do iLux'} onClick={() => openPdf(order)}><FileText size={14} /> Abrir O.S. / Reimprimir</button>
+                  <button type="button" style={s.osActionPrimary} disabled={!printable || Boolean(sendingId)} onClick={() => sendToManager(order)}>
                     {sending ? <RefreshCw size={14} /> : <Send size={14} />} {sending ? 'Enviando...' : 'Enviar ao gestor'}
                   </button>
                   {order.managerCopySentAt ? <span style={s.copySent}>Enviado ao gestor</span> : null}

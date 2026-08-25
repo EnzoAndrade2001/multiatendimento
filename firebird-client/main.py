@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.1"
+DEFAULT_AGENT_VERSION = "1.0.2"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -57,6 +57,11 @@ AGENT_CAPABILITIES = (
     "commands.fetch-billing-document",
     "commands.fetch-company-profile",
 )
+
+# A abertura imediata e a sincronizacao incremental usam threads diferentes.
+# Sem uma trava compartilhada, a sincronizacao pode importar a O.S. recem-criada
+# antes de o callback associar o SEQOS ao registro original do CRM.
+SERVICE_ORDER_SYNC_LOCK = threading.RLock()
 
 
 def digits(value: Any) -> str | None:
@@ -529,30 +534,35 @@ class CRMClient:
 
                 try:
                     if cmd_type == "CREATE_OS":
-                        cached = result_store.get(cmd_id)
-                        if cached and cached.get("seqOs"):
-                            seq_os = int(cached["seqOs"])
-                            command_result = dict(cached)
-                            logging.info(
-                                "Comando %s ja processado; reenviando SEQOS %s.",
-                                cmd_id,
-                                seq_os,
-                            )
-                        else:
-                            seq_os = repo.create_service_order(payload)
-                            command_result = {"seqOs": seq_os}
-                            try:
-                                command_result["printData"] = repo.fetch_service_order_print_data(seq_os)
-                            except Exception as print_data_error:
-                                logging.warning(
-                                    "O.S. %s criada, mas o historico para impressao nao foi consultado: %s",
+                        # Mantem insercao, leitura do snapshot e callback atomicos em
+                        # relacao ao sincronizador incremental de O.S. A trava evita
+                        # que o mesmo SEQOS seja importado como um segundo registro
+                        # enquanto o CRM ainda aguarda a confirmacao deste comando.
+                        with SERVICE_ORDER_SYNC_LOCK:
+                            cached = result_store.get(cmd_id)
+                            if cached and cached.get("seqOs"):
+                                seq_os = int(cached["seqOs"])
+                                command_result = dict(cached)
+                                logging.info(
+                                    "Comando %s ja processado; reenviando SEQOS %s.",
+                                    cmd_id,
                                     seq_os,
-                                    print_data_error,
                                 )
-                            # Persist before callback. If HTTPS fails, replaying this
-                            # command returns the same SEQOS instead of inserting again.
-                            result_store.set(cmd_id, command_result)
-                        self.report_command_result(cmd_id, success=True, result=command_result)
+                            else:
+                                seq_os = repo.create_service_order(payload)
+                                command_result = {"seqOs": seq_os}
+                                try:
+                                    command_result["printData"] = repo.fetch_service_order_print_data(seq_os)
+                                except Exception as print_data_error:
+                                    logging.warning(
+                                        "O.S. %s criada, mas o historico para impressao nao foi consultado: %s",
+                                        seq_os,
+                                        print_data_error,
+                                    )
+                                # Persist before callback. If HTTPS fails, replaying this
+                                # command returns the same SEQOS instead of inserting again.
+                                result_store.set(cmd_id, command_result)
+                            self.report_command_result(cmd_id, success=True, result=command_result)
                         logging.info("O.S. criada no Firebird com sucesso. SEQOS: %s", seq_os)
                     elif cmd_type == "PROCESS_BILLING":
                         # O fluxo antigo de pasta foi aposentado, mas o comando continua
@@ -2423,7 +2433,7 @@ def sync_crm360_details(
     state.save()
 
 
-def sync_service_orders_incremental(
+def _sync_service_orders_incremental_unlocked(
     repo: FirebirdRepository,
     crm: CRMClient,
     state: StateStore,
@@ -2499,6 +2509,24 @@ def sync_service_orders_incremental(
     return True
 
 
+def sync_service_orders_incremental(
+    repo: FirebirdRepository,
+    crm: CRMClient,
+    state: StateStore,
+    batch_size: int,
+    stop_event: threading.Event | None = None,
+) -> bool:
+    """Serializa a importacao de historico com a criacao imediata de O.S."""
+    with SERVICE_ORDER_SYNC_LOCK:
+        return _sync_service_orders_incremental_unlocked(
+            repo,
+            crm,
+            state,
+            batch_size,
+            stop_event,
+        )
+
+
 def run_cycle(
     config: AppConfig,
     state: StateStore,
@@ -2562,7 +2590,12 @@ def run_cycle(
         if stop_event is not None and stop_event.is_set():
             return
         logging.info("Iniciando sincronização de %s", entity)
-        if not sync_entity(repo, crm, state, entity, config.batch_size, stop_event):
+        if entity == "serviceOrders":
+            with SERVICE_ORDER_SYNC_LOCK:
+                synced = sync_entity(repo, crm, state, entity, config.batch_size, stop_event)
+        else:
+            synced = sync_entity(repo, crm, state, entity, config.batch_size, stop_event)
+        if not synced:
             return
 
     if refresh_contract_details:
@@ -2621,7 +2654,8 @@ def run_service_order_history_backfill(config: AppConfig) -> dict[str, Any]:
     state.set_cursor("serviceOrders", 0)
     state.save()
     try:
-        ok = sync_entity(repo, crm, state, "serviceOrders", config.batch_size)
+        with SERVICE_ORDER_SYNC_LOCK:
+            ok = sync_entity(repo, crm, state, "serviceOrders", config.batch_size)
     except Exception:
         # Nao deixa o cursor zerado se algo explodir antes do primeiro lote --
         # sync_entity ja salva progresso incremental, entao so restauramos o
