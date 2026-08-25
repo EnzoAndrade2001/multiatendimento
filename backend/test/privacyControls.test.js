@@ -60,6 +60,34 @@ test('acesso de midia consulta mensagem no tenant e nunca confia apenas no nome'
   }
 });
 
+test('anexo interno exige participação do usuário na conversa', { concurrency: false }, async () => {
+  const originals = {
+    message: prisma.message.findFirst,
+    internalMessage: prisma.internalMessage.findFirst,
+    record: prisma.externalSyncRecord.findFirst,
+  };
+  let internalWhere;
+  prisma.message.findFirst = async () => null;
+  prisma.internalMessage.findFirst = async ({ where }) => {
+    internalWhere = where;
+    return where.OR.some((condition) => condition.senderId === 'user-ok')
+      ? { id: 'internal-1', attachmentName: 'arquivo.pdf', attachmentMimeType: 'application/pdf' }
+      : null;
+  };
+  prisma.externalSyncRecord.findFirst = async () => null;
+  try {
+    const allowed = await canAccessMedia('tenant-ok', '/uploads/media/internal-file.pdf', 'user-ok');
+    assert.equal(allowed.resourceType, 'internal_message_attachment');
+    assert.equal(internalWhere.tenantId, 'tenant-ok');
+    assert.equal(internalWhere.attachmentUrl, '/uploads/media/internal-file.pdf');
+    assert.equal(await canAccessMedia('tenant-ok', '/uploads/media/internal-file.pdf', 'user-other'), null);
+  } finally {
+    prisma.message.findFirst = originals.message;
+    prisma.internalMessage.findFirst = originals.internalMessage;
+    prisma.externalSyncRecord.findFirst = originals.record;
+  }
+});
+
 test('aceite rejeita versao antiga e exige escopo obrigatorio', { concurrency: false }, async () => {
   const originalPolicy = prisma.privacyPolicy.findFirst;
   const originalAcceptance = prisma.privacyAcceptance.upsert;

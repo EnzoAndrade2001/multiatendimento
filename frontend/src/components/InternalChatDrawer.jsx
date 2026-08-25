@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AtSign, ChevronLeft, Circle, Maximize2, MessageCircle, Minimize2, Pin, PinOff, Reply, Search, Send, Smile, Sparkles, Users, X } from 'lucide-react';
+import { AtSign, ChevronLeft, Circle, Download, FileText, Maximize2, MessageCircle, Minimize2, Paperclip, Pin, PinOff, Reply, Search, Send, Smile, Sparkles, Users, X } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   getInternalConversations,
   getInternalConversationMessages,
   getInternalMessages,
   getInternalMessageThread,
+  getMediaUrl,
   getUsers,
   addInternalMessageReaction,
   removeInternalMessageReaction,
   sendInternalConversationMessage,
+  sendInternalAttachment,
   sendInternalMessage,
   updateInternalConversationPin,
   updateInternalConversationRead,
@@ -27,6 +29,8 @@ const COMPOSER_EMOJIS = ['😀', '😊', '👍', '🙏', '✅', '👀', '🎉', 
 const FALLBACK_STATUSES = new Set([404, 405, 501]);
 const MIN_DRAWER_WIDTH = 360;
 const MAX_DRAWER_WIDTH = 680;
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+const ATTACHMENT_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
 
 function clampDrawerWidth(value) {
   return Math.max(MIN_DRAWER_WIDTH, Math.min(MAX_DRAWER_WIDTH, Number(value) || 440));
@@ -41,6 +45,17 @@ function conversationTime(value) {
   return isToday
     ? date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+function formatFileSize(value) {
+  const size = Number(value || 0);
+  if (!size) return '';
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+}
+
+function messagePreview(message) {
+  return message?.body || (message?.attachmentName ? `📎 ${message.attachmentName}` : 'Iniciar conversa');
 }
 
 function unsupported(error) {
@@ -100,9 +115,14 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   const [drawerWidth, setDrawerWidth] = useState(() => clampDrawerWidth(localStorage.getItem('internal-chat-width')));
   const [expanded, setExpanded] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachment, setAttachment] = useState(null);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const bottomRef = useRef(null);
   const closeRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const uploadAbortRef = useRef(null);
   const myId = localStorage.getItem('userId');
   const effectiveWidth = isMobile ? '100vw' : expanded ? Math.min(760, Math.max(440, window.innerWidth - 96)) : drawerWidth;
 
@@ -141,6 +161,12 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   useEffect(() => {
     localStorage.setItem('internal-chat-width', String(drawerWidth));
   }, [drawerWidth]);
+
+  useEffect(() => {
+    return () => {
+      if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    };
+  }, [attachment?.previewUrl]);
 
   useEffect(() => {
     if (advancedAvailable === false && messageType === 'note') setMessageType('message');
@@ -328,10 +354,45 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
     }
   }
 
+  function clearAttachment() {
+    setAttachment((previous) => {
+      if (previous?.previewUrl) URL.revokeObjectURL(previous.previewUrl);
+      return null;
+    });
+    setUploadProgress(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function chooseAttachment(file) {
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      toast.error('O anexo excede o limite de 20 MB.');
+      return;
+    }
+    const acceptedExtension = /\.(jpe?g|png|webp|gif|pdf|txt|csv|docx?|xlsx?|pptx?)$/i.test(file.name);
+    if (!file.type.startsWith('image/') && !acceptedExtension) {
+      toast.error('Formato não permitido. Use imagem, PDF, texto ou arquivo do Office.');
+      return;
+    }
+    setAttachment((previous) => {
+      if (previous?.previewUrl) URL.revokeObjectURL(previous.previewUrl);
+      return { file, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '' };
+    });
+    setUploadProgress(0);
+  }
+
+  function handlePaste(event) {
+    const file = [...(event.clipboardData?.items || [])].find((item) => item.kind === 'file')?.getAsFile();
+    if (file) {
+      event.preventDefault();
+      chooseAttachment(file);
+    }
+  }
+
   async function handleSend(event) {
     event?.preventDefault();
     const body = text.trim();
-    if (!body || !selected || sending) return;
+    if ((!body && !attachment) || !selected || sending) return;
     const payload = {
       body,
       type: messageType,
@@ -344,9 +405,26 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
       ])],
     };
     setSending(true);
+    setUploadProgress(attachment ? 1 : 0);
     try {
       let data;
-      if (advancedAvailable !== false) {
+      if (attachment) {
+        if (advancedAvailable === false) throw new Error('Atualize o backend para enviar anexos no chat interno.');
+        const formData = new FormData();
+        formData.append('file', attachment.file);
+        formData.append('body', body);
+        formData.append('type', payload.type);
+        if (payload.receiverId) formData.append('receiverId', payload.receiverId);
+        if (payload.teamId) formData.append('teamId', payload.teamId);
+        if (payload.replyToId) formData.append('replyToId', payload.replyToId);
+        formData.append('mentionUserIds', JSON.stringify(payload.mentionUserIds || []));
+        formData.append('mentionTeamIds', JSON.stringify(payload.mentionTeamIds || []));
+        uploadAbortRef.current = new AbortController();
+        ({ data } = await sendInternalAttachment(formData, (progressEvent) => {
+          const total = progressEvent.total || attachment.file.size;
+          setUploadProgress(Math.min(99, Math.round((progressEvent.loaded / total) * 100)));
+        }, uploadAbortRef.current.signal));
+      } else if (advancedAvailable !== false) {
         try {
           ({ data } = await sendInternalConversationMessage(payload));
         } catch (requestError) {
@@ -363,10 +441,13 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
       }
       setConversations((previous) => previous.map((item) => item.key === selected.key ? { ...item, lastMessage: data } : item));
       setText('');
+      clearAttachment();
       setReplyTo(null);
     } catch (err) {
-      toast.error(`Falha ao enviar: ${err.response?.data?.error || err.message}`);
+      if (err.code === 'ERR_CANCELED') toast.info('Envio do anexo cancelado.');
+      else toast.error(`Falha ao enviar: ${err.response?.data?.error || err.message}`);
     } finally {
+      uploadAbortRef.current = null;
       setSending(false);
     }
   }
@@ -426,8 +507,16 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
           {selected?.kind === 'team' || !mine ? <strong>{mine ? 'Você' : message.sender?.name || 'Equipe'}</strong> : null}
           {message.type === 'note' ? <span style={s.noteBadge}>Nota interna</span> : null}
         </div>
-        {message.replyTo ? <button type="button" style={s.replyPreview} onClick={() => openThread(message.replyTo)}><Reply size={12} /> {message.replyTo.body}</button> : null}
-        <div style={s.body}>{message.body}</div>
+        {message.replyTo ? <button type="button" style={s.replyPreview} onClick={() => openThread(message.replyTo)}><Reply size={12} /> {messagePreview(message.replyTo)}</button> : null}
+        {message.attachmentUrl ? <div style={s.messageAttachment}>
+          {message.attachmentMimeType?.startsWith('image/') ? <a href={getMediaUrl(message.attachmentUrl)} target="_blank" rel="noreferrer" style={s.attachmentImageLink}><img src={getMediaUrl(message.attachmentUrl)} alt={message.attachmentName || 'Imagem anexada'} style={s.attachmentImage} /></a> : null}
+          <a href={getMediaUrl(message.attachmentUrl)} target="_blank" rel="noreferrer" style={s.attachmentFile} title={`Abrir ${message.attachmentName || 'anexo'}`}>
+            <span style={s.attachmentFileIcon}><FileText size={18} /></span>
+            <span style={s.attachmentFileInfo}><strong style={s.attachmentName}>{message.attachmentName || 'Arquivo anexado'}</strong><small>{formatFileSize(message.attachmentSize) || 'Arquivo'}</small></span>
+            <Download size={16} />
+          </a>
+        </div> : null}
+        {message.body ? <div style={s.body}>{message.body}</div> : null}
         <time style={s.time}>{new Date(message.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</time>
         {groupedReactions.length ? <div style={s.reactions}>{groupedReactions.map((reaction) => <button key={reaction.emoji} type="button" style={{ ...s.reaction, ...(reaction.mine ? s.reactionMine : {}) }} onClick={() => toggleReaction(message, reaction.emoji)}>{reaction.emoji} {reaction.count}</button>)}</div> : null}
         {!compact && advancedAvailable !== false ? <div className="internal-message-actions" style={s.messageActions}>
@@ -499,7 +588,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
             return <div key={conversation.key} style={{ ...s.row, ...(conversation.unreadCount ? s.rowUnread : {}) }}>
               <button type="button" style={s.rowMain} onClick={() => selectConversation(conversation)} aria-label={`Abrir ${conversation.target.name}${conversation.unreadCount ? `, ${conversation.unreadCount} não lidas` : ''}`}>
                 <span style={s.avatar}>{conversation.kind === 'team' ? <Users size={16} /> : conversation.target.name?.[0]?.toUpperCase()}</span>
-                <span style={s.rowInfo}><span style={s.nameLine}><span style={s.nameText}>{conversation.target.name}</span><span style={{ ...s.presence, background: isOnline ? 'var(--success)' : 'var(--text-dim)' }} title={isOnline ? 'Online' : 'Offline'} />{lastMessageTime ? <time style={s.rowTime}>{lastMessageTime}</time> : null}</span><span style={{ ...s.preview, ...(conversation.unreadCount ? s.previewUnread : {}) }}>{conversation.lastMessage?.body || 'Iniciar conversa'}</span></span>
+                <span style={s.rowInfo}><span style={s.nameLine}><span style={s.nameText}>{conversation.target.name}</span><span style={{ ...s.presence, background: isOnline ? 'var(--success)' : 'var(--text-dim)' }} title={isOnline ? 'Online' : 'Offline'} />{lastMessageTime ? <time style={s.rowTime}>{lastMessageTime}</time> : null}</span><span style={{ ...s.preview, ...(conversation.unreadCount ? s.previewUnread : {}) }}>{messagePreview(conversation.lastMessage)}</span></span>
                 {conversation.mentionCount > 0 ? <span style={s.mention}>@{conversation.mentionCount}</span> : null}
                 {conversation.unreadCount > 0 ? <span style={s.unread}>{conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}</span> : null}
               </button>
@@ -511,7 +600,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
         {advancedAvailable === false ? <p style={s.compatibility}>Modo compatível ativo. Equipes, notas, menções, threads e reações exigem a versão atualizada do backend.</p> : null}
       </div> : <div style={s.view}>
         <header style={s.header}>
-          <button type="button" style={s.iconButton} onClick={() => thread ? setThread(null) : setSelected(null)} aria-label={thread ? 'Voltar à conversa' : 'Voltar às conversas'}><ChevronLeft size={20} /></button>
+          <button type="button" style={s.iconButton} onClick={() => { if (thread) setThread(null); else { clearAttachment(); setSelected(null); } }} aria-label={thread ? 'Voltar à conversa' : 'Voltar às conversas'}><ChevronLeft size={20} /></button>
           <div style={s.selectedIdentity}><span style={s.avatar}>{selected.kind === 'team' ? <Users size={16} /> : selected.target.name?.[0]?.toUpperCase()}</span><span><strong style={s.selectedName}>{selected.target.name}</strong><small style={s.status}>{selected.kind === 'team' ? 'Conversa de equipe' : viewing ? 'Também está nesta conversa' : online ? 'Online agora' : 'Offline'}</small></span></div>
           {!isMobile ? <button type="button" style={s.iconButton} onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Restaurar tamanho do chat' : 'Expandir chat'} title={expanded ? 'Restaurar tamanho' : 'Expandir'}>{expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button> : null}
           <button type="button" style={s.iconButton} onClick={onClose} aria-label="Fechar chat interno"><X size={20} /></button>
@@ -521,20 +610,29 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
           {!loading && !threadLoading && !renderedMessages.length ? <div style={s.empty}><MessageCircle size={24} /><span>Nenhuma mensagem ainda.</span></div> : null}
           <div ref={bottomRef} />
         </div>
-        <div style={s.composerArea}>
-          {replyTo || thread ? <div style={s.replyBar}><Reply size={14} /><span><strong>Respondendo a {replyTo?.sender?.name || thread?.parent?.sender?.name || 'mensagem'}</strong><small>{replyTo?.body || thread?.parent?.body}</small></span>{replyTo ? <button type="button" style={s.dismissReply} onClick={() => setReplyTo(null)} aria-label="Cancelar resposta"><X size={14} /></button> : null}</div> : null}
+        <div style={{ ...s.composerArea, ...(draggingFile ? s.composerDragging : {}) }} onDragEnter={(event) => { event.preventDefault(); setDraggingFile(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDraggingFile(false); }} onDrop={(event) => { event.preventDefault(); setDraggingFile(false); chooseAttachment(event.dataTransfer.files?.[0]); }}>
+          {draggingFile ? <div style={s.dropOverlay}><Paperclip size={24} /><strong>Solte o arquivo para anexar</strong></div> : null}
+          {replyTo || thread ? <div style={s.replyBar}><Reply size={14} /><span><strong>Respondendo a {replyTo?.sender?.name || thread?.parent?.sender?.name || 'mensagem'}</strong><small>{messagePreview(replyTo || thread?.parent)}</small></span>{replyTo ? <button type="button" style={s.dismissReply} onClick={() => setReplyTo(null)} aria-label="Cancelar resposta"><X size={14} /></button> : null}</div> : null}
+          {attachment ? <div style={s.attachmentPreview}>
+            {attachment.previewUrl ? <img src={attachment.previewUrl} alt="Prévia do anexo" style={s.attachmentPreviewImage} /> : <span style={s.attachmentPreviewIcon}><FileText size={20} /></span>}
+            <span style={s.attachmentPreviewInfo}><strong style={s.attachmentName}>{attachment.file.name}</strong><small>{formatFileSize(attachment.file.size)}{uploadProgress ? ` · Enviando ${uploadProgress}%` : ''}</small></span>
+            <button type="button" style={s.dismissAttachment} onClick={() => sending ? uploadAbortRef.current?.abort() : clearAttachment()} aria-label={sending ? 'Cancelar envio do anexo' : 'Remover anexo'} title={sending ? 'Cancelar envio' : 'Remover anexo'}><X size={16} /></button>
+            {uploadProgress ? <span style={{ ...s.uploadBar, width: `${uploadProgress}%` }} /> : null}
+          </div> : null}
           <div style={s.typeTabs} role="tablist" aria-label="Tipo da mensagem">
             <button type="button" role="tab" aria-selected={messageType === 'message'} style={{ ...s.typeTab, ...(messageType === 'message' ? s.typeTabActive : {}) }} onClick={() => setMessageType('message')}>Mensagem</button>
             <button type="button" role="tab" aria-selected={messageType === 'note'} disabled={advancedAvailable === false} style={{ ...s.typeTab, ...(messageType === 'note' ? s.noteTabActive : {}) }} onClick={() => setMessageType('note')}>Nota interna</button>
           </div>
           <form onSubmit={handleSend} style={s.composer}>
             {mentionOptions.length ? <div style={s.mentionMenu} role="listbox" aria-label="Sugestões de menção">{mentionOptions.map((conversation) => <button key={conversation.key} type="button" style={s.mentionOption} onClick={() => selectMention(conversation)}><span style={s.mentionAvatar}>{conversation.kind === 'team' ? <Users size={13} /> : conversation.target.name?.[0]?.toUpperCase()}</span><span><strong>{conversation.target.name}</strong><small>{conversation.kind === 'team' ? 'Equipe' : 'Pessoa'}</small></span></button>)}</div> : null}
+            <input ref={fileInputRef} type="file" accept={ATTACHMENT_ACCEPT} style={s.hiddenInput} onChange={(event) => chooseAttachment(event.target.files?.[0])} />
+            <button type="button" style={s.emojiButton} onClick={() => fileInputRef.current?.click()} disabled={sending || advancedAvailable === false} aria-label="Anexar arquivo" title="Anexar arquivo de até 20 MB"><Paperclip size={18} /></button>
             <div style={s.emojiWrap}>
               <button type="button" style={s.emojiButton} onClick={() => setEmojiOpen((value) => !value)} aria-expanded={emojiOpen} aria-label="Escolher emoji"><Smile size={18} /></button>
               {emojiOpen ? <div style={s.emojiPicker} aria-label="Emojis rápidos">{COMPOSER_EMOJIS.map((emoji) => <button key={emoji} type="button" style={s.emojiPickerButton} onClick={() => { setText((previous) => `${previous}${emoji}`); setEmojiOpen(false); inputRef.current?.focus(); }}>{emoji}</button>)}</div> : null}
             </div>
-            <textarea ref={inputRef} rows={1} style={{ ...s.input, ...(messageType === 'note' ? s.noteInput : {}) }} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleSend(); } }} placeholder={messageType === 'note' ? 'Escreva uma nota interna…' : 'Mensagem… Use @nome para mencionar'} aria-label={`${messageType === 'note' ? 'Nota interna' : 'Mensagem'} para ${selected.target.name}`} />
-            <ActionButton type="submit" loading={sending} disabled={!text.trim()} style={s.send} aria-label="Enviar mensagem"><Send size={16} /></ActionButton>
+            <textarea ref={inputRef} rows={1} style={{ ...s.input, ...(messageType === 'note' ? s.noteInput : {}) }} value={text} onChange={(event) => setText(event.target.value)} onPaste={handlePaste} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleSend(); } }} placeholder={messageType === 'note' ? 'Escreva uma nota interna…' : 'Mensagem… Use @nome para mencionar'} aria-label={`${messageType === 'note' ? 'Nota interna' : 'Mensagem'} para ${selected.target.name}`} />
+            <ActionButton type="submit" loading={sending} disabled={!text.trim() && !attachment} style={s.send} aria-label="Enviar mensagem"><Send size={16} /></ActionButton>
           </form>
           <span style={s.shortcut}>Enter envia · Shift + Enter quebra linha</span>
         </div>
@@ -597,6 +695,13 @@ const s = {
   noteBadge: { padding: '1px 5px', borderRadius: '999px', border: '1px solid var(--warning-border)', color: 'var(--warning-text)', fontSize: '.56rem', fontWeight: 800, textTransform: 'uppercase' },
   replyPreview: { width: '100%', maxWidth: '260px', marginBottom: '.4rem', padding: '.35rem .45rem', display: 'flex', alignItems: 'center', gap: '.3rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', border: 0, borderLeft: '2px solid var(--accent)', borderRadius: '5px', background: 'var(--bg-panel)', color: 'var(--text-muted)', fontSize: '.66rem', cursor: 'pointer' },
   body: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  messageAttachment: { display: 'grid', gap: '.35rem', marginBottom: '.35rem' },
+  attachmentImageLink: { display: 'block' },
+  attachmentImage: { display: 'block', width: '100%', maxWidth: '300px', maxHeight: '260px', objectFit: 'contain', borderRadius: '9px', background: 'var(--bg-panel)' },
+  attachmentFile: { minWidth: 0, padding: '.5rem', display: 'flex', alignItems: 'center', gap: '.5rem', border: '1px solid var(--border-color)', borderRadius: '9px', background: 'var(--bg-panel)', color: 'var(--text-main)', textDecoration: 'none' },
+  attachmentFileIcon: { width: '34px', height: '34px', flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '8px', background: 'var(--accent-light)', color: 'var(--accent)' },
+  attachmentFileInfo: { flex: 1, minWidth: 0, display: 'grid', gap: '1px' },
+  attachmentName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   time: { display: 'block', marginTop: '.3rem', textAlign: 'right', fontSize: '.63rem', opacity: .72 },
   reactions: { display: 'flex', flexWrap: 'wrap', gap: '.25rem', marginTop: '.35rem' },
   reaction: { minHeight: '23px', padding: '1px 6px', borderRadius: '999px', border: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-main)', cursor: 'pointer', fontSize: '.67rem' },
@@ -605,12 +710,21 @@ const s = {
   messageAction: { width: '24px', height: '24px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' },
   emojiAction: { width: '24px', height: '24px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '50%', background: 'transparent', cursor: 'pointer', fontSize: '.7rem' },
   composerArea: { position: 'relative', padding: '.55rem 1rem max(.65rem, env(safe-area-inset-bottom))', borderTop: '1px solid var(--border-color)', background: 'var(--bg-surface)' },
+  composerDragging: { outline: '2px dashed var(--accent)', outlineOffset: '-6px' },
+  dropOverlay: { position: 'absolute', inset: 0, zIndex: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.6rem', background: 'var(--accent-light)', color: 'var(--accent)', pointerEvents: 'none' },
   composer: { position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '.45rem' },
   input: { flex: 1, minHeight: '42px', maxHeight: '140px', padding: '.65rem .8rem', resize: 'none', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '12px', outline: 0, background: 'var(--bg-panel)', color: 'var(--text-main)', font: 'inherit', lineHeight: 1.4 },
   emojiWrap: { position: 'relative' },
   emojiButton: { width: '42px', height: '42px', display: 'grid', placeItems: 'center', border: '1px solid var(--border-color)', borderRadius: '11px', background: 'var(--bg-panel)', color: 'var(--text-muted)', cursor: 'pointer' },
   emojiPicker: { position: 'absolute', left: 0, bottom: 'calc(100% + 7px)', zIndex: 5, width: '210px', padding: '.45rem', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '.2rem', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-panel)', boxShadow: 'var(--shadow-lg)' },
   emojiPickerButton: { width: '30px', height: '30px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '7px', background: 'transparent', cursor: 'pointer', fontSize: '1rem' },
+  hiddenInput: { display: 'none' },
+  attachmentPreview: { position: 'relative', minHeight: '58px', marginBottom: '.45rem', padding: '.45rem 2.5rem .45rem .45rem', display: 'flex', alignItems: 'center', gap: '.55rem', overflow: 'hidden', border: '1px solid var(--accent-border)', borderRadius: '10px', background: 'var(--accent-light)' },
+  attachmentPreviewImage: { width: '46px', height: '46px', flexShrink: 0, objectFit: 'cover', borderRadius: '8px' },
+  attachmentPreviewIcon: { width: '42px', height: '42px', flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '8px', background: 'var(--bg-panel)', color: 'var(--accent)' },
+  attachmentPreviewInfo: { flex: 1, minWidth: 0, display: 'grid', gap: '2px', color: 'var(--text-main)', fontSize: '.74rem' },
+  dismissAttachment: { position: 'absolute', top: '8px', right: '8px', width: '28px', height: '28px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '50%', background: 'var(--bg-panel)', color: 'var(--text-muted)', cursor: 'pointer' },
+  uploadBar: { position: 'absolute', left: 0, bottom: 0, height: '3px', background: 'var(--accent)', transition: 'width .15s ease' },
   noteInput: { background: 'var(--warning-light)', borderColor: 'var(--warning-border)' },
   send: { width: '42px', height: '42px', minWidth: '42px', padding: 0, display: 'grid', placeItems: 'center', borderRadius: '50%' },
   typeTabs: { display: 'flex', gap: '.25rem', marginBottom: '.4rem' },

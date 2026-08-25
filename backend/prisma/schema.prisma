@@ -8,69 +8,69 @@ datasource db {
 }
 
 model Tenant {
-  id                String               @id @default(cuid())
-  name              String
-  slug              String               @unique
-  plan              String               @default("trial") // trial, starter, pro, enterprise
-  active            Boolean              @default(true)
-  maxConnections    Int                  @default(1)
-  maxUsers          Int                  @default(5)
-  primaryColor      String?              @default("#D4AF37")
-  logoUrl           String?
-  createdAt         DateTime             @default(now())
-  contacts          Contact[]
-  quickResponses    QuickResponse[]
-  scheduledMessages ScheduledMessage[]
-  internalMessages  InternalMessage[]
-  teams             Team[]
-  settings          TenantSettings?
-  tickets           Ticket[]
-  users             User[]
-  instances         WaInstance[]
-  metaInstances     MetaInstance[]
-  knowledges        Knowledge[]
-  businessHours     BusinessHour[]
-  knowledgeLogs     KnowledgeLog[]
-  tags              Tag[]
-  equipments        Equipment[]
-  serviceOrders     ServiceOrder[]
-  leads             Lead[]
-  syncRecords       ExternalSyncRecord[]
-  crmCustomers      CrmCustomer[]
-  crmEquipments     CrmEquipment[]
-  crmOsTypes        CrmOsType[]
-  crmTechnicians    CrmTechnician[]
-  billingLogs       BillingLog[]
-  revenueSnapshots  RevenueSnapshot[]
-  userTicketStates  UserTicketState[]
-  privacyAuditLogs  PrivacyAuditLog[]
-  privacyRetentionPolicy PrivacyRetentionPolicy?
-  privacyPolicies   PrivacyPolicy[]
-  privacyAcceptances PrivacyAcceptance[]
-  internalMessageReads InternalMessageRead[]
-  internalMessageReactions InternalMessageReaction[]
+  id                         String                      @id @default(cuid())
+  name                       String
+  slug                       String                      @unique
+  plan                       String                      @default("trial") // trial, starter, pro, enterprise
+  active                     Boolean                     @default(true)
+  maxConnections             Int                         @default(1)
+  maxUsers                   Int                         @default(5)
+  primaryColor               String?                     @default("#D4AF37")
+  logoUrl                    String?
+  createdAt                  DateTime                    @default(now())
+  contacts                   Contact[]
+  quickResponses             QuickResponse[]
+  scheduledMessages          ScheduledMessage[]
+  internalMessages           InternalMessage[]
+  teams                      Team[]
+  settings                   TenantSettings?
+  tickets                    Ticket[]
+  users                      User[]
+  instances                  WaInstance[]
+  metaInstances              MetaInstance[]
+  knowledges                 Knowledge[]
+  businessHours              BusinessHour[]
+  knowledgeLogs              KnowledgeLog[]
+  tags                       Tag[]
+  equipments                 Equipment[]
+  serviceOrders              ServiceOrder[]
+  leads                      Lead[]
+  syncRecords                ExternalSyncRecord[]
+  crmCustomers               CrmCustomer[]
+  crmEquipments              CrmEquipment[]
+  crmOsTypes                 CrmOsType[]
+  crmTechnicians             CrmTechnician[]
+  billingLogs                BillingLog[]
+  revenueSnapshots           RevenueSnapshot[]
+  userTicketStates           UserTicketState[]
+  privacyAuditLogs           PrivacyAuditLog[]
+  privacyRetentionPolicy     PrivacyRetentionPolicy?
+  privacyPolicies            PrivacyPolicy[]
+  privacyAcceptances         PrivacyAcceptance[]
+  internalMessageReads       InternalMessageRead[]
+  internalMessageReactions   InternalMessageReaction[]
   internalConversationStates InternalConversationState[]
 }
 
 model TenantSettings {
-  id                 String  @id @default(cuid())
-  tenantId           String  @unique
-  tenant             Tenant  @relation(fields: [tenantId], references: [id])
-  evolutionUrl       String?
-  evolutionKey       String?
-  geminiKey          String?
-  botEnabled         Boolean @default(false)
-  botName            String? @default("LCD Bot")
-  botSystemPrompt    String? @db.Text
-  botTransferWord    String? @default("atendente")
-  webhookUrl         String?
-  outOfOfficeMessage String? @db.Text
-  notificationPhone  String?
-  serviceOrderManagerCopyEnabled    Boolean @default(false)
-  serviceOrderManagerPhone          String?
-  serviceOrderManagerInstanceId     String?
-  ratingEnabled      Boolean @default(false)
-  ratingMessage      String? @default("Como você avalia nosso atendimento de 1 a 5?") @db.Text
+  id                             String  @id @default(cuid())
+  tenantId                       String  @unique
+  tenant                         Tenant  @relation(fields: [tenantId], references: [id])
+  evolutionUrl                   String?
+  evolutionKey                   String?
+  geminiKey                      String?
+  botEnabled                     Boolean @default(false)
+  botName                        String? @default("LCD Bot")
+  botSystemPrompt                String? @db.Text
+  botTransferWord                String? @default("atendente")
+  webhookUrl                     String?
+  outOfOfficeMessage             String? @db.Text
+  notificationPhone              String?
+  serviceOrderManagerCopyEnabled Boolean @default(false)
+  serviceOrderManagerPhone       String?
+  serviceOrderManagerInstanceId  String?
+  ratingEnabled                  Boolean @default(false)
+  ratingMessage                  String? @default("Como você avalia nosso atendimento de 1 a 5?") @db.Text
 
   // Dados da Empresa para PDF/OS
   companyName    String?
@@ -101,53 +101,53 @@ model TenantSettings {
   firebirdQueueBillingProcess Boolean   @default(false)
 
   // Configurações de KPI do RevGuard AI
-  kpiContractValue Float? @default(1200.0)
-  kpiServiceValue  Float? @default(350.0)
-  kpiSlaLimitHours Int?   @default(24)
-  kpiReincidentThreshold Int? @default(2)
+  kpiContractValue       Float? @default(1200.0)
+  kpiServiceValue        Float? @default(350.0)
+  kpiSlaLimitHours       Int?   @default(24)
+  kpiReincidentThreshold Int?   @default(2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 }
 
 model User {
-  id                       String            @id @default(cuid())
-  tenantId                 String
-  name                     String
-  email                    String
-  password                 String
-  role                     String            @default("agent")
-  accessProfile            String            @default("agent")
-  permissions              Json?
-  homePage                 String?
-  phone                    String?
-  firebirdSupportName      String?
-  active                   Boolean           @default(true)
-  createdAt                DateTime          @default(now())
-  messages                 Message[]
-  sentInternalMessages     InternalMessage[] @relation("InternalSender")
-  receivedInternalMessages InternalMessage[] @relation("InternalReceiver")
-  teamMembers              TeamMember[]
-  tickets                  Ticket[]
-  ticketEvents             TicketEvent[]
-  tenant                   Tenant            @relation(fields: [tenantId], references: [id])
-  serviceOrders            ServiceOrder[]
-  closedOrders             ServiceOrder[]    @relation("ClosedBy")
-  ticketStates             UserTicketState[]
-  internalMessageReads     InternalMessageRead[]
-  internalMessageReactions InternalMessageReaction[]
+  id                         String                      @id @default(cuid())
+  tenantId                   String
+  name                       String
+  email                      String
+  password                   String
+  role                       String                      @default("agent")
+  accessProfile              String                      @default("agent")
+  permissions                Json?
+  homePage                   String?
+  phone                      String?
+  firebirdSupportName        String?
+  active                     Boolean                     @default(true)
+  createdAt                  DateTime                    @default(now())
+  messages                   Message[]
+  sentInternalMessages       InternalMessage[]           @relation("InternalSender")
+  receivedInternalMessages   InternalMessage[]           @relation("InternalReceiver")
+  teamMembers                TeamMember[]
+  tickets                    Ticket[]
+  ticketEvents               TicketEvent[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
+  serviceOrders              ServiceOrder[]
+  closedOrders               ServiceOrder[]              @relation("ClosedBy")
+  ticketStates               UserTicketState[]
+  internalMessageReads       InternalMessageRead[]
+  internalMessageReactions   InternalMessageReaction[]
   internalConversationStates InternalConversationState[]
 
   @@unique([tenantId, email])
 }
 
 model Team {
-  id       String       @id @default(cuid())
-  tenantId String
-  name     String
-  tenant   Tenant       @relation(fields: [tenantId], references: [id])
-  members  TeamMember[]
-  tickets  Ticket[]
+  id               String            @id @default(cuid())
+  tenantId         String
+  name             String
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  members          TeamMember[]
+  tickets          Ticket[]
   internalMessages InternalMessage[]
 }
 
@@ -267,12 +267,12 @@ model Ticket {
 
   messages      Message[]
   events        TicketEvent[]
-  agent         User?          @relation(fields: [agentId], references: [id])
-  contact       Contact        @relation(fields: [contactId], references: [id])
-  instance      WaInstance?    @relation(fields: [instanceId], references: [id])
-  metaInstance  MetaInstance?  @relation(fields: [metaInstanceId], references: [id])
-  team          Team?          @relation(fields: [teamId], references: [id])
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  agent         User?             @relation(fields: [agentId], references: [id])
+  contact       Contact           @relation(fields: [contactId], references: [id])
+  instance      WaInstance?       @relation(fields: [instanceId], references: [id])
+  metaInstance  MetaInstance?     @relation(fields: [metaInstanceId], references: [id])
+  team          Team?             @relation(fields: [teamId], references: [id])
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
   serviceOrders ServiceOrder[]
   userStates    UserTicketState[]
 
@@ -287,15 +287,15 @@ model Ticket {
 }
 
 model UserTicketState {
-  id           String   @id @default(cuid())
-  tenantId     String
-  userId       String
-  ticketId     String
-  isPinned     Boolean  @default(false)
-  isUnread     Boolean  @default(false)
-  pinnedAt     DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  ticketId  String
+  isPinned  Boolean   @default(false)
+  isUnread  Boolean   @default(false)
+  pinnedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -403,73 +403,78 @@ model ScheduledMessage {
 }
 
 model InternalMessage {
-  id         String   @id @default(cuid())
-  tenantId   String
-  senderId   String
-  receiverId String?
-  teamId     String?
-  type       String   @default("message")
-  body       String
-  replyToId  String?
-  mentionUserIds Json?
-  mentionTeamIds Json?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
-  receiver   User?    @relation("InternalReceiver", fields: [receiverId], references: [id])
-  sender     User     @relation("InternalSender", fields: [senderId], references: [id])
-  tenant     Tenant   @relation(fields: [tenantId], references: [id])
-  team       Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  replyTo    InternalMessage? @relation("InternalMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies    InternalMessage[] @relation("InternalMessageReplies")
-  reactions  InternalMessageReaction[]
-  reads      InternalMessageRead[]
+  id                 String                    @id @default(cuid())
+  tenantId           String
+  senderId           String
+  receiverId         String?
+  teamId             String?
+  type               String                    @default("message")
+  body               String
+  replyToId          String?
+  mentionUserIds     Json?
+  mentionTeamIds     Json?
+  attachmentUrl      String?
+  attachmentName     String?
+  attachmentMimeType String?
+  attachmentSize     Int?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @default(now()) @updatedAt
+  receiver           User?                     @relation("InternalReceiver", fields: [receiverId], references: [id])
+  sender             User                      @relation("InternalSender", fields: [senderId], references: [id])
+  tenant             Tenant                    @relation(fields: [tenantId], references: [id])
+  team               Team?                     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  replyTo            InternalMessage?          @relation("InternalMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies            InternalMessage[]         @relation("InternalMessageReplies")
+  reactions          InternalMessageReaction[]
+  reads              InternalMessageRead[]
 
   @@index([tenantId, receiverId, createdAt])
   @@index([tenantId, teamId, createdAt])
+  @@index([tenantId, attachmentUrl])
   @@index([replyToId, createdAt])
 }
 
 model InternalMessageReaction {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   tenantId  String
   messageId String
   userId    String
   emoji     String
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   message   InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId, emoji])
   @@index([tenantId, messageId])
 }
 
 model InternalMessageRead {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   tenantId  String
   messageId String
   userId    String
-  readAt    DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  readAt    DateTime        @default(now())
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   message   InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([tenantId, userId, readAt])
 }
 
 model InternalConversationState {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   tenantId        String
   userId          String
   conversationKey String
-  pinned          Boolean  @default(false)
-  unreadCount     Int      @default(0)
+  pinned          Boolean   @default(false)
+  unreadCount     Int       @default(0)
   readAt          DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, userId, conversationKey])
   @@index([tenantId, userId, pinned, updatedAt])
@@ -511,24 +516,24 @@ model Equipment {
 }
 
 model ServiceOrder {
-  id                String    @id @default(cuid())
-  tenantId          String
-  contactId         String
-  equipmentId       String
-  externalSource    String?   @default("manual")
-  externalId        String?
-  externalUpdatedAt DateTime?
-  requestKey        String?
-  ticketId          String?
-  cdOstp            String?
-  nmsuportet        String?
-  defect            String? // Descrição do defeito relatado
-  status            String    @default("PENDENTE") // PENDENTE, EM_ATENDIMENTO, AGUARDANDO_RETORNO, FINALIZADA
-  technicalNotes    String? // Notas do técnico (peças trocadas, pendências)
-  meters            String? // Medidores em JSON (ex: {"mono": 1000, "cor": 500})
-  userId            String? // Atendente que criou a O.S.
-  managerCopySentAt DateTime?
-  managerCopyLastError String? @db.Text
+  id                   String    @id @default(cuid())
+  tenantId             String
+  contactId            String
+  equipmentId          String
+  externalSource       String?   @default("manual")
+  externalId           String?
+  externalUpdatedAt    DateTime?
+  requestKey           String?
+  ticketId             String?
+  cdOstp               String?
+  nmsuportet           String?
+  defect               String? // Descrição do defeito relatado
+  status               String    @default("PENDENTE") // PENDENTE, EM_ATENDIMENTO, AGUARDANDO_RETORNO, FINALIZADA
+  technicalNotes       String? // Notas do técnico (peças trocadas, pendências)
+  meters               String? // Medidores em JSON (ex: {"mono": 1000, "cor": 500})
+  userId               String? // Atendente que criou a O.S.
+  managerCopySentAt    DateTime?
+  managerCopyLastError String?   @db.Text
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -742,18 +747,18 @@ model PrivacyAuditLog {
 }
 
 model PrivacyRetentionPolicy {
-  id                 String   @id @default(cuid())
-  tenantId           String   @unique
-  enabled            Boolean  @default(false)
-  dryRun             Boolean  @default(true)
-  mediaRetentionDays Int      @default(365)
-  auditRetentionDays Int      @default(730)
-  billingRetentionDays Int    @default(2555)
-  agentLogRetentionDays Int   @default(30)
-  lastPreviewAt      DateTime?
-  lastPreview        Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                    String    @id @default(cuid())
+  tenantId              String    @unique
+  enabled               Boolean   @default(false)
+  dryRun                Boolean   @default(true)
+  mediaRetentionDays    Int       @default(365)
+  auditRetentionDays    Int       @default(730)
+  billingRetentionDays  Int       @default(2555)
+  agentLogRetentionDays Int       @default(30)
+  lastPreviewAt         DateTime?
+  lastPreview           Json?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }

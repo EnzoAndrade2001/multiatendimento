@@ -49,6 +49,11 @@ export const updateInternalConversationPin = (conversationKey, pinned) => (
   api.patch(`/internal-messages/conversations/${encodeURIComponent(conversationKey)}/pin`, { pinned })
 );
 export const sendInternalConversationMessage = (data) => api.post('/internal-messages/messages', data);
+export const sendInternalAttachment = (formData, onUploadProgress, signal) => api.post('/internal-messages/messages/attachment', formData, {
+  headers: { 'Content-Type': 'multipart/form-data' },
+  onUploadProgress,
+  signal,
+});
 export const getInternalMessageThread = (messageId) => api.get(`/internal-messages/messages/${messageId}/thread`);
 export const addInternalMessageReaction = (messageId, emoji) => (
   api.post(`/internal-messages/messages/${messageId}/reactions`, { emoji })

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { toast } from '../utils/toast';
 import {
   getSettings,
@@ -49,9 +50,12 @@ function isMaskedSecret(value) {
 
 export default function Settings() {
   const { can } = usePermissions();
+  const location = useLocation();
   const isMobile = window.innerWidth <= 768;
   const isAdmin = localStorage.getItem('role') === 'admin' || localStorage.getItem('role') === 'superadmin';
   const [tab, setTab] = useState(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (requestedTab === 'account') return 8;
     const firstAllowed = TAB_PERMISSIONS.findIndex((permission) => !permission || can(permission));
     return firstAllowed >= 0 ? firstAllowed : 8;
   });
@@ -127,6 +131,10 @@ export default function Settings() {
   useEffect(() => {
     if (!visibleTabIndexes.includes(tab)) setTab(visibleTabIndexes[0] ?? 8);
   }, [tab, visibleTabIndexes.join(',')]);
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('tab') === 'account') setTab(8);
+  }, [location.search]);
 
   useEffect(() => {
     load();

@@ -49,6 +49,7 @@ export default function Layout() {
   const [tenant, setTenant] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -63,6 +64,7 @@ export default function Layout() {
   const seenInternalEventsRef = React.useRef(new Set());
   const seenMentionEventsRef = React.useRef(new Set());
   const desktopMenuRef = React.useRef(null);
+  const userMenuRef = React.useRef(null);
   const role = localStorage.getItem('role')?.toLowerCase();
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   const [instances, setInstances] = useState([]);
@@ -183,7 +185,7 @@ export default function Layout() {
       audioRef.current.play().catch(() => {});
       setNotification({
         name: `Equipe: ${msg.sender?.name || 'Colega'}`,
-        body: msg.body,
+        body: msg.body || (msg.attachmentName ? `Anexo: ${msg.attachmentName}` : 'Nova mensagem interna'),
         isInternal: true,
         conversationKey: msg.teamId
           ? `team:${msg.teamId}`
@@ -193,7 +195,7 @@ export default function Layout() {
       notificationTimerRef.current = window.setTimeout(() => setNotification(null), 5000);
 
       if (typeof window !== 'undefined' && window.Notification && Notification.permission === 'granted') {
-        const systemNotification = new Notification(`Equipe: ${msg.sender?.name || 'Colega'}`, { body: msg.body });
+        const systemNotification = new Notification(`Equipe: ${msg.sender?.name || 'Colega'}`, { body: msg.body || (msg.attachmentName ? `Anexo: ${msg.attachmentName}` : 'Nova mensagem interna') });
         systemNotification.onclick = () => {
           window.focus();
           setInitialInternalConversationKey(msg.teamId ? `team:${msg.teamId}` : `direct:${msg.senderId}`);
@@ -242,17 +244,21 @@ export default function Layout() {
       if (desktopMenuRef.current && !desktopMenuRef.current.contains(event.target)) {
         setDesktopMenuOpen(false);
       }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setUserMenuOpen(false);
+      }
     }
 
-    if (desktopMenuOpen) {
+    if (desktopMenuOpen || userMenuOpen) {
       document.addEventListener('mousedown', handlePointerDown);
     }
 
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [desktopMenuOpen]);
+  }, [desktopMenuOpen, userMenuOpen]);
 
   React.useEffect(() => {
     setDesktopMenuOpen(false);
+    setUserMenuOpen(false);
   }, [location.pathname]);
 
   React.useEffect(() => {
@@ -264,6 +270,7 @@ export default function Layout() {
       if (event.key === 'Escape') {
         setCommandOpen(false);
         setDesktopMenuOpen(false);
+        setUserMenuOpen(false);
       }
     }
     window.addEventListener('keydown', handleShortcut);
@@ -316,17 +323,23 @@ export default function Layout() {
         .desktop-nav-scroll::-webkit-scrollbar {
           display: none;
         }
+        .primary-nav-link, .header-action-button, .user-menu-item { transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s ease; }
+        .primary-nav-link:hover, .header-action-button:hover, .user-menu-item:hover { background: var(--bg-hover, var(--accent-light)) !important; color: var(--text-main) !important; }
+        .primary-nav-link:focus-visible, .header-action-button:focus-visible, .user-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        @media (max-width: 1180px) {
+          .header-chat-label { display: none; }
+        }
       `}</style>
       <nav style={{ ...styles.nav, padding: isMobile ? '0 var(--space-4)' : '0 var(--space-6)' }}>
         <div style={styles.brandGroup}>
           {tenant?.logoUrl ? (
-            <div style={{ ...styles.logoFrame, width: isMobile ? '72px' : '88px', height: isMobile ? '40px' : '50px' }}>
+            <div style={{ ...styles.logoFrame, width: isMobile ? '76px' : '98px', height: isMobile ? '42px' : '52px' }}>
               <img
                 src={getMediaUrl(tenant.logoUrl)}
                 alt={tenant?.name || 'Logo da empresa'}
                 style={{
                   maxWidth: '100%',
-                  maxHeight: isMobile ? '30px' : '38px',
+                  maxHeight: isMobile ? '32px' : '41px',
                   width: 'auto',
                   objectFit: 'contain',
                   display: 'block',
@@ -347,7 +360,7 @@ export default function Layout() {
           <div style={styles.centerNav}>
             <div style={{ ...styles.links }} className="desktop-nav-scroll" aria-label="Navegação principal">
               {primaryDesktopLinks.map((link) => (
-                <NavLink key={link.to} to={link.to} end={link.to === '/dashboard'} style={({ isActive }) => ({ ...styles.primaryLink, ...(isActive ? styles.linkActive : {}) })}>
+                <NavLink className="primary-nav-link" key={link.to} to={link.to} end={link.to === '/dashboard'} style={({ isActive }) => ({ ...styles.primaryLink, ...(isActive ? styles.linkActive : {}) })}>
                   {link.icon}
                   <span>{link.label === 'Chat' ? 'Atendimento' : link.label}</span>
                 </NavLink>
@@ -355,6 +368,7 @@ export default function Layout() {
               <div style={styles.moreMenuWrap} ref={desktopMenuRef}>
                 <button
                   type="button"
+                  className="primary-nav-link"
                   onClick={() => setDesktopMenuOpen((open) => !open)}
                   style={{ ...styles.primaryLink, ...styles.moreMenuBtn, ...(secondaryDesktopLinks.some((link) => link.to === location.pathname) ? styles.linkActive : {}) }}
                   aria-expanded={desktopMenuOpen}
@@ -386,7 +400,7 @@ export default function Layout() {
 
         <div style={styles.rightActions}>
           {!isMobile ? (
-            <button type="button" onClick={() => setCommandOpen(true)} style={styles.commandButton} aria-label="Abrir busca de ações">
+            <button type="button" className="header-action-button" onClick={() => setCommandOpen(true)} style={styles.commandButton} aria-label="Abrir busca de ações">
               <Search size={17} />
               <span>Buscar</span>
               <kbd style={styles.commandKey}>Ctrl K</kbd>
@@ -395,6 +409,7 @@ export default function Layout() {
           {canUseInternalChat ? (
             <button
               type="button"
+              className="header-action-button"
               onClick={() => {
                 setInitialInternalConversationKey(null);
                 setIsChatOpen(true);
@@ -404,7 +419,7 @@ export default function Layout() {
               aria-label={`Abrir chat interno${internalSummary.unread ? `, ${internalSummary.unread} mensagens não lidas` : ''}`}
             >
               <MessageCircle size={18} />
-              {!isMobile ? <span>Equipe</span> : null}
+              {!isMobile ? <span className="header-chat-label">Chat interno</span> : null}
               {internalSummary.unread > 0 ? (
                 <span style={styles.internalChatBadge} aria-hidden="true">
                   {internalSummary.unread > 99 ? '99+' : internalSummary.unread}
@@ -413,20 +428,25 @@ export default function Layout() {
               {internalSummary.mentions > 0 ? <span style={styles.mentionDot} title={`${internalSummary.mentions} menções pendentes`}>@</span> : null}
             </button>
           ) : null}
-          <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={styles.themeBtn} title="Alternar tema" aria-label="Alternar tema">
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
           {currentUser?.name ? (
-            <div style={{ ...styles.userIdentity, ...(isMobile ? styles.userIdentityMobile : {}) }} title={`Usuário conectado: ${currentUser.name}`}>
-              <span style={styles.userAvatar}>{currentUser.name.trim().charAt(0).toUpperCase()}</span>
-              {!isMobile ? <span style={styles.userName}>{currentUser.name}</span> : null}
+            <div ref={userMenuRef} style={styles.userMenuWrap}>
+              <button type="button" className="header-action-button" style={{ ...styles.userIdentity, ...(isMobile ? styles.userIdentityMobile : {}) }} onClick={() => setUserMenuOpen((open) => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" title={`Usuário conectado: ${currentUser.name}`}>
+                <span style={styles.userAvatar}>{currentUser.name.trim().charAt(0).toUpperCase()}</span>
+                {!isMobile ? <span style={styles.userName}>{currentUser.name}</span> : null}
+                {!isMobile ? <ChevronDown size={14} /> : null}
+              </button>
+              {userMenuOpen ? <div style={styles.userMenu} role="menu">
+                <div style={styles.userMenuHeader}>
+                  <span style={styles.userMenuAvatar}>{currentUser.name.trim().charAt(0).toUpperCase()}</span>
+                  <span style={styles.userMenuProfile}><strong>{currentUser.name}</strong><small>{currentUser.email || 'Usuário do sistema'}</small></span>
+                </div>
+                <button type="button" className="user-menu-item" role="menuitem" style={styles.userMenuItem} onClick={() => { setUserMenuOpen(false); navigate('/settings?tab=account'); }}><Settings size={17} /><span>Minha conta</span></button>
+                <button type="button" className="user-menu-item" role="menuitem" style={styles.userMenuItem} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}</span></button>
+                <div style={styles.userMenuDivider} />
+                <button type="button" className="user-menu-item" role="menuitem" style={{ ...styles.userMenuItem, color: 'var(--danger)' }} onClick={logout}><LogOut size={17} /><span>Sair do sistema</span></button>
+              </div> : null}
             </div>
           ) : null}
-
-          <button type="button" style={{ ...styles.logout, padding: isMobile ? '0.45rem 0.85rem' : '0.55rem 1rem' }} onClick={logout} title="Sair do sistema" aria-label="Sair do sistema">
-            {isMobile ? <LogOut size={18} /> : 'Sair'}
-          </button>
         </div>
       </nav>
 
@@ -710,6 +730,8 @@ const styles = {
     fontWeight: 900,
   },
   userIdentity: {
+    height: '38px',
+    padding: '0 .55rem',
     display: 'inline-flex',
     alignItems: 'center',
     gap: '0.45rem',
@@ -718,6 +740,11 @@ const styles = {
     color: 'var(--text-main)',
     fontSize: '0.82rem',
     fontWeight: 700,
+    border: '1px solid var(--border-color)',
+    borderRadius: '12px',
+    background: 'var(--bg-surface)',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
   },
   userIdentityMobile: {
     maxWidth: '34px',
@@ -742,6 +769,13 @@ const styles = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
+  userMenuWrap: { position: 'relative' },
+  userMenu: { position: 'absolute', top: 'calc(100% + 10px)', right: 0, zIndex: 1250, width: '260px', padding: '.45rem', border: '1px solid var(--border-color)', borderRadius: '14px', background: 'var(--bg-panel)', boxShadow: '0 18px 45px rgba(0,0,0,.22)' },
+  userMenuHeader: { padding: '.65rem', display: 'flex', alignItems: 'center', gap: '.65rem' },
+  userMenuAvatar: { width: '38px', height: '38px', flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '50%', background: 'var(--accent)', color: 'var(--text-inverse)', fontWeight: 900 },
+  userMenuProfile: { minWidth: 0, display: 'grid', gap: '2px', color: 'var(--text-main)', fontSize: '.82rem' },
+  userMenuItem: { width: '100%', minHeight: '40px', padding: '0 .7rem', display: 'flex', alignItems: 'center', gap: '.6rem', border: 0, borderRadius: '9px', background: 'transparent', color: 'var(--text-muted)', font: 'inherit', fontSize: '.8rem', fontWeight: 700, textAlign: 'left', cursor: 'pointer' },
+  userMenuDivider: { height: '1px', margin: '.35rem .3rem', background: 'var(--border-color)' },
   commandButton: {
     height: '38px',
     minWidth: '150px',

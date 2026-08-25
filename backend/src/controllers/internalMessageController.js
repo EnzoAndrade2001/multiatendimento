@@ -1,9 +1,15 @@
 const prisma = require('../lib/prisma');
 const { hasPermission } = require('../auth/permissions');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const { mediaPath } = require('../utils/uploads');
+const { recordPrivacyAudit } = require('../services/privacyAuditService');
+const { fingerprint } = require('../utils/privacy');
 
 const MESSAGE_INCLUDE = {
   sender: { select: { id: true, name: true } },
-  replyTo: { select: { id: true, body: true, senderId: true, type: true } },
+  replyTo: { select: { id: true, body: true, senderId: true, type: true, attachmentName: true } },
   reactions: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
   reads: { select: { userId: true, readAt: true } },
 };
@@ -13,6 +19,67 @@ function setIo(socketIo) { io = socketIo; }
 
 function directKey(userId) { return `direct:${userId}`; }
 function teamKey(teamId) { return `team:${teamId}`; }
+
+const SAFE_ATTACHMENT_EXTENSIONS = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+  'application/pdf': '.pdf', 'text/plain': '.txt', 'text/csv': '.csv',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.ms-powerpoint': '.ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+};
+
+function parseIdArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeOriginalName(value) {
+  return path.basename(String(value || 'arquivo').replace(/\\/g, '/')).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 180) || 'arquivo';
+}
+
+function attachmentBufferMatches(mimeType, buffer) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) return false;
+  const startsWith = (...bytes) => bytes.every((byte, index) => buffer[index] === byte);
+  if (mimeType === 'image/jpeg') return startsWith(0xff, 0xd8, 0xff);
+  if (mimeType === 'image/png') return startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+  if (mimeType === 'image/gif') return buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a';
+  if (mimeType === 'image/webp') return buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (mimeType === 'application/pdf') return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
+  if (mimeType.startsWith('text/')) return !buffer.includes(0);
+  if (mimeType.includes('openxmlformats')) return startsWith(0x50, 0x4b);
+  if (['application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint'].includes(mimeType)) {
+    return startsWith(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+  }
+  return false;
+}
+
+async function persistInternalAttachment(file) {
+  if (!file?.buffer) return null;
+  const mimeType = String(file.mimetype || '').toLowerCase();
+  const extension = SAFE_ATTACHMENT_EXTENSIONS[mimeType];
+  if (!extension) throw Object.assign(new Error('Formato de arquivo não permitido no chat interno.'), { statusCode: 415 });
+  if (!attachmentBufferMatches(mimeType, file.buffer)) {
+    throw Object.assign(new Error('O conteúdo do arquivo não corresponde ao formato informado.'), { statusCode: 415 });
+  }
+  const storedName = `internal-${Date.now()}-${crypto.randomUUID()}${extension}`;
+  await fs.promises.writeFile(path.join(mediaPath, storedName), file.buffer, { flag: 'wx' });
+  return {
+    url: `/uploads/media/${storedName}`,
+    path: path.join(mediaPath, storedName),
+    name: safeOriginalName(file.originalname),
+    mimeType,
+    size: file.size,
+  };
+}
 
 function parseConversationKey(value) {
   const [kind, id, ...rest] = String(value || '').split(':');
@@ -202,7 +269,7 @@ async function sendMessage(req, res) {
   const { receiverId, teamId, replyToId } = req.body || {};
   const body = String(req.body?.body || '').trim();
   const type = req.body?.type || 'message';
-  if (!body || body.length > 4000) return res.status(400).json({ error: 'Mensagem deve ter entre 1 e 4000 caracteres.' });
+  if ((!body && !req.file) || body.length > 4000) return res.status(400).json({ error: 'Informe uma mensagem ou anexo de até 20 MB.' });
   if (!['message', 'note'].includes(type)) return res.status(400).json({ error: 'Tipo deve ser message ou note.' });
   if (Boolean(receiverId) === Boolean(teamId)) return res.status(400).json({ error: 'Informe exatamente um destinatário ou equipe.' });
   const conversation = await resolveConversation(req, receiverId ? directKey(receiverId) : teamKey(teamId));
@@ -213,8 +280,8 @@ async function sendMessage(req, res) {
       return res.status(400).json({ error: 'Mensagem respondida não pertence a esta conversa.' });
     }
   }
-  const rawUserMentions = Array.isArray(req.body?.mentionUserIds) ? req.body.mentionUserIds : [];
-  const rawTeamMentions = Array.isArray(req.body?.mentionTeamIds) ? req.body.mentionTeamIds : [];
+  const rawUserMentions = parseIdArray(req.body?.mentionUserIds);
+  const rawTeamMentions = parseIdArray(req.body?.mentionTeamIds);
   if (rawUserMentions.length > 20 || rawTeamMentions.length > 20) {
     return res.status(400).json({ error: 'Limite de 20 menções por mensagem excedido.' });
   }
@@ -222,39 +289,59 @@ async function sendMessage(req, res) {
   const mentionTeamIds = [...new Set(rawTeamMentions.map(String))];
   if (!await validateMentions(req, mentionUserIds, mentionTeamIds)) return res.status(400).json({ error: 'Uma ou mais menções não pertencem a esta empresa.' });
 
-  const message = await prisma.internalMessage.create({
-    data: {
-      tenantId: req.user.tenantId, senderId: req.user.userId,
-      receiverId: conversation.kind === 'direct' ? conversation.id : null,
-      teamId: conversation.kind === 'team' ? conversation.id : null,
-      type, body, replyToId: replyToId || null, mentionUserIds, mentionTeamIds,
-    }, include: MESSAGE_INCLUDE,
-  });
-  const recipientIds = conversation.kind === 'direct'
-    ? [conversation.id]
-    : conversation.team.members.map((member) => member.userId).filter((id) => id !== req.user.userId);
-  await Promise.all(recipientIds.map((userId) => {
-    const recipientKey = conversation.kind === 'direct' ? directKey(req.user.userId) : conversation.key;
-    return prisma.internalConversationState.upsert({
-      where: { tenantId_userId_conversationKey: { tenantId: req.user.tenantId, userId, conversationKey: recipientKey } },
-      update: { unreadCount: { increment: 1 } },
-      create: { tenantId: req.user.tenantId, userId, conversationKey: recipientKey, unreadCount: 1 },
+  let attachment;
+  let messageCreated = false;
+  try {
+    attachment = await persistInternalAttachment(req.file);
+    const message = await prisma.internalMessage.create({
+      data: {
+        tenantId: req.user.tenantId, senderId: req.user.userId,
+        receiverId: conversation.kind === 'direct' ? conversation.id : null,
+        teamId: conversation.kind === 'team' ? conversation.id : null,
+        type, body, replyToId: replyToId || null, mentionUserIds, mentionTeamIds,
+        attachmentUrl: attachment?.url || null,
+        attachmentName: attachment?.name || null,
+        attachmentMimeType: attachment?.mimeType || null,
+        attachmentSize: attachment?.size || null,
+      }, include: MESSAGE_INCLUDE,
     });
-  }));
-  emitMessage(message, [req.user.userId, ...recipientIds], conversation.kind === 'team' ? conversation.id : null);
-  if (io) {
-    for (const userId of mentionUserIds) io.to(`user:${userId}`).emit('internal_mention', { message, mentionedUserId: userId });
-    if (mentionTeamIds.length) {
-      const mentionedMembers = await prisma.teamMember.findMany({
-        where: { teamId: { in: mentionTeamIds }, team: { tenantId: req.user.tenantId } },
-        select: { teamId: true, userId: true },
+    messageCreated = true;
+    if (attachment) await recordPrivacyAudit(req, {
+      action: 'INTERNAL_ATTACHMENT_UPLOAD',
+      resourceType: 'internal_message_attachment',
+      resourceId: message.id,
+      metadata: { filenameHash: fingerprint(attachment.name), mimeType: attachment.mimeType, size: attachment.size },
+    });
+    const recipientIds = conversation.kind === 'direct'
+      ? [conversation.id]
+      : conversation.team.members.map((member) => member.userId).filter((id) => id !== req.user.userId);
+    await Promise.all(recipientIds.map((userId) => {
+      const recipientKey = conversation.kind === 'direct' ? directKey(req.user.userId) : conversation.key;
+      return prisma.internalConversationState.upsert({
+        where: { tenantId_userId_conversationKey: { tenantId: req.user.tenantId, userId, conversationKey: recipientKey } },
+        update: { unreadCount: { increment: 1 } },
+        create: { tenantId: req.user.tenantId, userId, conversationKey: recipientKey, unreadCount: 1 },
       });
-      for (const member of mentionedMembers) {
-        io.to(`user:${member.userId}`).emit('internal_mention', { message, mentionedTeamId: member.teamId });
+    }));
+    emitMessage(message, [req.user.userId, ...recipientIds], conversation.kind === 'team' ? conversation.id : null);
+    if (io) {
+      for (const userId of mentionUserIds) io.to(`user:${userId}`).emit('internal_mention', { message, mentionedUserId: userId });
+      if (mentionTeamIds.length) {
+        const mentionedMembers = await prisma.teamMember.findMany({
+          where: { teamId: { in: mentionTeamIds }, team: { tenantId: req.user.tenantId } },
+          select: { teamId: true, userId: true },
+        });
+        for (const member of mentionedMembers) {
+          io.to(`user:${member.userId}`).emit('internal_mention', { message, mentionedTeamId: member.teamId });
+        }
       }
     }
+    return res.status(201).json(message);
+  } catch (error) {
+    if (!messageCreated && attachment?.path) await fs.promises.unlink(attachment.path).catch(() => {});
+    console.error('[internal-chat] Falha ao enviar mensagem:', error.message);
+    return res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Não foi possível enviar a mensagem interna.' });
   }
-  return res.status(201).json(message);
 }
 
 async function send(req, res) { return sendMessage(req, res); }
