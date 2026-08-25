@@ -88,7 +88,11 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   }, [advancedAvailable, messageType]);
 
   function publishSummary(next) {
-    onSummaryChange?.({
+    // The drawer is also used while an older cached Layout bundle is being
+    // replaced. Guard the callback explicitly so a stale/non-function prop
+    // cannot take down the whole inbox after sending with Enter.
+    if (typeof onSummaryChange !== 'function') return;
+    onSummaryChange({
       unread: next.reduce((sum, item) => sum + Number(item.unreadCount || 0), 0),
       mentions: next.reduce((sum, item) => sum + Number(item.mentionCount || 0), 0),
     });
