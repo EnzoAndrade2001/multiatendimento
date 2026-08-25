@@ -94,6 +94,14 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
     });
   }
 
+  // Keep the global badge in sync after the local conversation state commits.
+  // Do not call the parent setter from inside a setConversations updater: React
+  // can treat that nested update as a render-time exception when a socket event
+  // arrives immediately after sending a message.
+  useEffect(() => {
+    publishSummary(conversations);
+  }, [conversations, onSummaryChange]);
+
   async function loadConversations() {
     setError('');
     let next;
@@ -110,7 +118,6 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
       setAdvancedAvailable(false);
     }
     setConversations(next);
-    publishSummary(next);
     return next;
   }
 
@@ -135,12 +142,14 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
 
   useEffect(() => {
     if (!socket) return undefined;
-    const handlePresence = ({ onlineUserIds: next = [] } = {}) => setOnlineUserIds(next);
-    const handleViewers = ({ conversationKey, viewerUserIds: next = [] } = {}) => {
+    const handlePresence = (payload = {}) => setOnlineUserIds(Array.isArray(payload.onlineUserIds) ? payload.onlineUserIds : []);
+    const handleViewers = (payload = {}) => {
+      const { conversationKey, viewerUserIds: next = [] } = payload;
       if (selected?.kind === 'direct' && conversationKey === [myId, selected.target.id].sort().join(':')) setViewerUserIds(next);
     };
     const handleConversationUpdate = () => void loadConversations().catch(() => {});
     const handleMessageUpdate = (update) => {
+      if (!update?.id) return;
       setMessages((previous) => previous.map((message) => message.id === update.id ? { ...message, ...update } : message));
       setThread((previous) => previous ? {
         parent: previous.parent?.id === update.id ? { ...previous.parent, ...update } : previous.parent,
@@ -167,19 +176,15 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   }, [socket, selected?.key, isOpen]);
 
   useEffect(() => {
-    if (!incomingMessage) return;
+    if (!incomingMessage?.id) return;
     const key = messageConversationKey(incomingMessage, myId);
     if (!key) return;
-    setConversations((previous) => {
-      const next = previous.map((item) => item.key === key ? {
+    setConversations((previous) => previous.map((item) => item.key === key ? {
         ...item,
         lastMessage: incomingMessage,
         unreadCount: selected?.key === key || incomingMessage.senderId === myId ? 0 : Number(item.unreadCount || 0) + 1,
         mentionCount: selected?.key === key ? 0 : Number(item.mentionCount || 0),
-      } : item);
-      publishSummary(next);
-      return next;
-    });
+      } : item));
     if (selected?.key === key) {
       setMessages((previous) => mergeUnique(previous, incomingMessage));
       if (incomingMessage.senderId !== myId) void markRead(key);
@@ -204,11 +209,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   async function markRead(key) {
     try {
       await updateInternalConversationRead(key);
-      setConversations((previous) => {
-        const next = previous.map((item) => item.key === key ? { ...item, unreadCount: 0, mentionCount: 0 } : item);
-        publishSummary(next);
-        return next;
-      });
+      setConversations((previous) => previous.map((item) => item.key === key ? { ...item, unreadCount: 0, mentionCount: 0 } : item));
     } catch {
       // A mensagem continua disponível; a próxima atualização tentará sincronizar o contador.
     }
