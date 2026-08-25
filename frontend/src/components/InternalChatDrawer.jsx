@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AtSign, ChevronLeft, Circle, MessageCircle, Pin, PinOff, Reply, Search, Send, Sparkles, Users, X } from 'lucide-react';
+import { AtSign, ChevronLeft, Circle, Maximize2, MessageCircle, Minimize2, Pin, PinOff, Reply, Search, Send, Smile, Sparkles, Users, X } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   getInternalConversations,
@@ -23,7 +23,25 @@ const FILTERS = [
   { id: 'pinned', label: 'Fixadas', icon: Pin },
 ];
 const QUICK_REACTIONS = ['👍', '✅', '👀', '🎉'];
+const COMPOSER_EMOJIS = ['😀', '😊', '👍', '🙏', '✅', '👀', '🎉', '🚀', '📌', '⚠️', '❤️', '👏'];
 const FALLBACK_STATUSES = new Set([404, 405, 501]);
+const MIN_DRAWER_WIDTH = 360;
+const MAX_DRAWER_WIDTH = 680;
+
+function clampDrawerWidth(value) {
+  return Math.max(MIN_DRAWER_WIDTH, Math.min(MAX_DRAWER_WIDTH, Number(value) || 440));
+}
+
+function conversationTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const isToday = date.toDateString() === today.toDateString();
+  return isToday
+    ? date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
 
 function unsupported(error) {
   return FALLBACK_STATUSES.has(error?.response?.status);
@@ -61,7 +79,7 @@ function mentionedTeamIds(body, conversations) {
     .map((item) => item.target.id))];
 }
 
-export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMessage, initialConversationKey, onSummaryChange }) {
+export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMessage, initialConversationKey, onSummaryChange, isMobile = false, onWidthChange }) {
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -79,9 +97,50 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [threadLoading, setThreadLoading] = useState(false);
+  const [drawerWidth, setDrawerWidth] = useState(() => clampDrawerWidth(localStorage.getItem('internal-chat-width')));
+  const [expanded, setExpanded] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const bottomRef = useRef(null);
   const closeRef = useRef(null);
+  const inputRef = useRef(null);
   const myId = localStorage.getItem('userId');
+  const effectiveWidth = isMobile ? '100vw' : expanded ? Math.min(760, Math.max(440, window.innerWidth - 96)) : drawerWidth;
+
+  useEffect(() => {
+    if (typeof onWidthChange === 'function') onWidthChange(isOpen && !isMobile ? Number(effectiveWidth) : 0);
+  }, [effectiveWidth, isMobile, isOpen, onWidthChange]);
+
+  useEffect(() => {
+    if (!inputRef.current) return;
+    inputRef.current.style.height = 'auto';
+    inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 140)}px`;
+  }, [text, selected?.key]);
+
+  function beginResize(event) {
+    if (isMobile || expanded) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = drawerWidth;
+    const previousUserSelect = document.body.style.userSelect;
+    let lastWidth = startWidth;
+    document.body.style.userSelect = 'none';
+    const handleMove = (moveEvent) => {
+      lastWidth = clampDrawerWidth(startWidth + startX - moveEvent.clientX);
+      setDrawerWidth(lastWidth);
+    };
+    const handleEnd = () => {
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', handleEnd);
+      document.body.style.userSelect = previousUserSelect;
+      localStorage.setItem('internal-chat-width', String(lastWidth));
+    };
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', handleEnd, { once: true });
+  }
+
+  useEffect(() => {
+    localStorage.setItem('internal-chat-width', String(drawerWidth));
+  }, [drawerWidth]);
 
   useEffect(() => {
     if (advancedAvailable === false && messageType === 'note') setMessageType('message');
@@ -410,12 +469,14 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
   const renderedMessages = thread ? [thread.parent, ...(thread.replies || [])] : messages;
 
   return <>
-    <div style={s.backdrop} onClick={onClose} aria-hidden="true" />
-    <aside style={s.drawer} role="dialog" aria-modal="true" aria-label="Chat interno da equipe">
+    {isMobile ? <div style={s.backdrop} onClick={onClose} aria-hidden="true" /> : null}
+    <aside style={{ ...s.drawer, width: effectiveWidth }} role="dialog" aria-modal={isMobile} aria-label="Chat interno da equipe">
       <style>{chatCss}</style>
+      {!isMobile && !expanded ? <div role="separator" aria-orientation="vertical" aria-label="Redimensionar chat interno" aria-valuemin={MIN_DRAWER_WIDTH} aria-valuemax={MAX_DRAWER_WIDTH} aria-valuenow={drawerWidth} style={s.resizeHandle} onPointerDown={beginResize}><span /></div> : null}
       {!selected ? <div style={s.view}>
         <header style={s.header}>
           <div style={s.title}><Users size={18} /> Chat interno</div>
+          {!isMobile ? <button type="button" style={s.iconButton} onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Restaurar tamanho do chat' : 'Expandir chat'} title={expanded ? 'Restaurar tamanho' : 'Expandir'}>{expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button> : null}
           <button ref={closeRef} type="button" style={s.iconButton} onClick={onClose} aria-label="Fechar chat interno"><X size={20} /></button>
         </header>
         <div style={s.filters} role="tablist" aria-label="Atalhos do chat interno">
@@ -428,16 +489,17 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
         </div>
         <div style={s.searchRow}>
           <label style={s.searchBox}><Search size={16} /><span style={s.srOnly}>Buscar conversa</span><input style={s.searchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar colega ou equipe…" /></label>
-          <button type="button" style={s.newButton} onClick={() => setShowAll((value) => !value)}>{showAll ? 'Recentes' : 'Nova'}</button>
+          <button type="button" style={s.newButton} onClick={() => setShowAll((value) => !value)}>{showAll ? 'Ver recentes' : '+ Nova conversa'}</button>
         </div>
         <div style={s.list} aria-live="polite" aria-busy={loading}>
           {!loading && error ? <div style={s.errorState}><span>{error}</span><button type="button" style={s.retry} onClick={() => loadConversations().catch(() => {})}>Tentar novamente</button></div> : null}
           {loading ? <div style={s.empty}>Carregando conversas…</div> : displayed.map((conversation) => {
             const isOnline = conversation.kind === 'direct' && onlineUserIds.includes(conversation.target.id);
-            return <div key={conversation.key} style={s.row}>
+            const lastMessageTime = conversationTime(conversation.lastMessage?.createdAt);
+            return <div key={conversation.key} style={{ ...s.row, ...(conversation.unreadCount ? s.rowUnread : {}) }}>
               <button type="button" style={s.rowMain} onClick={() => selectConversation(conversation)} aria-label={`Abrir ${conversation.target.name}${conversation.unreadCount ? `, ${conversation.unreadCount} não lidas` : ''}`}>
                 <span style={s.avatar}>{conversation.kind === 'team' ? <Users size={16} /> : conversation.target.name?.[0]?.toUpperCase()}</span>
-                <span style={s.rowInfo}><span style={s.nameLine}>{conversation.target.name}<span style={{ ...s.presence, background: isOnline ? 'var(--success)' : 'var(--text-dim)' }} title={isOnline ? 'Online' : 'Offline'} /></span><span style={s.preview}>{conversation.lastMessage?.body || 'Iniciar conversa'}</span></span>
+                <span style={s.rowInfo}><span style={s.nameLine}><span style={s.nameText}>{conversation.target.name}</span><span style={{ ...s.presence, background: isOnline ? 'var(--success)' : 'var(--text-dim)' }} title={isOnline ? 'Online' : 'Offline'} />{lastMessageTime ? <time style={s.rowTime}>{lastMessageTime}</time> : null}</span><span style={{ ...s.preview, ...(conversation.unreadCount ? s.previewUnread : {}) }}>{conversation.lastMessage?.body || 'Iniciar conversa'}</span></span>
                 {conversation.mentionCount > 0 ? <span style={s.mention}>@{conversation.mentionCount}</span> : null}
                 {conversation.unreadCount > 0 ? <span style={s.unread}>{conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}</span> : null}
               </button>
@@ -451,6 +513,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
         <header style={s.header}>
           <button type="button" style={s.iconButton} onClick={() => thread ? setThread(null) : setSelected(null)} aria-label={thread ? 'Voltar à conversa' : 'Voltar às conversas'}><ChevronLeft size={20} /></button>
           <div style={s.selectedIdentity}><span style={s.avatar}>{selected.kind === 'team' ? <Users size={16} /> : selected.target.name?.[0]?.toUpperCase()}</span><span><strong style={s.selectedName}>{selected.target.name}</strong><small style={s.status}>{selected.kind === 'team' ? 'Conversa de equipe' : viewing ? 'Também está nesta conversa' : online ? 'Online agora' : 'Offline'}</small></span></div>
+          {!isMobile ? <button type="button" style={s.iconButton} onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Restaurar tamanho do chat' : 'Expandir chat'} title={expanded ? 'Restaurar tamanho' : 'Expandir'}>{expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button> : null}
           <button type="button" style={s.iconButton} onClick={onClose} aria-label="Fechar chat interno"><X size={20} /></button>
         </header>
         <div style={s.messages} aria-live="polite" aria-busy={loading}>
@@ -466,7 +529,11 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
           </div>
           <form onSubmit={handleSend} style={s.composer}>
             {mentionOptions.length ? <div style={s.mentionMenu} role="listbox" aria-label="Sugestões de menção">{mentionOptions.map((conversation) => <button key={conversation.key} type="button" style={s.mentionOption} onClick={() => selectMention(conversation)}><span style={s.mentionAvatar}>{conversation.kind === 'team' ? <Users size={13} /> : conversation.target.name?.[0]?.toUpperCase()}</span><span><strong>{conversation.target.name}</strong><small>{conversation.kind === 'team' ? 'Equipe' : 'Pessoa'}</small></span></button>)}</div> : null}
-            <textarea rows={1} style={{ ...s.input, ...(messageType === 'note' ? s.noteInput : {}) }} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleSend(); } }} placeholder={messageType === 'note' ? 'Escreva uma nota interna…' : 'Mensagem… Use @nome para mencionar'} aria-label={`${messageType === 'note' ? 'Nota interna' : 'Mensagem'} para ${selected.target.name}`} />
+            <div style={s.emojiWrap}>
+              <button type="button" style={s.emojiButton} onClick={() => setEmojiOpen((value) => !value)} aria-expanded={emojiOpen} aria-label="Escolher emoji"><Smile size={18} /></button>
+              {emojiOpen ? <div style={s.emojiPicker} aria-label="Emojis rápidos">{COMPOSER_EMOJIS.map((emoji) => <button key={emoji} type="button" style={s.emojiPickerButton} onClick={() => { setText((previous) => `${previous}${emoji}`); setEmojiOpen(false); inputRef.current?.focus(); }}>{emoji}</button>)}</div> : null}
+            </div>
+            <textarea ref={inputRef} rows={1} style={{ ...s.input, ...(messageType === 'note' ? s.noteInput : {}) }} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleSend(); } }} placeholder={messageType === 'note' ? 'Escreva uma nota interna…' : 'Mensagem… Use @nome para mencionar'} aria-label={`${messageType === 'note' ? 'Nota interna' : 'Mensagem'} para ${selected.target.name}`} />
             <ActionButton type="submit" loading={sending} disabled={!text.trim()} style={s.send} aria-label="Enviar mensagem"><Send size={16} /></ActionButton>
           </form>
           <span style={s.shortcut}>Enter envia · Shift + Enter quebra linha</span>
@@ -488,27 +555,32 @@ const chatCss = `
 
 const s = {
   backdrop: { position: 'fixed', inset: 0, zIndex: 1040, background: 'var(--overlay-bg)', backdropFilter: 'blur(2px)' },
-  drawer: { position: 'fixed', inset: '0 0 0 auto', zIndex: 1050, width: 'min(440px, 100vw)', background: 'var(--bg-base)', boxShadow: '-8px 0 32px rgba(0,0,0,.22)' },
+  drawer: { position: 'fixed', inset: '0 0 0 auto', zIndex: 1050, maxWidth: '100vw', background: 'var(--bg-base)', borderLeft: '1px solid var(--border-color)', boxShadow: '-8px 0 32px rgba(0,0,0,.18)' },
+  resizeHandle: { position: 'absolute', inset: '0 auto 0 -5px', zIndex: 3, width: '10px', display: 'grid', placeItems: 'center', cursor: 'col-resize', touchAction: 'none' },
   view: { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' },
   header: { minHeight: '68px', padding: '.8rem 1rem', display: 'flex', alignItems: 'center', gap: '.7rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-surface)' },
   title: { flex: 1, display: 'flex', alignItems: 'center', gap: '.55rem', color: 'var(--text-main)', fontWeight: 800 },
   iconButton: { width: '40px', height: '40px', display: 'grid', placeItems: 'center', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' },
-  filters: { padding: '.75rem 1rem .4rem', display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '.45rem' },
-  filter: { minHeight: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.35rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-surface)', color: 'var(--text-muted)', font: 'inherit', fontSize: '.76rem', fontWeight: 700, cursor: 'pointer' },
+  filters: { padding: '.65rem 1rem .35rem', display: 'flex', gap: '.4rem', overflowX: 'auto' },
+  filter: { minHeight: '34px', padding: '0 .65rem', flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.35rem', border: '1px solid var(--border-color)', borderRadius: '999px', background: 'var(--bg-surface)', color: 'var(--text-muted)', font: 'inherit', fontSize: '.72rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' },
   filterActive: { borderColor: 'var(--accent-border)', background: 'var(--accent-light)', color: 'var(--accent)' },
   count: { minWidth: '20px', height: '20px', padding: '0 5px', display: 'grid', placeItems: 'center', borderRadius: '999px', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '.66rem' },
   searchRow: { padding: '.5rem 1rem .7rem', display: 'flex', gap: '.5rem' },
   searchBox: { flex: 1, minWidth: 0, height: '40px', padding: '0 .7rem', display: 'flex', alignItems: 'center', gap: '.5rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-panel)', color: 'var(--text-dim)' },
   searchInput: { flex: 1, minWidth: 0, border: 0, outline: 0, background: 'transparent', color: 'var(--text-main)', font: 'inherit' },
-  newButton: { minWidth: '82px', border: '1px solid var(--accent-border)', borderRadius: '10px', background: 'var(--accent-light)', color: 'var(--accent)', font: 'inherit', fontWeight: 800, cursor: 'pointer' },
+  newButton: { minWidth: '116px', padding: '0 .65rem', border: '1px solid var(--accent-border)', borderRadius: '10px', background: 'var(--accent-light)', color: 'var(--accent)', font: 'inherit', fontSize: '.72rem', fontWeight: 800, cursor: 'pointer' },
   list: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '.35rem 1rem max(1rem, env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: '.5rem' },
   row: { display: 'flex', alignItems: 'stretch', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-surface)', overflow: 'hidden' },
+  rowUnread: { borderColor: 'var(--accent-border)', background: 'var(--accent-light)' },
   rowMain: { flex: 1, minWidth: 0, padding: '.7rem', display: 'flex', alignItems: 'center', gap: '.7rem', border: 0, background: 'transparent', color: 'var(--text-main)', textAlign: 'left', font: 'inherit', cursor: 'pointer' },
   avatar: { width: '38px', height: '38px', flexShrink: 0, display: 'inline-grid', placeItems: 'center', borderRadius: '11px', background: 'var(--accent)', color: 'var(--text-inverse)', fontWeight: 800 },
   rowInfo: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' },
-  nameLine: { display: 'flex', alignItems: 'center', gap: '.35rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.88rem', fontWeight: 750 },
+  nameLine: { display: 'flex', alignItems: 'center', gap: '.35rem', minWidth: 0, fontSize: '.88rem', fontWeight: 750 },
+  nameText: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  rowTime: { marginLeft: 'auto', flexShrink: 0, color: 'var(--text-dim)', fontSize: '.62rem', fontWeight: 600 },
   presence: { width: '7px', height: '7px', flexShrink: 0, borderRadius: '50%' },
   preview: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-dim)', fontSize: '.72rem' },
+  previewUnread: { color: 'var(--text-main)', fontWeight: 700 },
   mention: { color: 'var(--danger)', fontSize: '.7rem', fontWeight: 800 },
   unread: { minWidth: '22px', height: '22px', padding: '0 5px', display: 'grid', placeItems: 'center', borderRadius: '999px', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '.68rem', fontWeight: 800 },
   pin: { width: '38px', border: 0, borderLeft: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' },
@@ -533,8 +605,12 @@ const s = {
   messageAction: { width: '24px', height: '24px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' },
   emojiAction: { width: '24px', height: '24px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '50%', background: 'transparent', cursor: 'pointer', fontSize: '.7rem' },
   composerArea: { position: 'relative', padding: '.55rem 1rem max(.65rem, env(safe-area-inset-bottom))', borderTop: '1px solid var(--border-color)', background: 'var(--bg-surface)' },
-  composer: { position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '.55rem' },
-  input: { flex: 1, minHeight: '42px', maxHeight: '120px', padding: '.65rem .8rem', resize: 'vertical', border: '1px solid var(--border-color)', borderRadius: '12px', outline: 0, background: 'var(--bg-panel)', color: 'var(--text-main)', font: 'inherit', lineHeight: 1.4 },
+  composer: { position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '.45rem' },
+  input: { flex: 1, minHeight: '42px', maxHeight: '140px', padding: '.65rem .8rem', resize: 'none', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '12px', outline: 0, background: 'var(--bg-panel)', color: 'var(--text-main)', font: 'inherit', lineHeight: 1.4 },
+  emojiWrap: { position: 'relative' },
+  emojiButton: { width: '42px', height: '42px', display: 'grid', placeItems: 'center', border: '1px solid var(--border-color)', borderRadius: '11px', background: 'var(--bg-panel)', color: 'var(--text-muted)', cursor: 'pointer' },
+  emojiPicker: { position: 'absolute', left: 0, bottom: 'calc(100% + 7px)', zIndex: 5, width: '210px', padding: '.45rem', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '.2rem', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-panel)', boxShadow: 'var(--shadow-lg)' },
+  emojiPickerButton: { width: '30px', height: '30px', display: 'grid', placeItems: 'center', padding: 0, border: 0, borderRadius: '7px', background: 'transparent', cursor: 'pointer', fontSize: '1rem' },
   noteInput: { background: 'var(--warning-light)', borderColor: 'var(--warning-border)' },
   send: { width: '42px', height: '42px', minWidth: '42px', padding: 0, display: 'grid', placeItems: 'center', borderRadius: '50%' },
   typeTabs: { display: 'flex', gap: '.25rem', marginBottom: '.4rem' },

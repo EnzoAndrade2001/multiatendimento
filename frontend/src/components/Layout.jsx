@@ -52,6 +52,7 @@ export default function Layout() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [internalChatWidth, setInternalChatWidth] = useState(0);
   const [internalSocket, setInternalSocket] = useState(null);
   const [incomingInternalMessage, setIncomingInternalMessage] = useState(null);
   const [initialInternalConversationKey, setInitialInternalConversationKey] = useState(null);
@@ -310,7 +311,7 @@ export default function Layout() {
   }
 
   return (
-    <div style={styles.root} className="app-layout-root">
+    <div style={{ ...styles.root, paddingRight: !isMobile && isChatOpen ? `${internalChatWidth}px` : 0 }} className="app-layout-root">
       <style>{`
         .desktop-nav-scroll::-webkit-scrollbar {
           display: none;
@@ -527,6 +528,8 @@ export default function Layout() {
           incomingMessage={incomingInternalMessage}
           initialConversationKey={initialInternalConversationKey}
           onSummaryChange={setInternalSummary}
+          isMobile={isMobile}
+          onWidthChange={setInternalChatWidth}
         />
       ) : null}
       <ToastContainer />
@@ -535,7 +538,7 @@ export default function Layout() {
 }
 
 const styles = {
-  root: { display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-base)' },
+  root: { display: 'flex', flexDirection: 'column', height: '100vh', boxSizing: 'border-box', background: 'var(--bg-base)', transition: 'padding-right .2s ease' },
   nav: {
     position: 'relative',
     zIndex: 200,
