@@ -26,7 +26,7 @@ import {
   X,
   BarChart2,
 } from 'lucide-react';
-import { getMe, getMediaUrl, getInstances } from '../services/api';
+import { getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ToastContainer from './ToastContainer';
 import InternalChatDrawer from './InternalChatDrawer';
@@ -52,12 +52,21 @@ export default function Layout() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [internalSocket, setInternalSocket] = useState(null);
+  const [incomingInternalMessage, setIncomingInternalMessage] = useState(null);
+  const [initialInternalConversationKey, setInitialInternalConversationKey] = useState(null);
+  const [internalSummary, setInternalSummary] = useState({ unread: 0, mentions: 0 });
   const audioRef = React.useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3'));
+  const notificationTimerRef = React.useRef(null);
+  const isChatOpenRef = React.useRef(false);
+  const seenInternalEventsRef = React.useRef(new Set());
+  const seenMentionEventsRef = React.useRef(new Set());
   const desktopMenuRef = React.useRef(null);
   const role = localStorage.getItem('role')?.toLowerCase();
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   const [instances, setInstances] = useState([]);
   const isMobile = useIsMobile();
+  const canUseInternalChat = can('internal_chat.view');
 
   function getNotificationBody(message) {
     const text = message?.body?.trim();
@@ -85,6 +94,17 @@ export default function Layout() {
   }, [theme]);
 
   React.useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+  }, [isChatOpen]);
+
+  React.useEffect(() => {
+    const baseTitle = 'Multiatendimento';
+    const pending = Number(internalSummary.unread || 0);
+    document.title = pending > 0 ? `(${pending > 99 ? '99+' : pending}) ${baseTitle}` : baseTitle;
+    return () => { document.title = baseTitle; };
+  }, [internalSummary.unread]);
+
+  React.useEffect(() => {
     if (typeof window !== 'undefined' && window.Notification && Notification.permission === 'default') {
       Notification.requestPermission();
     }
@@ -99,11 +119,24 @@ export default function Layout() {
       })
       .catch(() => {});
 
+    if (canUseInternalChat) {
+      getInternalConversations()
+        .then(({ data }) => {
+          const conversations = Array.isArray(data?.conversations) ? data.conversations : [];
+          setInternalSummary({
+            unread: conversations.reduce((sum, item) => sum + Number(item.unreadCount || 0), 0),
+            mentions: conversations.reduce((sum, item) => sum + Number(item.mentionCount || 0), 0),
+          });
+        })
+        .catch(() => {});
+    }
+
     const token = localStorage.getItem('token');
     const socket = io(SOCKET_URL, {
       auth: { token },
       reconnectionDelayMax: 10000,
     });
+    setInternalSocket(socket);
 
     getInstances()
       .then((res) => {
@@ -119,7 +152,8 @@ export default function Layout() {
       const notificationBody = getNotificationBody(message);
       audioRef.current.play().catch(() => {});
       setNotification({ name: contact?.name || contact?.phone || 'Contato', body: notificationBody });
-      setTimeout(() => setNotification(null), 5000);
+      window.clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = window.setTimeout(() => setNotification(null), 5000);
 
       if (typeof window !== 'undefined' && window.Notification && Notification.permission === 'granted') {
         new Notification(`Nova mensagem de ${contact?.name || contact?.phone || 'Contato'}`, {
@@ -131,19 +165,54 @@ export default function Layout() {
 
     socket.on('new_internal', (msg) => {
       const myId = localStorage.getItem('userId');
+      if (!msg?.id || seenInternalEventsRef.current.has(msg.id)) return;
+      seenInternalEventsRef.current.add(msg.id);
+      if (seenInternalEventsRef.current.size > 500) {
+        const first = seenInternalEventsRef.current.values().next().value;
+        seenInternalEventsRef.current.delete(first);
+      }
+
+      setIncomingInternalMessage(msg);
       if (msg.senderId === myId) return;
+
+      setInternalSummary((previous) => ({ ...previous, unread: Number(previous.unread || 0) + 1 }));
+
+      if (isChatOpenRef.current) return;
 
       audioRef.current.play().catch(() => {});
       setNotification({
         name: `Equipe: ${msg.sender?.name || 'Colega'}`,
         body: msg.body,
         isInternal: true,
+        conversationKey: msg.teamId
+          ? `team:${msg.teamId}`
+          : `direct:${msg.senderId}`,
       });
-      setTimeout(() => setNotification(null), 5000);
+      window.clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = window.setTimeout(() => setNotification(null), 5000);
 
       if (typeof window !== 'undefined' && window.Notification && Notification.permission === 'granted') {
-        new Notification(`Equipe: ${msg.sender?.name || 'Colega'}`, { body: msg.body });
+        const systemNotification = new Notification(`Equipe: ${msg.sender?.name || 'Colega'}`, { body: msg.body });
+        systemNotification.onclick = () => {
+          window.focus();
+          setInitialInternalConversationKey(msg.teamId ? `team:${msg.teamId}` : `direct:${msg.senderId}`);
+          setIsChatOpen(true);
+          systemNotification.close();
+        };
       }
+    });
+
+    socket.on('internal_mention', ({ message, mentionedUserId, mentionedTeamId } = {}) => {
+      const myId = localStorage.getItem('userId');
+      if (!message?.id || message.senderId === myId) return;
+      const mentionKey = `${message.id}:${mentionedUserId || mentionedTeamId || myId}`;
+      if (seenMentionEventsRef.current.has(mentionKey)) return;
+      seenMentionEventsRef.current.add(mentionKey);
+      if (seenMentionEventsRef.current.size > 500) {
+        const first = seenMentionEventsRef.current.values().next().value;
+        seenMentionEventsRef.current.delete(first);
+      }
+      setInternalSummary((previous) => ({ ...previous, mentions: Number(previous.mentions || 0) + 1 }));
     });
 
     socket.on('connection_update', ({ instance, data }) => {
@@ -160,8 +229,12 @@ export default function Layout() {
       );
     });
 
-    return () => socket.disconnect();
-  }, []);
+    return () => {
+      window.clearTimeout(notificationTimerRef.current);
+      setInternalSocket(null);
+      socket.disconnect();
+    };
+  }, [canUseInternalChat]);
 
   React.useEffect(() => {
     function handlePointerDown(event) {
@@ -318,6 +391,27 @@ export default function Layout() {
               <kbd style={styles.commandKey}>Ctrl K</kbd>
             </button>
           ) : null}
+          {canUseInternalChat ? (
+            <button
+              type="button"
+              onClick={() => {
+                setInitialInternalConversationKey(null);
+                setIsChatOpen(true);
+              }}
+              style={styles.internalChatButton}
+              title="Abrir chat interno"
+              aria-label={`Abrir chat interno${internalSummary.unread ? `, ${internalSummary.unread} mensagens não lidas` : ''}`}
+            >
+              <MessageCircle size={18} />
+              {!isMobile ? <span>Equipe</span> : null}
+              {internalSummary.unread > 0 ? (
+                <span style={styles.internalChatBadge} aria-hidden="true">
+                  {internalSummary.unread > 99 ? '99+' : internalSummary.unread}
+                </span>
+              ) : null}
+              {internalSummary.mentions > 0 ? <span style={styles.mentionDot} title={`${internalSummary.mentions} menções pendentes`}>@</span> : null}
+            </button>
+          ) : null}
           <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={styles.themeBtn} title="Alternar tema" aria-label="Alternar tema">
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
@@ -374,6 +468,7 @@ export default function Layout() {
           style={{ ...styles.toast, right: isMobile ? 'var(--space-4)' : 'var(--space-8)', left: isMobile ? 'var(--space-4)' : 'auto' }}
           onClick={() => {
             if (notification.isInternal) {
+              setInitialInternalConversationKey(notification.conversationKey || null);
               setIsChatOpen(true);
             } else {
               navigate('/inbox');
@@ -421,7 +516,19 @@ export default function Layout() {
         </div>
       ) : null}
 
-      {can('internal_chat.view') ? <InternalChatDrawer isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} /> : null}
+      {canUseInternalChat ? (
+        <InternalChatDrawer
+          isOpen={isChatOpen}
+          onClose={() => {
+            setIsChatOpen(false);
+            setInitialInternalConversationKey(null);
+          }}
+          socket={internalSocket}
+          incomingMessage={incomingInternalMessage}
+          initialConversationKey={initialInternalConversationKey}
+          onSummaryChange={setInternalSummary}
+        />
+      ) : null}
       <ToastContainer />
     </div>
   );
@@ -547,6 +654,58 @@ const styles = {
     boxShadow: 'inset 0 0 0 1px var(--accent-border)',
   },
   rightActions: { display: 'flex', alignItems: 'center', gap: '0.8rem', flexShrink: 0 },
+  internalChatButton: {
+    position: 'relative',
+    minWidth: '38px',
+    height: '38px',
+    padding: '0 0.7rem',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.45rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '12px',
+    background: 'var(--bg-surface)',
+    color: 'var(--text-muted)',
+    fontFamily: 'inherit',
+    fontSize: '0.8rem',
+    fontWeight: 750,
+    cursor: 'pointer',
+  },
+  internalChatBadge: {
+    position: 'absolute',
+    top: '-7px',
+    right: '-7px',
+    minWidth: '20px',
+    height: '20px',
+    padding: '0 5px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '999px',
+    border: '2px solid var(--bg-panel)',
+    background: 'var(--danger)',
+    color: '#fff',
+    fontSize: '0.64rem',
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+  mentionDot: {
+    position: 'absolute',
+    bottom: '-6px',
+    right: '-6px',
+    width: '18px',
+    height: '18px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '50%',
+    border: '2px solid var(--bg-panel)',
+    background: 'var(--accent)',
+    color: 'var(--text-inverse)',
+    fontSize: '0.65rem',
+    fontWeight: 900,
+  },
   userIdentity: {
     display: 'inline-flex',
     alignItems: 'center',

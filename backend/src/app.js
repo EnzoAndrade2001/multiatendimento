@@ -125,6 +125,41 @@ app.use('/api/media', mediaRoutes);
 const jwt = require('jsonwebtoken');
 const prisma = require('./lib/prisma');
 const { resolveUserAccess, hasPermission } = require('./auth/permissions');
+const onlineUsersByTenant = new Map();
+const internalViewersByTenant = new Map();
+
+function changeCounter(container, key, delta) {
+  const next = Math.max(0, Number(container.get(key) || 0) + delta);
+  if (next === 0) container.delete(key);
+  else container.set(key, next);
+}
+
+function emitInternalPresence(tenantId) {
+  const users = onlineUsersByTenant.get(tenantId) || new Map();
+  io.to(tenantId).emit('internal_presence', { onlineUserIds: [...users.keys()] });
+}
+
+function internalConversationKey(left, right) {
+  return [String(left), String(right)].sort().join(':');
+}
+
+function leaveInternalConversation(socket) {
+  const { tenantId, userId } = socket.user;
+  const peerId = socket.internalViewingPeerId;
+  if (!peerId) return;
+  const tenantViews = internalViewersByTenant.get(tenantId);
+  const conversationKey = internalConversationKey(userId, peerId);
+  const viewers = tenantViews?.get(conversationKey);
+  if (viewers) {
+    changeCounter(viewers, userId, -1);
+    if (!viewers.size) tenantViews.delete(conversationKey);
+    io.to(tenantId).emit('internal_viewers', {
+      conversationKey,
+      viewerUserIds: [...viewers.keys()]
+    });
+  }
+  socket.internalViewingPeerId = null;
+}
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.query.token;
@@ -158,15 +193,47 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  const { tenantId } = socket.user;
+  const { tenantId, userId } = socket.user;
   socket.join(tenantId);
-  socket.on('disconnect', (reason) => {
-    console.log(`[socket] usuário ${socket.user.userId} DESCONECTADO do tenant ${tenantId}. Motivo: ${reason}`);
+  socket.join(`user:${userId}`);
+  prisma.teamMember.findMany({
+    where: { userId, team: { tenantId } }, select: { teamId: true },
+  }).then((memberships) => {
+    memberships.forEach(({ teamId }) => socket.join(`team:${teamId}`));
+  }).catch((error) => {
+    console.warn(`[socket] falha ao carregar salas internas: ${error.message}`);
   });
 
-  socket.on('send_internal', (message) => {
+  if (!onlineUsersByTenant.has(tenantId)) onlineUsersByTenant.set(tenantId, new Map());
+  changeCounter(onlineUsersByTenant.get(tenantId), userId, 1);
+  emitInternalPresence(tenantId);
+
+  socket.on('internal_viewing', ({ peerId } = {}) => {
     if (!hasPermission(socket.user, 'internal_chat.view')) return;
-    socket.to(tenantId).emit('new_internal', message);
+    leaveInternalConversation(socket);
+    if (!peerId || peerId === userId) return;
+
+    socket.internalViewingPeerId = peerId;
+    if (!internalViewersByTenant.has(tenantId)) internalViewersByTenant.set(tenantId, new Map());
+    const tenantViews = internalViewersByTenant.get(tenantId);
+    const conversationKey = internalConversationKey(userId, peerId);
+    if (!tenantViews.has(conversationKey)) tenantViews.set(conversationKey, new Map());
+    changeCounter(tenantViews.get(conversationKey), userId, 1);
+    io.to(tenantId).emit('internal_viewers', {
+      conversationKey,
+      viewerUserIds: [...tenantViews.get(conversationKey).keys()]
+    });
+  });
+
+  socket.on('disconnect', (reason) => {
+    leaveInternalConversation(socket);
+    const onlineUsers = onlineUsersByTenant.get(tenantId);
+    if (onlineUsers) {
+      changeCounter(onlineUsers, userId, -1);
+      if (!onlineUsers.size) onlineUsersByTenant.delete(tenantId);
+    }
+    emitInternalPresence(tenantId);
+    console.log(`[socket] usuário ${userId} DESCONECTADO do tenant ${tenantId}. Motivo: ${reason}`);
   });
 });
 

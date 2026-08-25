@@ -51,6 +51,11 @@ async function remove(req, res) {
     const team = await prisma.team.findFirst({ where: { id, tenantId: req.user.tenantId } });
     if (!team) return res.status(404).json({ error: 'Equipe não encontrada' });
 
+    const messageCount = await prisma.internalMessage.count({ where: { tenantId: req.user.tenantId, teamId: id } });
+    if (messageCount > 0) {
+      return res.status(409).json({ error: 'Equipe possui histórico no chat interno e não pode ser excluída.' });
+    }
+
     await prisma.teamMember.deleteMany({ where: { teamId: id } });
     await prisma.team.delete({ where: { id } });
     res.sendStatus(204);

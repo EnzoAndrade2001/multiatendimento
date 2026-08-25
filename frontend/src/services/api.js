@@ -37,7 +37,25 @@ export const deleteScheduledMessage = (id) => api.delete(`/scheduled-messages/${
 
 // Chat Interno
 export const getInternalMessages = (receiverId) => api.get(`/internal-messages?receiverId=${receiverId}`);
+export const getInternalConversations = () => api.get('/internal-messages/conversations');
 export const sendInternalMessage = (data) => api.post('/internal-messages', data);
+export const getInternalConversationMessages = (conversationKey, params = {}) => (
+  api.get(`/internal-messages/conversations/${encodeURIComponent(conversationKey)}/messages`, { params })
+);
+export const updateInternalConversationRead = (conversationKey, data = {}) => (
+  api.patch(`/internal-messages/conversations/${encodeURIComponent(conversationKey)}/read`, data)
+);
+export const updateInternalConversationPin = (conversationKey, pinned) => (
+  api.patch(`/internal-messages/conversations/${encodeURIComponent(conversationKey)}/pin`, { pinned })
+);
+export const sendInternalConversationMessage = (data) => api.post('/internal-messages/messages', data);
+export const getInternalMessageThread = (messageId) => api.get(`/internal-messages/messages/${messageId}/thread`);
+export const addInternalMessageReaction = (messageId, emoji) => (
+  api.post(`/internal-messages/messages/${messageId}/reactions`, { emoji })
+);
+export const removeInternalMessageReaction = (messageId, emoji) => (
+  api.delete(`/internal-messages/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`)
+);
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');

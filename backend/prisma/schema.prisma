@@ -47,6 +47,9 @@ model Tenant {
   privacyRetentionPolicy PrivacyRetentionPolicy?
   privacyPolicies   PrivacyPolicy[]
   privacyAcceptances PrivacyAcceptance[]
+  internalMessageReads InternalMessageRead[]
+  internalMessageReactions InternalMessageReaction[]
+  internalConversationStates InternalConversationState[]
 }
 
 model TenantSettings {
@@ -131,6 +134,9 @@ model User {
   serviceOrders            ServiceOrder[]
   closedOrders             ServiceOrder[]    @relation("ClosedBy")
   ticketStates             UserTicketState[]
+  internalMessageReads     InternalMessageRead[]
+  internalMessageReactions InternalMessageReaction[]
+  internalConversationStates InternalConversationState[]
 
   @@unique([tenantId, email])
 }
@@ -142,6 +148,7 @@ model Team {
   tenant   Tenant       @relation(fields: [tenantId], references: [id])
   members  TeamMember[]
   tickets  Ticket[]
+  internalMessages InternalMessage[]
 }
 
 model TeamMember {
@@ -400,11 +407,72 @@ model InternalMessage {
   tenantId   String
   senderId   String
   receiverId String?
+  teamId     String?
+  type       String   @default("message")
   body       String
+  replyToId  String?
+  mentionUserIds Json?
+  mentionTeamIds Json?
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
   receiver   User?    @relation("InternalReceiver", fields: [receiverId], references: [id])
   sender     User     @relation("InternalSender", fields: [senderId], references: [id])
   tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  team       Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  replyTo    InternalMessage? @relation("InternalMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies    InternalMessage[] @relation("InternalMessageReplies")
+  reactions  InternalMessageReaction[]
+  reads      InternalMessageRead[]
+
+  @@index([tenantId, receiverId, createdAt])
+  @@index([tenantId, teamId, createdAt])
+  @@index([replyToId, createdAt])
+}
+
+model InternalMessageReaction {
+  id        String   @id @default(cuid())
+  tenantId  String
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  message   InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([tenantId, messageId])
+}
+
+model InternalMessageRead {
+  id        String   @id @default(cuid())
+  tenantId  String
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  message   InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([tenantId, userId, readAt])
+}
+
+model InternalConversationState {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String
+  conversationKey String
+  pinned          Boolean  @default(false)
+  unreadCount     Int      @default(0)
+  readAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, conversationKey])
+  @@index([tenantId, userId, pinned, updatedAt])
 }
 
 model KnowledgeLog {
