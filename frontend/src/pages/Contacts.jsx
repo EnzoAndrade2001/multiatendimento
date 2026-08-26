@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
-import { getContacts, createContact, createTicket, importContacts } from '../services/api';
-import { Edit2, MessageSquare, Plus, Search, BookUser, Upload, Printer } from 'lucide-react';
+import { getContacts, createContact, createTicket, importContacts, linkContactToCrm } from '../services/api';
+import { Edit2, Link2, MessageSquare, Plus, Search, BookUser, Upload } from 'lucide-react';
 import ContactProfileModal from '../components/ContactProfileModal';
+import LinkContactModal from '../components/LinkContactModal';
 import { toast } from '../utils/toast';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -16,26 +17,10 @@ export default function Contacts() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newContact, setNewContact] = useState({
-    name: '',
-    phone: '',
-    fantasyName: '',
-    email: '',
-    document: '',
-    address: '',
-    city: '',
-    state: '',
-    zipCode: '',
-    equipment: {
-      manufacturer: '',
-      model: '',
-      serialNumber: '',
-      type: '',
-      sector: '',
-    },
-  });
+  const [newContact, setNewContact] = useState({ name: '', phone: '' });
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedContact, setSelectedContact] = useState(null);
+  const [linkingContact, setLinkingContact] = useState(null);
   const [pendingChatContact, setPendingChatContact] = useState(null);
   const [openingChat, setOpeningChat] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -55,7 +40,7 @@ export default function Contacts() {
 
   async function loadContacts() {
     try {
-      const response = await getContacts(search, { withoutDocument: true });
+      const response = await getContacts(search, { withoutCrm: true });
       setContacts(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.error('Erro ao carregar contatos:', err);
@@ -66,31 +51,17 @@ export default function Contacts() {
   }
 
   async function handleCreate() {
-    if (!newContact.name || !newContact.phone) return toast.error('Preencha nome e telefone do cliente');
+    if (!newContact.name || !newContact.phone) return toast.error('Preencha o nome e o telefone do contato');
     if (creating) return;
     setCreating(true);
     try {
-      await createContact({
-        ...newContact,
-        cpfCnpj: newContact.document,
-      });
+      await createContact({ name: newContact.name.trim(), phone: newContact.phone.trim() });
       setShowAddModal(false);
-      setNewContact({
-        name: '',
-        phone: '',
-        fantasyName: '',
-        email: '',
-        document: '',
-        address: '',
-        city: '',
-        state: '',
-        zipCode: '',
-        equipment: { manufacturer: '', model: '', serialNumber: '', type: '', sector: '' },
-      });
+      setNewContact({ name: '', phone: '' });
       loadContacts();
-      toast.success('Cliente cadastrado com sucesso');
+      toast.success('Contato cadastrado com sucesso');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erro ao cadastrar cliente');
+      toast.error(err.response?.data?.error || 'Erro ao cadastrar contato');
     } finally {
       setCreating(false);
     }
@@ -99,6 +70,18 @@ export default function Contacts() {
   function openProfileModal(contact) {
     setSelectedContact(contact);
     setShowProfileModal(true);
+  }
+
+  async function handleLinkCrm(crmCustomerId) {
+    if (!linkingContact || !crmCustomerId) return;
+    try {
+      await linkContactToCrm(linkingContact.id, crmCustomerId);
+      setLinkingContact(null);
+      await loadContacts();
+      toast.success('Contato vinculado ao CRM com sucesso');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao vincular contato ao CRM');
+    }
   }
 
   async function handleImportExcel(e) {
@@ -155,13 +138,14 @@ export default function Contacts() {
   const contactCards = useMemo(
     () =>
       contacts.map((contact) => {
-        const initials = (contact.name || '?')
+        const contactName = contact.name || contact.fantasyName || '';
+        const initials = (contactName || '?')
           .split(' ')
           .map((word) => word[0])
           .join('')
           .slice(0, 2)
           .toUpperCase();
-        const hue = (contact.name || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
+        const hue = contactName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
         const hasActiveTicket = contact.tickets?.some((ticket) => ticket.status === 'open');
         const hasPendingTicket = contact.tickets?.some((ticket) => ticket.status === 'pending');
         const statusColor = hasActiveTicket ? '#48bb78' : hasPendingTicket ? '#D4AF37' : 'var(--text-dim)';
@@ -172,26 +156,25 @@ export default function Contacts() {
             <div style={s.cardHeader}>
               <div style={{ ...s.avatar, background: `hsl(${hue}, 45%, 35%)` }}>{initials}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={s.cardName}>{contact.name || 'Sem nome'}</div>
-                {contact.fantasyName ? <div style={s.cardFantasy}>{contact.fantasyName}</div> : null}
-                <div style={s.cardPhone}>{contact.phone || 'Sem número'}</div>
+                <div style={s.cardName}>{contact.name || contact.fantasyName || 'Sem nome'}</div>
+                <div style={s.cardPhone}>{contact.phone || contact.whatsapp || 'Sem número'}</div>
               </div>
-              <button onClick={() => openProfileModal(contact)} style={s.editBtn} title="Editar cliente" aria-label="Editar cliente">
+              <button onClick={() => openProfileModal(contact)} style={s.editBtn} title="Editar contato" aria-label="Editar contato">
                 <Edit2 size={16} />
               </button>
             </div>
 
-            {statusLabel || contact.email ? (
-              <div style={s.cardMeta}>
-                {statusLabel ? (
-                  <span style={{ ...s.statusPill, color: statusColor, borderColor: statusColor }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
-                    {statusLabel}
-                  </span>
-                ) : null}
-                {contact.email ? <span style={s.emailText}>{contact.email}</span> : null}
-              </div>
-            ) : null}
+            <div style={s.cardMeta}>
+              {statusLabel ? (
+                <span style={{ ...s.statusPill, color: statusColor, borderColor: statusColor }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+                  {statusLabel}
+                </span>
+              ) : null}
+              <span style={{ ...s.statusPill, color: contact.crmCustomerId ? '#48bb78' : 'var(--text-dim)', borderColor: contact.crmCustomerId ? '#48bb78' : 'var(--border-color)' }}>
+                {contact.crmCustomerId ? 'Vinculado ao CRM' : 'Não vinculado ao CRM'}
+              </span>
+            </div>
 
             <div style={s.cardTags}>
               {parseTags(contact.tags).map((tag, index) => (
@@ -204,6 +187,11 @@ export default function Contacts() {
             <button style={s.chatBtn} onClick={() => startChat(contact)}>
               <MessageSquare size={16} /> Abrir conversa
             </button>
+            {!contact.crmCustomerId ? (
+              <button style={s.linkBtn} onClick={() => setLinkingContact(contact)}>
+                <Link2 size={16} /> Vincular ao CRM
+              </button>
+            ) : null}
           </SurfaceCard>
         );
       }),
@@ -214,11 +202,11 @@ export default function Contacts() {
     <div style={s.container}>
       <PageHeader
         kicker="Relacionamento"
-        title="Clientes WhatsApp"
+        title="Contatos WhatsApp"
         subtitle={
           contacts.length > 0
-            ? `Gerencie apenas contatos do WhatsApp sem CNPJ/CPF (${contacts.length} clientes).`
-            : 'Gerencie apenas contatos do WhatsApp sem CNPJ/CPF. Clientes com documento ficam na aba CRM.'
+            ? `Cadastre e gerencie nomes e números do WhatsApp (${contacts.length} contatos). A vinculação ao CRM é feita depois.`
+            : 'Cadastre e gerencie nomes e números do WhatsApp. A vinculação ao CRM é feita depois.'
         }
         actions={
           <div style={s.actionsRow}>
@@ -233,14 +221,14 @@ export default function Contacts() {
             <input type="file" id="importExcel" hidden accept=".xlsx, .xls" onChange={handleImportExcel} />
 
             <ActionButton onClick={() => setShowAddModal(true)}>
-              <Plus size={20} /> Novo cliente
+              <Plus size={20} /> Novo contato
             </ActionButton>
           </div>
         }
       />
 
       {loading ? (
-        <div style={s.loading}>Carregando clientes...</div>
+        <div style={s.loading}>Carregando contatos...</div>
       ) : (
         <div style={s.grid}>
           {Array.isArray(contacts) && contacts.length > 0 ? (
@@ -248,15 +236,15 @@ export default function Contacts() {
           ) : (
             <EmptyState
               icon={<BookUser size={22} />}
-              title={search ? `Nenhum cliente encontrado para "${search}"` : 'Nenhum cliente encontrado'}
+              title={search ? `Nenhum contato encontrado para "${search}"` : 'Nenhum contato encontrado'}
               description={
                 search
-                  ? 'Tente pesquisar por outro nome, telefone ou e-mail, ou cadastre este cliente agora.'
-                  : 'Cadastre um novo cliente ou importe uma planilha para começar.'
+                  ? 'Tente pesquisar por outro nome ou telefone, ou cadastre este contato agora.'
+                  : 'Cadastre um novo contato ou importe uma planilha para começar.'
               }
               action={
                 <ActionButton onClick={() => setShowAddModal(true)}>
-                  <Plus size={18} /> Novo cliente
+                  <Plus size={18} /> Novo contato
                 </ActionButton>
               }
               style={{ gridColumn: '1 / -1' }}
@@ -266,99 +254,20 @@ export default function Contacts() {
       )}
 
       {showAddModal ? (
-        <ModalShell kicker="Novo cadastro" title="Cadastrar cliente" onClose={() => setShowAddModal(false)} maxWidth="48rem">
+        <ModalShell kicker="Novo contato" title="Cadastrar contato WhatsApp" onClose={() => setShowAddModal(false)} maxWidth="32rem">
           <div style={s.modalBody}>
             <div style={s.modalScrollArea}>
               <div style={s.formGrid}>
                 <div style={s.field}>
-                  <label style={s.label}>Nome completo</label>
-                  <input style={s.input} value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} placeholder="Ex: João da Silva" />
+                  <label style={s.label}>Nome</label>
+                  <input autoFocus style={s.input} value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} placeholder="Ex.: João da Silva" />
                 </div>
                 <div style={s.field}>
-                  <label style={s.label}>Nome fantasia / departamento</label>
-                  <input style={s.input} value={newContact.fantasyName} onChange={(e) => setNewContact({ ...newContact, fantasyName: e.target.value })} placeholder="Ex: Financeiro" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>WhatsApp (com DDD)</label>
-                  <input style={s.input} value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} placeholder="Ex: 5551999999999" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>E-mail</label>
-                  <input style={s.input} value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} placeholder="exemplo@email.com" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>CPF / CNPJ</label>
-                  <input style={s.input} value={newContact.document} onChange={(e) => setNewContact({ ...newContact, document: e.target.value })} placeholder="00.000.000/0001-00" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>Endereço</label>
-                  <input style={s.input} value={newContact.address} onChange={(e) => setNewContact({ ...newContact, address: e.target.value })} placeholder="Rua, Número, Bairro" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>Cidade</label>
-                  <input style={s.input} value={newContact.city} onChange={(e) => setNewContact({ ...newContact, city: e.target.value })} placeholder="Ex: Porto Alegre" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>Estado (UF)</label>
-                  <input style={s.input} value={newContact.state} onChange={(e) => setNewContact({ ...newContact, state: e.target.value })} placeholder="Ex: RS" />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>CEP</label>
-                  <input style={s.input} value={newContact.zipCode} onChange={(e) => setNewContact({ ...newContact, zipCode: e.target.value })} placeholder="00000-000" />
+                  <label style={s.label}>Número do WhatsApp</label>
+                  <input type="tel" inputMode="tel" style={s.input} value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} placeholder="Ex.: (51) 99999-9999" />
                 </div>
               </div>
-              <div style={s.sectionDivider}>
-                <h3 style={s.sectionTitle}>
-                  <Printer size={20} /> Equipamento principal (opcional)
-                </h3>
-                <div style={s.formGrid}>
-                  <div style={s.field}>
-                    <label style={s.label}>Marca</label>
-                    <input
-                      style={s.input}
-                      value={newContact.equipment.manufacturer}
-                      onChange={(e) => setNewContact({ ...newContact, equipment: { ...newContact.equipment, manufacturer: e.target.value } })}
-                      placeholder="Ex: Xerox"
-                    />
-                  </div>
-                  <div style={s.field}>
-                    <label style={s.label}>Modelo</label>
-                    <input
-                      style={s.input}
-                      value={newContact.equipment.model}
-                      onChange={(e) => setNewContact({ ...newContact, equipment: { ...newContact.equipment, model: e.target.value } })}
-                      placeholder="Ex: WorkCentre 7845"
-                    />
-                  </div>
-                  <div style={s.field}>
-                    <label style={s.label}>Número de série</label>
-                    <input
-                      style={s.input}
-                      value={newContact.equipment.serialNumber}
-                      onChange={(e) => setNewContact({ ...newContact, equipment: { ...newContact.equipment, serialNumber: e.target.value } })}
-                      placeholder="Ex: ABC123456"
-                    />
-                  </div>
-                  <div style={s.field}>
-                    <label style={s.label}>Tipo de impressora</label>
-                    <input
-                      style={s.input}
-                      value={newContact.equipment.type}
-                      onChange={(e) => setNewContact({ ...newContact, equipment: { ...newContact.equipment, type: e.target.value } })}
-                      placeholder="Ex: Multifuncional monocromática"
-                    />
-                  </div>
-                  <div style={s.field}>
-                    <label style={s.label}>Setor / localização</label>
-                    <input
-                      style={s.input}
-                      value={newContact.equipment.sector}
-                      onChange={(e) => setNewContact({ ...newContact, equipment: { ...newContact.equipment, sector: e.target.value } })}
-                      placeholder="Ex: Recepção"
-                    />
-                  </div>
-                </div>
-              </div>
+              <p style={s.modalHint}>Depois de cadastrar, você poderá abrir a conversa e vincular este contato ao cliente correspondente no CRM.</p>
             </div>
 
             <div style={s.modalFooter}>
@@ -366,7 +275,7 @@ export default function Contacts() {
                 Fechar
               </ActionButton>
               <ActionButton style={s.modalFooterBtn} loading={creating} onClick={handleCreate}>
-                Cadastrar cliente
+                Cadastrar contato
               </ActionButton>
             </div>
           </div>
@@ -376,6 +285,8 @@ export default function Contacts() {
       {showProfileModal && selectedContact ? (
         <ContactProfileModal contact={selectedContact} onClose={() => setShowProfileModal(false)} onUpdated={loadContacts} />
       ) : null}
+
+      {linkingContact ? <LinkContactModal onClose={() => setLinkingContact(null)} onLink={handleLinkCrm} /> : null}
 
       {pendingChatContact ? (
         <InstanceSelectionModal
@@ -432,17 +343,6 @@ const s = {
     flexShrink: 0,
   },
   cardName: { fontSize: 'var(--text-md)', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  cardFantasy: {
-    color: 'var(--accent)',
-    fontSize: 'var(--text-xs)',
-    fontWeight: 800,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginTop: '1px',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
   cardPhone: { color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginTop: '2px', fontVariantNumeric: 'tabular-nums' },
   editBtn: { background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 'var(--space-1)', flexShrink: 0 },
   cardMeta: { display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' },
@@ -458,7 +358,6 @@ const s = {
     background: 'transparent',
     flexShrink: 0,
   },
-  emailText: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: '1 1 120px' },
   cardTags: { display: 'flex', flexWrap: 'wrap', gap: '5px', minHeight: '20px' },
   tag: { fontSize: 'var(--text-xs)', background: 'var(--accent-light)', color: 'var(--accent)', padding: '2px 7px', borderRadius: '5px', fontWeight: 800, border: '1px solid var(--accent-border)' },
   chatBtn: {
@@ -477,14 +376,29 @@ const s = {
     gap: 'var(--space-2)',
     fontSize: 'var(--text-sm)',
   },
+  linkBtn: {
+    width: '100%',
+    background: 'var(--accent-light)',
+    border: '1px solid var(--accent-border)',
+    color: 'var(--accent)',
+    padding: 'var(--space-3)',
+    borderRadius: 'var(--radius-sm)',
+    fontWeight: 700,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'var(--space-2)',
+    fontSize: 'var(--text-sm)',
+  },
   modalBody: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 },
   modalScrollArea: { padding: '0 var(--space-8)', overflowY: 'auto', flex: 1, minHeight: 0 },
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-6)', marginBottom: 'var(--space-8)' },
   field: { display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' },
   label: { fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' },
   input: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: 'var(--space-3) var(--space-4)', color: 'var(--text-main)', outline: 'none', fontSize: 'var(--text-md)' },
-  sectionDivider: { marginTop: 'var(--space-8)', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--space-8)', paddingBottom: 'var(--space-6)' },
-  sectionTitle: { margin: '0 0 var(--space-6) 0', fontSize: 'var(--text-lg)', fontWeight: 800, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' },
+  modalHint: { margin: '0 0 var(--space-4)', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.5 },
   modalFooter: {
     display: 'flex',
     gap: 'var(--space-3)',

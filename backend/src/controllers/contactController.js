@@ -5,8 +5,10 @@ const evolutionService = require('../services/evolutionService');
 async function list(req, res) {
   const q = req.query.q || req.query.search;
   const withoutDocument = ['1', 'true', 'yes'].includes(String(req.query.withoutDocument || '').toLowerCase());
-  console.log(`[Contacts] Busca executada | tenant=${req.user.tenantId} | comFiltro=${Boolean(q)}`);
+  const withoutCrm = ['1', 'true', 'yes'].includes(String(req.query.withoutCrm || '').toLowerCase());
+  console.log(`[Contacts] Busca executada | tenant=${req.user.tenantId} | comFiltro=${Boolean(q)} | semCrm=${withoutCrm}`);
   const where = { tenantId: req.user.tenantId };
+  if (withoutCrm) where.crmCustomerId = null;
   if (withoutDocument) {
     where.OR = [
       { cpfCnpj: null },
@@ -77,7 +79,7 @@ async function updateContact(req, res) {
   let normalizedPhone;
   if (phone !== undefined) {
     normalizedPhone = evolutionService.normalizePhoneNumber(phone);
-    if (!normalizedPhone) return res.status(400).json({ error: 'Telefone invalido' });
+    if (!normalizedPhone) return res.status(400).json({ error: 'Telefone inválido' });
   }
 
   let normalizedWhatsApp;
@@ -86,7 +88,7 @@ async function updateContact(req, res) {
       ? evolutionService.normalizePhoneNumber(whatsapp)
       : null;
     if (String(whatsapp || '').trim() && !normalizedWhatsApp) {
-      return res.status(400).json({ error: 'WhatsApp invalido' });
+      return res.status(400).json({ error: 'WhatsApp inválido' });
     }
   }
 
@@ -112,6 +114,29 @@ async function updateContact(req, res) {
       ...(whatsappOptOutAt !== undefined && { whatsappOptOutAt: whatsappOptOutAt ? new Date(whatsappOptOutAt) : null }),
     },
   });
+  res.json(updated);
+}
+
+async function linkCrm(req, res) {
+  const { id } = req.params;
+  const { crmCustomerId } = req.body || {};
+  const { tenantId } = req.user;
+  if (!crmCustomerId) return res.status(400).json({ error: 'Informe o cliente do CRM para vincular.' });
+
+  const contact = await prisma.contact.findFirst({ where: { id, tenantId } });
+  if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
+
+  const customer = await prisma.crmCustomer.findFirst({ where: { id: crmCustomerId, tenantId } });
+  if (!customer) return res.status(404).json({ error: 'Cliente do CRM não encontrado' });
+
+  const updated = await prisma.contact.update({
+    where: { id: contact.id },
+    data: { crmCustomerId: customer.id },
+  });
+
+  // Mantém os equipamentos do iLux disponíveis imediatamente no atendimento.
+  const { syncCrmEquipmentsToEquipment } = require('../services/crmSyncService');
+  await syncCrmEquipmentsToEquipment(tenantId, contact.id);
   res.json(updated);
 }
 
@@ -142,7 +167,7 @@ async function create(req, res) {
   const { tenantId } = req.user;
 
   const cleanPhone = evolutionService.normalizePhoneNumber(phone);
-  if (!cleanPhone) return res.status(400).json({ error: 'Telefone invalido' });
+  if (!cleanPhone) return res.status(400).json({ error: 'Telefone inválido' });
 
   const phoneCandidates = evolutionService.buildPhoneLookupCandidates(cleanPhone);
   const exists = await prisma.contact.findFirst({
@@ -375,4 +400,4 @@ async function deleteContact(req, res) {
   }
 }
 
-module.exports = { list, getHistory, updateContact, getMedia, create, getTags, importExcel, deleteContact };
+module.exports = { list, getHistory, updateContact, linkCrm, getMedia, create, getTags, importExcel, deleteContact };

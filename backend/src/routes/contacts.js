@@ -2,7 +2,7 @@ const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
 const upload = require('../middlewares/upload');
-const { list, getHistory, updateContact, getMedia, create, getTags, importExcel, deleteContact } = require('../controllers/contactController');
+const { list, getHistory, updateContact, linkCrm, getMedia, create, getTags, importExcel, deleteContact } = require('../controllers/contactController');
 const auditSensitiveAction = require('../middlewares/auditSensitiveAction');
 
 router.use(authenticate, requirePermission('inbox.view', 'crm.view'));
@@ -12,6 +12,7 @@ router.post('/import', upload.single('file'), importExcel);
 router.get('/tags', getTags);
 router.get('/:id/history', getHistory);
 router.patch('/:id', updateContact);
+router.patch('/:id/link-crm', linkCrm);
 router.get('/:id/media', getMedia);
 router.delete('/:id', auditSensitiveAction('CONTACT_DELETE', 'contact'), deleteContact);
 

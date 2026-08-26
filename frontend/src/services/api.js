@@ -119,6 +119,7 @@ export const createContact = (data) => api.post('/contacts', data);
 export const getContactTags = () => api.get('/contacts/tags');
 export const getContactHistory = (id) => api.get(`/contacts/${id}/history`);
 export const updateContact = (id, data) => api.patch(`/contacts/${id}`, data);
+export const linkContactToCrm = (id, crmCustomerId) => api.patch(`/contacts/${id}/link-crm`, { crmCustomerId });
 export const getContactMedia = (id) => api.get(`/contacts/${id}/media`);
 export const importContacts = (formData) => api.post('/contacts/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 

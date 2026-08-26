@@ -274,14 +274,14 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
             <div><label style={s.label}>E-mail</label><input style={s.input} value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
             </section>
             <section style={s.fieldCard}>
-            <h3 style={s.fieldCardTitle}>AutorizaÃ§Ãµes de WhatsApp</h3>
-            <p style={s.fieldCardHint}>Registre separadamente o que este contato autorizou receber. O sistema nunca usa uma autorizaÃ§Ã£o para outra finalidade.</p>
+            <h3 style={s.fieldCardTitle}>Autorizações de WhatsApp</h3>
+            <p style={s.fieldCardHint}>Registre separadamente o que este contato autorizou receber. O sistema nunca usa uma autorização para outra finalidade.</p>
             <div style={s.consentGrid}>
               {[
-                ['enableWhatsAppBilling', 'CobranÃ§as e documentos financeiros'],
-                ['enableWhatsAppMarketing', 'PromoÃ§Ãµes e novidades'],
+                ['enableWhatsAppBilling', 'Cobranças e documentos financeiros'],
+                ['enableWhatsAppMarketing', 'Promoções e novidades'],
                 ['enableWhatsAppAlerts', 'Alertas operacionais'],
-                ['enableWhatsAppCounters', 'SolicitaÃ§Ã£o de contadores'],
+                ['enableWhatsAppCounters', 'Solicitação de contadores'],
               ].map(([key, label]) => (
                 <label key={key} style={s.consentRow}>
                   <input type="checkbox" checked={Boolean(formData[key])} onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })} />
