@@ -3,16 +3,13 @@ import { getDashboardStats } from '../services/api';
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { AlertCircle, ArrowRight, Bot, Clock, MessageSquare, Star, TrendingUp, UserPlus } from 'lucide-react';
+import { AlertCircle, ArrowRight, Bot, CheckCircle2, Clock, Database, MessageSquare, RefreshCw, Star, TrendingUp, UserPlus } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 
 const PERIOD_OPTIONS = [
@@ -24,22 +21,27 @@ const PERIOD_OPTIONS = [
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [periodDays, setPeriodDays] = useState(30);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
 
   useEffect(() => {
     load(periodDays);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodDays]);
 
-  async function load(days) {
-    setLoading(true);
+  async function load(days, { silent = false } = {}) {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
     try {
       const { data } = await getDashboardStats(days);
       setStats(data);
+      setLastUpdatedAt(data.generatedAt || new Date().toISOString());
     } catch (error) {
       console.error('Erro ao carregar dashboard:', error);
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   }
 
@@ -78,6 +80,11 @@ export default function Dashboard() {
 
   const { kpis, dailyMessages, agentBreakdown, ratingsDistribution } = stats;
   const iaShare = kpis.totalMessages > 0 ? Math.round((kpis.iaMessages / kpis.totalMessages) * 100) : 0;
+  const receivedMessages = Number(kpis.receivedMessages || 0);
+  const health = stats.health || { overall: 'unknown', services: {} };
+  const healthStatus = healthStatusInfo(health.overall);
+  const whatsappHealth = healthStatusInfo(health.services?.whatsapp?.status);
+  const firebirdHealth = healthStatusInfo(health.services?.firebird?.status);
 
   return (
     <div style={s.container}>
@@ -85,7 +92,17 @@ export default function Dashboard() {
         kicker="Visão operacional"
         title="Dashboard de performance"
         subtitle="Indicadores em tempo real para acompanhar eficiência, qualidade e capacidade da equipe."
-        actions={<div style={s.statusBadge}><span style={s.dot} /> Sistema operacional</div>}
+        actions={(
+          <div style={s.headerActions}>
+            <div style={{ ...s.statusBadge, ...healthStatus.badge }} title="Status calculado a partir das instâncias WhatsApp e da última sincronização do iLux">
+              <span style={{ ...s.dot, background: healthStatus.color, boxShadow: `0 0 10px ${healthStatus.glow}` }} /> {healthStatus.label}
+            </div>
+            <button type="button" style={s.refreshBtn} onClick={() => load(periodDays, { silent: true })} disabled={refreshing}>
+              <RefreshCw size={15} style={refreshing ? { animation: 'dashboard-spin 0.9s linear infinite' } : undefined} />
+              {refreshing ? 'Atualizando...' : 'Atualizar'}
+            </button>
+          </div>
+        )}
         compact
       />
 
@@ -104,17 +121,24 @@ export default function Dashboard() {
           ))}
         </div>
         <div style={s.allTimeHint}>
-          Desde o início: <strong>{kpis.totalMessagesAllTime.toLocaleString('pt-BR')}</strong> mensagens processadas
+          Desde o início: <strong>{kpis.totalMessagesAllTime.toLocaleString('pt-BR')}</strong> mensagens enviadas
           ({kpis.iaMessagesAllTime.toLocaleString('pt-BR')} pela IA · {kpis.humanMessagesAllTime.toLocaleString('pt-BR')} por humanos)
         </div>
+      </div>
+
+      <div style={s.healthRow} aria-label="Saúde das integrações">
+        <span style={s.updatedAt}><Clock size={13} /> Atualizado às {formatDateTime(lastUpdatedAt)}</span>
+        <span style={{ ...s.healthChip, ...whatsappHealth.chip }}><CheckCircle2 size={13} /> WhatsApp: {whatsappHealth.label}</span>
+        <span style={{ ...s.healthChip, ...firebirdHealth.chip }}><Database size={13} /> iLux: {firebirdHealth.label}</span>
+        <span style={s.queueHint}>Fila: {kpis.activeTickets || 0} abertas · {kpis.pendingTickets || 0} aguardando</span>
       </div>
 
       <div style={s.kpiGrid}>
         <KpiCard
           icon={<MessageSquare color="#8b5cf6" />}
-          label="Mensagens no Período"
+          label="Mensagens enviadas no período"
           value={kpis.totalMessages.toLocaleString('pt-BR')}
-          hint={`${iaShare}% respondidas pela IA (${kpis.iaMessages} de ${kpis.totalMessages})`}
+          hint={`${iaShare}% pela IA (${kpis.iaMessages.toLocaleString('pt-BR')} de ${kpis.totalMessages.toLocaleString('pt-BR')}) · ${receivedMessages.toLocaleString('pt-BR')} recebidas`}
           accentColor="#8b5cf6"
         />
         <KpiCard
@@ -127,21 +151,21 @@ export default function Dashboard() {
         <KpiCard
           icon={<TrendingUp color="#10b981" />}
           label="Taxa de Retenção IA"
-          value={`${kpis.retentionRate}%`}
-          hint="Conversas resolvidas sem humano"
+          value={formatPercent(kpis.retentionRate)}
+          hint={kpis.retentionSampleSize ? `${kpis.retainedByIA} de ${kpis.retentionSampleSize} conversas sem atendimento humano` : 'Sem conversas encerradas no período'}
           accentColor="#10b981"
         />
         <KpiCard
           icon={<Clock color="#3b82f6" />}
-          label="TMA Médio"
-          value={kpis.avgTMA > 60 ? `${Math.round(kpis.avgTMA / 60)}h` : `${kpis.avgTMA}m`}
-          hint="Tempo médio de resolução"
+          label="Tempo médio de resolução"
+          value={formatDuration(kpis.avgTMA)}
+          hint={kpis.tmaSampleSize ? `Mediana ${formatDuration(kpis.medianTMA)} · P90 ${formatDuration(kpis.p90TMA)} · ${kpis.tmaSampleSize} encerrados` : 'Sem chamados encerrados no período'}
           accentColor="#3b82f6"
         />
         <KpiCard
           icon={<Star color="#f59e0b" />}
           label="Satisfação (CSAT)"
-          value={`${kpis.avgRating}/5`}
+          value={kpis.avgRating == null ? '—' : `${kpis.avgRating}/5`}
           hint={`Baseado em ${kpis.totalRatings} avaliações`}
           accentColor="#f59e0b"
         />
@@ -157,7 +181,7 @@ export default function Dashboard() {
       <div style={s.mainGrid} className="dashboard-main-grid">
         <div style={s.chartSection}>
           <div style={s.sectionHeader}>
-            <h2 style={s.sectionTitle}>Evolução do Atendimento ({periodDays} dias)</h2>
+            <h2 style={s.sectionTitle}>Mensagens enviadas por dia ({periodDays} dias)</h2>
             <div style={s.legend}>
               <div style={s.legendItem}><span style={{ ...s.legendDot, background: '#D4AF37' }} /> IA</div>
               <div style={s.legendItem}><span style={{ ...s.legendDot, background: 'var(--text-muted)' }} /> Humano</div>
@@ -178,9 +202,10 @@ export default function Dashboard() {
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-main)' }}
                   itemStyle={{ fontSize: '12px' }}
+                  formatter={(value, name) => [Number(value || 0).toLocaleString('pt-BR'), name === 'ia' ? 'IA' : 'Humano']}
                 />
-                <Area type="monotone" dataKey="ia" stroke="#D4AF37" fillOpacity={1} fill="url(#colorIA)" strokeWidth={3} />
-                <Area type="monotone" dataKey="human" stroke="var(--text-muted)" fillOpacity={0} strokeWidth={2} strokeDasharray="5 5" />
+                <Area type="monotone" dataKey="ia" name="IA" stroke="#D4AF37" fillOpacity={1} fill="url(#colorIA)" strokeWidth={3} />
+                <Area type="monotone" dataKey="human" name="Humano" stroke="var(--text-muted)" fillOpacity={0} strokeWidth={2} strokeDasharray="5 5" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -189,20 +214,21 @@ export default function Dashboard() {
         <div style={s.sidebar}>
           <div style={s.sideCard}>
             <h3 style={s.sideTitle}>Distribuição de Notas</h3>
-            <div style={s.ratingDist}>
-              {ratingsDistribution.slice().reverse().map((rating) => (
-                <div key={rating.rating} style={s.ratingRow}>
-                  <span style={s.ratingLabel}>
-                    {rating.rating} <Star size={12} style={{ display: 'inline', marginBottom: '2px' }} />
-                  </span>
-                  <div style={s.ratingBarBg}>
-                    <div style={{ ...s.ratingBar, width: `${(rating.count / (kpis.totalRatings || 1)) * 100}%` }} />
+            {kpis.totalRatings === 0 ? <p style={s.emptyHint}>Nenhuma avaliação registrada ainda.</p> : (
+              <div style={s.ratingDist}>
+                {ratingsDistribution.slice().reverse().map((rating) => (
+                  <div key={rating.rating} style={s.ratingRow}>
+                    <span style={s.ratingLabel}>
+                      {rating.rating} <Star size={12} style={{ display: 'inline', marginBottom: '2px' }} />
+                    </span>
+                    <div style={s.ratingBarBg}>
+                      <div style={{ ...s.ratingBar, width: `${(rating.count / kpis.totalRatings) * 100}%` }} />
+                    </div>
+                    <span style={s.ratingCount}>{rating.count}</span>
                   </div>
-                  <span style={s.ratingCount}>{rating.count}</span>
-                </div>
-              ))}
-              {kpis.totalRatings === 0 && <p style={s.emptyHint}>Nenhuma avaliação registrada ainda.</p>}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={s.sideCard}>
@@ -241,7 +267,7 @@ export default function Dashboard() {
                   <th style={s.agentTh}>Atendente</th>
                   <th style={{ ...s.agentTh, textAlign: 'center' }}>Tickets Resolvidos</th>
                   <th style={{ ...s.agentTh, textAlign: 'center' }}>Mensagens Enviadas</th>
-                  <th style={{ ...s.agentTh, textAlign: 'center' }}>TMA Médio</th>
+                  <th style={{ ...s.agentTh, textAlign: 'center' }}>Tempo médio</th>
                   <th style={{ ...s.agentTh, textAlign: 'center' }}>CSAT</th>
                 </tr>
               </thead>
@@ -251,7 +277,7 @@ export default function Dashboard() {
                     <td style={s.agentTd}><strong>{agent.name}</strong></td>
                     <td style={{ ...s.agentTd, textAlign: 'center' }}>{agent.resolvedCount}</td>
                     <td style={{ ...s.agentTd, textAlign: 'center' }}>{agent.messagesCount}</td>
-                    <td style={{ ...s.agentTd, textAlign: 'center' }}>{agent.avgTma > 60 ? `${Math.round(agent.avgTma / 60)}h` : `${agent.avgTma}m`}</td>
+                    <td style={{ ...s.agentTd, textAlign: 'center' }}>{formatDuration(agent.avgTma)}</td>
                     <td style={{ ...s.agentTd, textAlign: 'center' }}>
                       {agent.avgCsat != null ? `★ ${agent.avgCsat} (${agent.csatCount})` : '--'}
                     </td>
@@ -264,12 +290,43 @@ export default function Dashboard() {
       </div>
 
       <style>{`
+        @keyframes dashboard-spin { to { transform: rotate(360deg); } }
         @media (max-width: 900px) {
           .dashboard-main-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
   );
+}
+
+function formatDuration(minutes) {
+  if (minutes === null || minutes === undefined || !Number.isFinite(Number(minutes))) return '—';
+  const value = Math.max(0, Math.round(Number(minutes)));
+  if (value < 60) return `${value}m`;
+  const days = Math.floor(value / 1440);
+  const hours = Math.floor((value % 1440) / 60);
+  const remainingMinutes = value % 60;
+  if (days > 0) return `${days}d${hours ? ` ${hours}h` : ''}`;
+  return `${hours}h${remainingMinutes ? ` ${remainingMinutes}m` : ''}`;
+}
+
+function formatPercent(value) {
+  return value === null || value === undefined || !Number.isFinite(Number(value)) ? '—' : `${Number(value)}%`;
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function healthStatusInfo(status) {
+  const normalized = String(status || 'unknown').toLowerCase();
+  if (normalized === 'ok') return { label: 'Operacional', color: '#16a34a', glow: 'rgba(22,163,74,.35)', badge: {}, chip: { color: 'var(--success-text)', borderColor: 'var(--success-border)', background: 'var(--success-light)' } };
+  if (normalized === 'syncing') return { label: 'Sincronizando', color: '#d97706', glow: 'rgba(217,119,6,.35)', badge: {}, chip: { color: 'var(--warning-text)', borderColor: 'var(--warning-border)', background: 'var(--warning-light)' } };
+  if (normalized === 'degraded') return { label: 'Atenção', color: '#dc2626', glow: 'rgba(220,38,38,.35)', badge: { borderColor: 'var(--danger-border)' }, chip: { color: 'var(--danger-text)', borderColor: 'var(--danger-border)', background: 'var(--danger-light)' } };
+  if (normalized === 'not_configured') return { label: 'Não configurado', color: '#64748b', glow: 'rgba(100,116,139,.25)', badge: {}, chip: { color: 'var(--text-muted)', borderColor: 'var(--border-color)', background: 'var(--bg-base)' } };
+  return { label: 'Verificar', color: '#64748b', glow: 'rgba(100,116,139,.25)', badge: { borderColor: 'var(--warning-border)' }, chip: { color: 'var(--warning-text)', borderColor: 'var(--warning-border)', background: 'var(--warning-light)' } };
 }
 
 function KpiCard({ icon, label, value, hint, accentColor }) {
@@ -302,14 +359,20 @@ const s = {
   errorTitle: { fontSize: 'var(--text-md)', fontWeight: 700, margin: 0 },
   errorText: { fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 },
   retryBtn: { marginTop: 'var(--space-2)', padding: '0.6rem 1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--accent-border)', background: 'var(--accent-light)', color: 'var(--accent)', fontWeight: 700, cursor: 'pointer', fontSize: 'var(--text-sm)' },
+  headerActions: { display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' },
   statusBadge: { background: 'var(--bg-surface)', border: '1px solid var(--border-color)', padding: '0.6rem 1rem', borderRadius: '100px', fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' },
   dot: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 10px rgba(16,185,129,0.4)' },
+  refreshBtn: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem', minHeight: 38, padding: '0.55rem 0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-main)', fontWeight: 800, cursor: 'pointer', fontSize: 'var(--text-sm)' },
   toolbar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' },
   periodGroup: { display: 'flex', alignItems: 'center', gap: 'var(--space-2)' },
   periodLabel: { fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginRight: '2px' },
   periodBtn: { padding: '0.4rem 0.9rem', borderRadius: 'var(--radius-pill)', border: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', fontWeight: 700, cursor: 'pointer' },
   periodBtnActive: { background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--text-inverse)' },
   allTimeHint: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)' },
+  healthRow: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.45rem 0.8rem', margin: '-0.9rem 0 var(--space-6)', color: 'var(--text-dim)', fontSize: 'var(--text-xs)' },
+  updatedAt: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem' },
+  healthChip: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '0.22rem 0.5rem', fontWeight: 700 },
+  queueHint: { marginLeft: 'auto' },
   kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-6)', marginBottom: 'var(--space-10)' },
   kpiCard: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: 'var(--space-6)', display: 'flex', gap: 'var(--space-4)', alignItems: 'flex-start' },
   kpiIcon: { background: 'var(--bg-base)', padding: 'var(--space-3)', borderRadius: '12px', border: '1px solid var(--border-color)' },
