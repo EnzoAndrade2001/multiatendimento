@@ -185,6 +185,14 @@ export const reindexKnowledge = () => api.post('/knowledge/reindex');
 export const createKnowledge = (data) => api.post('/knowledge', data);
 export const updateKnowledge = (id, data) => api.put(`/knowledge/${id}`, data);
 export const deleteKnowledge = (id) => api.delete(`/knowledge/${id}`);
+export const getKnowledgeDocuments = () => api.get('/knowledge/documents');
+export const getKnowledgeDocument = (id) => api.get(`/knowledge/documents/${id}`);
+export const uploadKnowledgeDocument = (formData, onUploadProgress) => api.post('/knowledge/documents', formData, { headers: { 'Content-Type': 'multipart/form-data' }, onUploadProgress });
+export const publishKnowledgeDocument = (id) => api.post(`/knowledge/documents/${id}/publish`);
+export const unpublishKnowledgeDocument = (id) => api.post(`/knowledge/documents/${id}/unpublish`);
+export const reprocessKnowledgeDocument = (id) => api.post(`/knowledge/documents/${id}/process`);
+export const deleteKnowledgeDocument = (id) => api.delete(`/knowledge/documents/${id}`);
+export const downloadKnowledgeDocument = (id) => api.get(`/knowledge/documents/${id}/download`, { responseType: 'blob' });
 
 // Campaigns
 export const sendCampaign = (data) => api.post('/campaigns/send', data);

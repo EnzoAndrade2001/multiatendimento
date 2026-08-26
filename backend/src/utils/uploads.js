@@ -16,7 +16,13 @@ if (!fs.existsSync(mediaPath)) {
   fs.mkdirSync(mediaPath, { recursive: true });
 }
 
+const knowledgePath = path.join(uploadsPath, 'knowledge');
+if (!fs.existsSync(knowledgePath)) {
+  fs.mkdirSync(knowledgePath, { recursive: true });
+}
+
 module.exports = {
   uploadsPath,
-  mediaPath
+  mediaPath,
+  knowledgePath,
 };

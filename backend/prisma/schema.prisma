@@ -29,6 +29,8 @@ model Tenant {
   instances                  WaInstance[]
   metaInstances              MetaInstance[]
   knowledges                 Knowledge[]
+  knowledgeDocuments         KnowledgeDocument[]
+  knowledgeChunks            KnowledgeChunk[]
   businessHours              BusinessHour[]
   knowledgeLogs              KnowledgeLog[]
   tags                       Tag[]
@@ -321,18 +323,76 @@ model TicketEvent {
 }
 
 model Knowledge {
-  id        String   @id @default(cuid())
+  id        String         @id @default(cuid())
   tenantId  String
-  question  String   @db.Text
-  answer    String   @db.Text
+  question  String         @db.Text
+  answer    String         @db.Text
   tags      String?
   embedding Json? // Array de números para busca semântica
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
   logs      KnowledgeLog[]
 
   @@index([tenantId, active])
+}
+
+model KnowledgeDocument {
+  id              String              @id @default(cuid())
+  tenantId        String
+  title           String
+  description     String?             @db.Text
+  category        String              @default("MANUAL") // PROCEDURE, MANUAL, PORTFOLIO
+  audience        String              @default("CUSTOMER") // CUSTOMER, AGENT, TECHNICIAN
+  manufacturer    String?
+  equipmentModel  String?
+  version         String?
+  language        String              @default("pt-BR")
+  status          String              @default("DRAFT") // DRAFT, PROCESSING, PUBLISHED, FAILED, REPLACED
+  originalName    String
+  storageKey      String
+  mimeType        String
+  size            Int
+  checksum        String
+  pageCount       Int?
+  chunkCount      Int                 @default(0)
+  processingError String?             @db.Text
+  supersedesId    String?
+  createdById     String?
+  publishedAt     DateTime?
+  processedAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supersedes      KnowledgeDocument?  @relation("KnowledgeDocumentVersions", fields: [supersedesId], references: [id], onDelete: SetNull)
+  revisions       KnowledgeDocument[] @relation("KnowledgeDocumentVersions")
+  chunks          KnowledgeChunk[]
+  logs            KnowledgeLog[]
+
+  @@unique([tenantId, checksum])
+  @@index([tenantId, status, audience])
+  @@index([tenantId, manufacturer, equipmentModel])
+  @@index([supersedesId])
+}
+
+model KnowledgeChunk {
+  id            String            @id @default(cuid())
+  tenantId      String
+  documentId    String
+  content       String            @db.Text
+  section       String?
+  pageStart     Int?
+  pageEnd       Int?
+  position      Int
+  tokenEstimate Int               @default(0)
+  embedding     Json?
+  createdAt     DateTime          @default(now())
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document      KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  logs          KnowledgeLog[]
+
+  @@unique([documentId, position])
+  @@index([tenantId, documentId])
 }
 
 model BusinessHour {
@@ -482,22 +542,28 @@ model InternalConversationState {
 }
 
 model KnowledgeLog {
-  id          String     @id @default(cuid())
+  id          String             @id @default(cuid())
   tenantId    String
   knowledgeId String?
-  tenant      Tenant     @relation(fields: [tenantId], references: [id])
-  knowledge   Knowledge? @relation(fields: [knowledgeId], references: [id], onDelete: SetNull)
+  documentId  String?
+  chunkId     String?
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  knowledge   Knowledge?         @relation(fields: [knowledgeId], references: [id], onDelete: SetNull)
+  document    KnowledgeDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  chunk       KnowledgeChunk?    @relation(fields: [chunkId], references: [id], onDelete: SetNull)
   query       String
   content     String?
   similarity  Float?
-  found       Boolean    @default(false)
-  searched    Boolean    @default(false)
+  found       Boolean            @default(false)
+  searched    Boolean            @default(false)
   method      String?
   error       String?
-  createdAt   DateTime   @default(now())
+  createdAt   DateTime           @default(now())
 
   @@index([tenantId, createdAt])
   @@index([knowledgeId, createdAt])
+  @@index([documentId, createdAt])
+  @@index([chunkId, createdAt])
 }
 
 model Equipment {

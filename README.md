@@ -63,6 +63,8 @@ Para o deploy Docker via Easypanel, utilize o Nixpacks. O sistema exige o mapeam
 /srv/multiatendimento/uploads → /app/uploads
 \`\`\`
 
+Os documentos da base de conhecimento são gravados em `/app/uploads/knowledge` e dependem deste mesmo volume persistente. Eles não são expostos como arquivos estáticos: o download passa pela API autenticada e respeita o tenant e a permissão `settings.bot.manage`.
+
 ### Pacote do Agente Local iLux (persistente)
 
 O executável do agente **não deve ser salvo dentro do diretório do container** (`/app` ou `/backend`), pois esses diretórios são substituídos a cada deploy.

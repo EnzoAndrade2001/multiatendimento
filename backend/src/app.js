@@ -89,6 +89,7 @@ const { uploadsPath } = require('./utils/uploads');
 // Mídias de atendimento/documentos exigem autorização tenant-aware em /api/media.
 // Arquivos públicos não sensíveis (ex.: logotipo da empresa) continuam em /uploads.
 app.use('/uploads/media', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
+app.use('/uploads/knowledge', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
 app.use('/uploads', express.static(uploadsPath, {
   setHeaders(res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');

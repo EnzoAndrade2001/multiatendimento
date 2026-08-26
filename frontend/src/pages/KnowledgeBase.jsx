@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, BookOpen, CheckCircle2, Plus, RefreshCw, Search } from 'lucide-react';
+import { Activity, AlertTriangle, BookOpen, CheckCircle2, Download, FileText, Plus, RefreshCw, Search, Upload } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   createKnowledge,
@@ -9,6 +9,13 @@ import {
   reindexKnowledge,
   testKnowledgeSearch,
   updateKnowledge,
+  deleteKnowledgeDocument,
+  downloadKnowledgeDocument,
+  getKnowledgeDocuments,
+  publishKnowledgeDocument,
+  reprocessKnowledgeDocument,
+  unpublishKnowledgeDocument,
+  uploadKnowledgeDocument,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -17,6 +24,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ModalShell from '../components/ui/ModalShell';
 
 const EMPTY_FORM = { question: '', answer: '', tags: '', active: true };
+const EMPTY_DOCUMENT = { title: '', description: '', category: 'MANUAL', audience: 'CUSTOMER', manufacturer: '', equipmentModel: '', version: '', language: 'pt-BR', supersedesId: '', file: null };
 
 export default function KnowledgeBase() {
   const [data, setData] = useState([]);
@@ -32,22 +40,69 @@ export default function KnowledgeBase() {
   const [testQuery, setTestQuery] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [tab, setTab] = useState('answers');
+  const [documents, setDocuments] = useState([]);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [documentForm, setDocumentForm] = useState(EMPTY_DOCUMENT);
+  const [documentBusy, setDocumentBusy] = useState(false);
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!documents.some((item) => item.status === 'PROCESSING')) return undefined;
+    const timer = window.setInterval(load, 5000);
+    return () => window.clearInterval(timer);
+  }, [documents]);
 
   async function load() {
     setLoading(true);
     try {
-      const [knowledgeResult, statsResult] = await Promise.allSettled([getKnowledge(), getKnowledgeStats()]);
+      const [knowledgeResult, statsResult, documentsResult] = await Promise.allSettled([getKnowledge(), getKnowledgeStats(), getKnowledgeDocuments()]);
       if (knowledgeResult.status === 'rejected') throw knowledgeResult.reason;
       setData(knowledgeResult.value.data);
       if (statsResult.status === 'fulfilled') setStats(statsResult.value.data);
+      if (documentsResult.status === 'fulfilled') setDocuments(documentsResult.value.data);
     } catch (error) {
       console.error(error);
       toast.error('Erro ao carregar a base de conhecimento. Tente novamente.');
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleDocumentUpload(event) {
+    event.preventDefault();
+    if (!documentForm.file || documentBusy) return;
+    setDocumentBusy(true);
+    try {
+      const payload = new FormData();
+      Object.entries(documentForm).forEach(([key, value]) => { if (key !== 'file' && value) payload.append(key, value); });
+      payload.append('file', documentForm.file);
+      await uploadKnowledgeDocument(payload);
+      toast.success('Documento recebido. O processamento continuará em segundo plano.');
+      setShowDocumentModal(false);
+      setDocumentForm(EMPTY_DOCUMENT);
+      await load();
+    } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível enviar o documento.'); }
+    finally { setDocumentBusy(false); }
+  }
+
+  async function documentAction(action, item) {
+    setDocumentBusy(true);
+    try {
+      if (action === 'publish') await publishKnowledgeDocument(item.id);
+      if (action === 'unpublish') await unpublishKnowledgeDocument(item.id);
+      if (action === 'reprocess') await reprocessKnowledgeDocument(item.id);
+      if (action === 'delete') await deleteKnowledgeDocument(item.id);
+      if (action === 'download') {
+        const response = await downloadKnowledgeDocument(item.id);
+        const url = URL.createObjectURL(response.data);
+        const anchor = document.createElement('a'); anchor.href = url; anchor.download = item.originalName; anchor.click(); URL.revokeObjectURL(url);
+      } else {
+        toast.success(action === 'publish' ? 'Documento publicado para consulta.' : action === 'unpublish' ? 'Documento retirado das respostas.' : action === 'delete' ? 'Documento excluído.' : 'Reprocessamento iniciado.');
+        await load();
+      }
+    } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível concluir a ação.'); }
+    finally { setDocumentBusy(false); }
   }
 
   async function handleSave(event) {
@@ -147,11 +202,16 @@ export default function KnowledgeBase() {
           <ActionButton variant="secondary" onClick={handleReindex} loading={reindexing}>
             <RefreshCw size={17} /> Reindexar base
           </ActionButton>
-          <ActionButton onClick={openCreate}><Plus size={18} /> Novo conhecimento</ActionButton>
+          <ActionButton onClick={tab === 'answers' ? openCreate : () => setShowDocumentModal(true)}>{tab === 'answers' ? <Plus size={18} /> : <Upload size={18} />} {tab === 'answers' ? 'Novo conhecimento' : 'Anexar documento'}</ActionButton>
         </div>}
       />
 
-      <div style={s.statsGrid}>
+      <div style={s.tabs}>
+        <button type="button" style={{ ...s.tab, ...(tab === 'answers' ? s.tabActive : {}) }} onClick={() => setTab('answers')}><BookOpen size={17} /> Respostas oficiais</button>
+        <button type="button" style={{ ...s.tab, ...(tab === 'documents' ? s.tabActive : {}) }} onClick={() => setTab('documents')}><FileText size={17} /> Manuais e portfólios <span style={s.tabCount}>{documents.length}</span></button>
+      </div>
+
+      {tab === 'answers' ? <><div style={s.statsGrid}>
         {indicators.map(({ label, value, detail, icon: Icon }) => (
           <SurfaceCard key={label} style={s.statCard}>
             <div style={s.statTop}><span style={s.statLabel}>{label}</span><Icon size={18} color="var(--accent)" /></div>
@@ -226,7 +286,40 @@ export default function KnowledgeBase() {
             <div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowModal(false)} disabled={saving}>Cancelar</ActionButton><ActionButton type="submit" loading={saving}>Salvar e indexar</ActionButton></div>
           </form>
         </ModalShell>
-      ) : null}
+      ) : null}</> : (
+        <div style={s.documentGrid}>
+          {documents.map((item) => (
+            <SurfaceCard key={item.id} style={s.card}>
+              <div style={s.statusRow}><span style={s.cardStatus}><FileText size={16} />{item.category}</span><span style={{ ...s.indexBadge, ...(item.status === 'PUBLISHED' ? s.indexed : item.status === 'FAILED' ? s.notIndexed : {}) }}>{item.status}</span></div>
+              <div><h3 style={s.cardTitle}>{item.title}</h3><p style={s.panelText}>{item.originalName}</p></div>
+              <div style={s.documentMeta}><span>Público: <strong>{item.audience}</strong></span><span>{item.pageCount || 0} pág. · {item.chunkCount || 0} trechos</span>{item.version ? <span>Versão {item.version}</span> : null}</div>
+              {(item.manufacturer || item.equipmentModel) ? <div style={s.tags}><span style={s.tag}>{[item.manufacturer, item.equipmentModel].filter(Boolean).join(' ')}</span></div> : null}
+              {item.processingError ? <div style={s.noMatch}><AlertTriangle size={17} /> {item.processingError}</div> : null}
+              <div style={s.usage}>Usado {item.usageCount30d || 0} vez(es) nos últimos 30 dias. Apenas documentos CUSTOMER e publicados podem orientar o bot.</div>
+              <div style={s.cardActions}>
+                <ActionButton variant="secondary" style={s.actionBtn} onClick={() => documentAction('download', item)}><Download size={15} /> Baixar</ActionButton>
+                {item.status === 'DRAFT' ? <ActionButton style={s.actionBtn} onClick={() => documentAction('publish', item)}>Publicar</ActionButton> : null}
+                {item.status === 'PUBLISHED' ? <ActionButton variant="secondary" style={s.actionBtn} onClick={() => documentAction('unpublish', item)}>Retirar</ActionButton> : null}
+                {item.status === 'FAILED' ? <ActionButton style={s.actionBtn} onClick={() => documentAction('reprocess', item)}>Reprocessar</ActionButton> : null}
+                {!['PUBLISHED', 'PROCESSING'].includes(item.status) ? <ActionButton variant="danger" style={s.actionBtn} onClick={() => documentAction('delete', item)}>Excluir</ActionButton> : null}
+              </div>
+            </SurfaceCard>
+          ))}
+          {!documents.length ? <EmptyState icon={<FileText size={22} />} title="Nenhum documento técnico" description="Anexe manuais, procedimentos e portfólios. Revise o processamento antes de publicar para o bot." action={<ActionButton onClick={() => setShowDocumentModal(true)}><Upload size={18} /> Anexar documento</ActionButton>} style={{ gridColumn: '1 / -1' }} /> : null}
+        </div>
+      )}
+
+      {showDocumentModal ? <ModalShell kicker="Base documental" title="Anexar manual ou portfólio" onClose={() => setShowDocumentModal(false)} maxWidth="42rem">
+        <form onSubmit={handleDocumentUpload} style={s.modalBody}>
+          <label style={s.label}>Título</label><input style={s.input} required value={documentForm.title} onChange={(e) => setDocumentForm({ ...documentForm, title: e.target.value })} placeholder="Ex: Manual técnico Ricoh MP C3004" />
+          <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Categoria</span><select style={s.input} value={documentForm.category} onChange={(e) => setDocumentForm({ ...documentForm, category: e.target.value })}><option value="MANUAL">Manual</option><option value="PROCEDURE">Procedimento</option><option value="PORTFOLIO">Portfólio</option></select></label><label style={s.fieldGroup}><span style={s.label}>Quem pode usar</span><select style={s.input} value={documentForm.audience} onChange={(e) => setDocumentForm({ ...documentForm, audience: e.target.value })}><option value="CUSTOMER">Bot com clientes</option><option value="AGENT">Somente atendentes</option><option value="TECHNICIAN">Somente técnicos</option></select></label></div>
+          <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Fabricante</span><input style={s.input} value={documentForm.manufacturer} onChange={(e) => setDocumentForm({ ...documentForm, manufacturer: e.target.value })} placeholder="Ricoh" /></label><label style={s.fieldGroup}><span style={s.label}>Modelo do equipamento</span><input style={s.input} value={documentForm.equipmentModel} onChange={(e) => setDocumentForm({ ...documentForm, equipmentModel: e.target.value })} placeholder="MP C3004" /></label></div>
+          <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Versão</span><input style={s.input} value={documentForm.version} onChange={(e) => setDocumentForm({ ...documentForm, version: e.target.value })} /></label><label style={s.fieldGroup}><span style={s.label}>Arquivo (máx. 25 MB)</span><input style={s.input} type="file" required accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.webp" onChange={(e) => setDocumentForm({ ...documentForm, file: e.target.files?.[0] || null })} /></label></div>
+          <label style={s.fieldGroup}><span style={s.label}>Substitui uma versão anterior? (opcional)</span><select style={s.input} value={documentForm.supersedesId} onChange={(e) => setDocumentForm({ ...documentForm, supersedesId: e.target.value })}><option value="">Não, é um documento novo</option>{documents.filter((item) => item.status !== 'REPLACED').map((item) => <option key={item.id} value={item.id}>{item.title}{item.version ? ` — versão ${item.version}` : ''}</option>)}</select><small style={s.fieldHelp}>Ao publicar a nova versão, a anterior será retirada automaticamente das respostas.</small></label>
+          <div style={s.noMatch}><AlertTriangle size={17} /> O arquivo será processado como rascunho. Ele só passa a orientar o bot depois que um administrador clicar em Publicar.</div>
+          <div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowDocumentModal(false)}>Cancelar</ActionButton><ActionButton type="submit" loading={documentBusy}><Upload size={17} /> Enviar e processar</ActionButton></div>
+        </form>
+      </ModalShell> : null}
     </div>
   );
 }
@@ -234,6 +327,10 @@ export default function KnowledgeBase() {
 const s = {
   page: { padding: 'var(--space-10)', background: 'var(--bg-base)', flex: 1, overflowY: 'auto', color: 'var(--text-main)', minHeight: '100%' },
   headerActions: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)' },
+  tabs: { display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-6)', borderBottom: '1px solid var(--border-color)' },
+  tab: { display: 'flex', alignItems: 'center', gap: 'var(--space-2)', border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: 'var(--text-muted)', padding: 'var(--space-3) var(--space-4)', cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' },
+  tabActive: { color: 'var(--accent)', borderBottomColor: 'var(--accent)' },
+  tabCount: { borderRadius: 999, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', padding: '1px 7px', fontSize: 'var(--text-xs)' },
   loading: { textAlign: 'center', padding: 'var(--space-12)', color: 'var(--text-muted)' },
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' },
   statCard: { gap: 'var(--space-2)', padding: 'var(--space-5)' },
@@ -252,6 +349,8 @@ const s = {
   matchAnswer: { margin: 'var(--space-2) 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.6 },
   noMatch: { display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--warning-text)', padding: 'var(--space-4)', background: 'var(--warning-light)', borderRadius: 'var(--radius-md)' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 'var(--space-6)' },
+  documentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 'var(--space-6)' },
+  documentMeta: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' },
   card: { display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', minHeight: '100%', minWidth: 0 },
   statusRow: { display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', alignItems: 'center' },
   cardStatus: { display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.06em' },
@@ -267,6 +366,8 @@ const s = {
   cardActions: { display: 'flex', gap: 'var(--space-3)', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--space-4)' },
   actionBtn: { minWidth: '6rem' },
   modalBody: { padding: '1.8rem', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' },
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 'var(--space-4)' },
+  fieldGroup: { display: 'grid', gap: 'var(--space-2)' },
   label: { fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' },
   fieldHelp: { marginTop: 'calc(var(--space-3) * -1)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' },
   activeOption: { display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)', padding: 'var(--space-4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-panel)', cursor: 'pointer' },

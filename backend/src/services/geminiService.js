@@ -311,6 +311,16 @@ async function analyzeImage(apiKey, imageBase64, mimeType, prompt = 'Descreva es
   return null;
 }
 
+async function extractDocumentText(apiKey, documentBase64, mimeType) {
+  return generateText(apiKey, [
+    { inlineData: { data: documentBase64, mimeType } },
+    { text: `Extraia fielmente o conteúdo textual deste documento para indexação interna.
+Preserve títulos, códigos de erro, modelos, avisos, listas e procedimentos.
+Quando conseguir identificar páginas, insira o marcador [PÁGINA N] antes do conteúdo correspondente.
+Não resuma, não responda ao conteúdo e não acrescente nenhuma informação que não esteja no arquivo.` },
+  ], { profile: 'multimodal', maxOutputTokens: 10000 });
+}
+
 async function extractClientInfo(apiKey, history, currentNotes) {
   const ai = createClient(apiKey);
   const historyText = history.map((m) => `${m.fromMe ? 'Agente' : 'Cliente'}: ${m.body}`).join('\n');
@@ -390,6 +400,7 @@ module.exports = {
   summarize,
   transcribeAudio,
   analyzeImage,
+  extractDocumentText,
   generateTags,
   generateTransferSummary,
   getEmbedding,

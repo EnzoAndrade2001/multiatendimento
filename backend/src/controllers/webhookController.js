@@ -905,6 +905,8 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   let topContent = null;
   let found = false;
   let topKnowledgeId = null;
+  let topDocumentId = null;
+  let topChunkId = null;
   let knowledgeMethod = null;
   let knowledgeError = null;
 
@@ -913,12 +915,15 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
       tenantId: tenant.id,
       apiKey: settings.geminiKey,
       query: currentUserTurn,
+      equipments,
     });
     const relevant = knowledgeResult.matches;
     knowledgeContext = knowledgeSearchService.buildKnowledgeContext(relevant);
     found = relevant.length > 0;
     if (found) {
-      topKnowledgeId = relevant[0].id;
+      topKnowledgeId = relevant[0].sourceType === 'answer' ? relevant[0].id : null;
+      topDocumentId = relevant[0].documentId || null;
+      topChunkId = relevant[0].chunkId || null;
       topSimilarity = relevant[0].score;
       topContent = relevant[0].answer;
       knowledgeMethod = relevant[0].method;
@@ -1039,6 +1044,8 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
       data: {
         tenantId: tenant.id,
         knowledgeId: topKnowledgeId,
+        documentId: topDocumentId,
+        chunkId: topChunkId,
         query: currentUserTurn,
         content: topContent,
         similarity: topSimilarity,
