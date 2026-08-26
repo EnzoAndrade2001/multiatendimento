@@ -197,6 +197,21 @@ export const downloadKnowledgeDocument = (id) => api.get(`/knowledge/documents/$
 
 // Campaigns
 export const sendCampaign = (data) => api.post('/campaigns/send', data);
+// Campanhas persistentes (compatíveis com o worker do agente local)
+export const getCampaigns = (params = {}) => api.get('/campaigns', { params });
+export const getCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}`);
+export const previewCampaign = (data) => api.post('/campaigns/preview', data);
+export const createCampaign = (data) => api.post('/campaigns', data);
+export const startCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/start`);
+export const pauseCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/pause`);
+export const resumeCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/resume`);
+export const cancelCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/cancel`);
+export const retryCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/retry`);
+export const exportCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}/export`, { responseType: 'blob' });
+export const sendCampaignTest = (data) => api.post('/campaigns/test', data);
+export const getCampaignTemplates = () => api.get('/campaigns/templates');
+// Lista restrita às instâncias do tenant para seleção segura no disparo em massa.
+export const getCampaignInstances = () => api.get('/campaigns/instances');
 
 // Tags
 export const getTags = () => api.get('/tags');

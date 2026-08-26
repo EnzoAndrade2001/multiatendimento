@@ -52,6 +52,9 @@ model Tenant {
   internalMessageReads       InternalMessageRead[]
   internalMessageReactions   InternalMessageReaction[]
   internalConversationStates InternalConversationState[]
+  campaigns                  Campaign[]
+  campaignRecipients         CampaignRecipient[]
+  campaignTemplates          CampaignTemplate[]
 }
 
 model TenantSettings {
@@ -139,6 +142,7 @@ model User {
   internalMessageReads       InternalMessageRead[]
   internalMessageReactions   InternalMessageReaction[]
   internalConversationStates InternalConversationState[]
+  campaigns                  Campaign[]
 
   @@unique([tenantId, email])
 }
@@ -165,15 +169,17 @@ model TeamMember {
 }
 
 model WaInstance {
-  id           String    @id @default(cuid())
-  tenantId     String
-  instanceName String
-  phone        String?
-  status       String    @default("disconnected")
-  qrCode       String?
-  contacts     Contact[]
-  tickets      Ticket[]
-  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  id                 String              @id @default(cuid())
+  tenantId           String
+  instanceName       String
+  phone              String?
+  status             String              @default("disconnected")
+  qrCode             String?
+  contacts           Contact[]
+  tickets            Ticket[]
+  campaigns          Campaign[]
+  campaignRecipients CampaignRecipient[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
 }
 
 model MetaInstance {
@@ -213,21 +219,26 @@ model Contact {
   whatsappJid       String?
 
   // Dados extras para CRM
-  cpfCnpj               String?
-  email                 String?
-  address               String?
-  city                  String?
-  state                 String?
-  zipCode               String?
-  enableWhatsAppBilling Boolean @default(false)
+  cpfCnpj                 String?
+  email                   String?
+  address                 String?
+  city                    String?
+  state                   String?
+  zipCode                 String?
+  enableWhatsAppBilling   Boolean   @default(false)
+  enableWhatsAppMarketing Boolean   @default(false)
+  enableWhatsAppAlerts    Boolean   @default(false)
+  enableWhatsAppCounters  Boolean   @default(false)
+  whatsappOptOutAt        DateTime?
 
-  instance          WaInstance         @relation(fields: [instanceId], references: [id])
-  tenant            Tenant             @relation(fields: [tenantId], references: [id])
-  crmCustomer       CrmCustomer?       @relation(fields: [crmCustomerId], references: [id], onDelete: SetNull)
-  tickets           Ticket[]
-  scheduledMessages ScheduledMessage[]
-  equipments        Equipment[]
-  serviceOrders     ServiceOrder[]
+  instance           WaInstance          @relation(fields: [instanceId], references: [id])
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  crmCustomer        CrmCustomer?        @relation(fields: [crmCustomerId], references: [id], onDelete: SetNull)
+  tickets            Ticket[]
+  scheduledMessages  ScheduledMessage[]
+  equipments         Equipment[]
+  serviceOrders      ServiceOrder[]
+  campaignRecipients CampaignRecipient[]
 
   @@unique([tenantId, instanceId, phone])
   @@unique([tenantId, externalSource, externalId])
@@ -871,4 +882,95 @@ model PrivacyAcceptance {
 
   @@unique([tenantId, userId, policyVersion])
   @@index([tenantId, userId, acceptedAt])
+}
+
+// Campanhas de comunicação em massa. Os registros são persistidos para que
+// reinícios do backend não provoquem reenvio nem percam o progresso.
+model Campaign {
+  id              String              @id @default(cuid())
+  tenantId        String
+  createdById     String?
+  instanceId      String?
+  name            String              @default("Nova campanha")
+  category        String              @default("MARKETING") // MARKETING, ALERT, COUNTER, BILLING
+  message         String              @db.Text
+  mediaUrl        String?
+  mediaType       String?
+  mediaMimeType   String?
+  mediaFilename   String?
+  status          String              @default("DRAFT") // DRAFT, QUEUED, RUNNING, PAUSED, COMPLETED, CANCELLED, FAILED
+  delaySeconds    Int                 @default(5)
+  scheduledAt     DateTime?
+  quietHoursStart String?             @default("20:00")
+  quietHoursEnd   String?             @default("08:00")
+  total           Int                 @default(0)
+  sent            Int                 @default(0)
+  failed          Int                 @default(0)
+  skipped         Int                 @default(0)
+  delivered       Int                 @default(0)
+  retryCount      Int                 @default(0)
+  cancelRequested Boolean             @default(false)
+  cancelledAt     DateTime?
+  startedAt       DateTime?
+  pausedAt        DateTime?
+  completedAt     DateTime?
+  lastError       String?             @db.Text
+  metadata        Json?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator         User?               @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  instance        WaInstance?         @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  recipients      CampaignRecipient[]
+
+  @@index([tenantId, status, scheduledAt])
+  @@index([tenantId, createdAt])
+}
+
+model CampaignRecipient {
+  id              String      @id @default(cuid())
+  campaignId      String
+  tenantId        String
+  contactId       String?
+  instanceId      String?
+  phone           String
+  contactName     String?
+  renderedMessage String      @db.Text
+  status          String      @default("PENDING") // PENDING, SENDING, SENT, DELIVERED, FAILED, SKIPPED, CANCELLED
+  reason          String?
+  errorMessage    String?     @db.Text
+  metadata        Json?
+  externalId      String?
+  attempts        Int         @default(0)
+  lastAttemptAt   DateTime?
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  skippedAt       DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  campaign        Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact         Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  instance        WaInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+
+  @@unique([campaignId, phone])
+  @@index([tenantId, status, updatedAt])
+  @@index([campaignId, status])
+  @@index([contactId])
+}
+
+model CampaignTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  category    String   @default("MARKETING")
+  body        String   @db.Text
+  variables   Json?
+  active      Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active, category])
 }

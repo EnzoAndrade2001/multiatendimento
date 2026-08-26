@@ -19,6 +19,7 @@ const quickResponseRoutes = require('./routes/quickResponses');
 const internalMessageRoutes = require('./routes/internalMessages');
 const scheduledMessageRoutes = require('./routes/scheduledMessages');
 const scheduleProcessor = require('./services/scheduleProcessor');
+const campaignProcessor = require('./services/campaignProcessor');
 const { setIo: setIoWebhook } = require('./controllers/webhookController');
 const { setIo: setIoTicket } = require('./controllers/ticketController');
 const { setIo: setIoInternal } = require('./controllers/internalMessageController');
@@ -60,6 +61,7 @@ setIoWebhook(io);
 setIoTicket(io);
 setIoInternal(io);
 setIoCampaign(io);
+campaignProcessor.setIo(io);
 setIoBilling(io);
 setIoManagerCopy(io);
 setIoBillingDocuments(io);
@@ -243,6 +245,7 @@ server.listen(PORT, () => {
   console.log(`[server] rodando na porta ${PORT}`);
   console.log(`[server] boot=${new Date(bootAt).toISOString()} pid=${process.pid}`);
   scheduleProcessor.start();
+  campaignProcessor.start();
 
   // Auto-correção de URLs da Evolution inválidas (ex: contendo '@' ou emails)
   (async () => {

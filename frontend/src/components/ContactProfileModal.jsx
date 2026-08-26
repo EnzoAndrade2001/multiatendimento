@@ -32,6 +32,10 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
     city: contact.city || '',
     state: contact.state || '',
     zipCode: contact.zipCode || '',
+    enableWhatsAppBilling: Boolean(contact.enableWhatsAppBilling),
+    enableWhatsAppMarketing: Boolean(contact.enableWhatsAppMarketing),
+    enableWhatsAppAlerts: Boolean(contact.enableWhatsAppAlerts),
+    enableWhatsAppCounters: Boolean(contact.enableWhatsAppCounters),
   });
   const [equipments, setEquipments] = useState([]);
   const [osHistory, setOsHistory] = useState([]);
@@ -270,6 +274,23 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
             <div><label style={s.label}>E-mail</label><input style={s.input} value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
             </section>
             <section style={s.fieldCard}>
+            <h3 style={s.fieldCardTitle}>AutorizaÃ§Ãµes de WhatsApp</h3>
+            <p style={s.fieldCardHint}>Registre separadamente o que este contato autorizou receber. O sistema nunca usa uma autorizaÃ§Ã£o para outra finalidade.</p>
+            <div style={s.consentGrid}>
+              {[
+                ['enableWhatsAppBilling', 'CobranÃ§as e documentos financeiros'],
+                ['enableWhatsAppMarketing', 'PromoÃ§Ãµes e novidades'],
+                ['enableWhatsAppAlerts', 'Alertas operacionais'],
+                ['enableWhatsAppCounters', 'SolicitaÃ§Ã£o de contadores'],
+              ].map(([key, label]) => (
+                <label key={key} style={s.consentRow}>
+                  <input type="checkbox" checked={Boolean(formData[key])} onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })} />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+            </section>
+            <section style={s.fieldCard}>
             <h3 style={s.fieldCardTitle}>Endereço principal</h3>
             <div>
               <label style={s.label}>Endereço (rua, número, bairro)</label>
@@ -435,6 +456,9 @@ const s = {
   sectionStack: { display: 'grid', gap: 'var(--space-3)' },
   fieldCard: { padding: 'var(--space-4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)' },
   fieldCardTitle: { margin: '0 0 var(--space-4)', paddingBottom: 'var(--space-3)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
+  fieldCardHint: { margin: '-var(--space-2) 0 var(--space-4)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.5 },
+  consentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-3)' },
+  consentRow: { display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)', color: 'var(--text-main)', fontSize: 'var(--text-sm)', lineHeight: 1.4, cursor: 'pointer' },
   inputGroup: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' },
   label: {
     fontSize: 'var(--text-xs)',
