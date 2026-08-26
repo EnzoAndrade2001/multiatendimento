@@ -6,6 +6,32 @@ const STOP_WORDS = new Set(['a', 'ao', 'aos', 'as', 'com', 'da', 'das', 'de', 'd
 function normalizeText(value = '') { return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 function tokenize(value) { return normalizeText(value).split(/\s+/).filter((token) => token.length >= 2 && !STOP_WORDS.has(token)); }
 
+function editDistance(left, right) {
+  const a = normalizeText(left);
+  const b = normalizeText(right);
+  const matrix = Array.from({ length: a.length + 1 }, (_, row) => Array.from({ length: b.length + 1 }, (_, column) => row || column));
+  for (let row = 1; row <= a.length; row += 1) {
+    for (let column = 1; column <= b.length; column += 1) {
+      const cost = a[row - 1] === b[column - 1] ? 0 : 1;
+      matrix[row][column] = Math.min(matrix[row - 1][column] + 1, matrix[row][column - 1] + 1, matrix[row - 1][column - 1] + cost);
+      if (row > 1 && column > 1 && a[row - 1] === b[column - 2] && a[row - 2] === b[column - 1]) {
+        matrix[row][column] = Math.min(matrix[row][column], matrix[row - 2][column - 2] + 1);
+      }
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+function fuzzyTokenMatch(reference, candidateText) {
+  const references = tokenize(reference).filter((token) => token.length >= 4);
+  const candidates = tokenize(candidateText).filter((token) => token.length >= 4);
+  return references.some((expected) => candidates.some((candidate) => {
+    if (expected === candidate) return true;
+    const tolerance = Math.min(2, Math.max(1, Math.floor(Math.max(expected.length, candidate.length) / 5)));
+    return editDistance(expected, candidate) <= tolerance;
+  }));
+}
+
 function lexicalSimilarity(query, knowledge) {
   const queryTokens = [...new Set(tokenize(query))];
   if (!queryTokens.length) return 0;
@@ -57,11 +83,11 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
       modelRelevant: !metadata || normalizedEquipments.some((equipment) => {
         const model = normalizeText(chunk.document.equipmentModel || '');
         if (model) return equipment.includes(model) || tokenize(model).filter((token) => token.length >= 3).every((token) => equipment.includes(token));
-        return tokenize(chunk.document.manufacturer || '').some((token) => equipment.includes(token));
+        return fuzzyTokenMatch(chunk.document.manufacturer || '', equipment);
       }) || (() => {
         const model = normalizeText(chunk.document.equipmentModel || '');
         if (model) return normalizedQuery.includes(model) || tokenize(model).filter((token) => token.length >= 3).every((token) => normalizedQuery.includes(token));
-        return tokenize(chunk.document.manufacturer || '').some((token) => normalizedQuery.includes(token));
+        return fuzzyTokenMatch(chunk.document.manufacturer || '', normalizedQuery);
       })(),
     };
   }).filter((item) => item.modelRelevant);
@@ -91,4 +117,4 @@ function buildKnowledgeContext(matches) {
   return `\n\n[BASE DE CONHECIMENTO OFICIAL DA EMPRESA]:\nUse somente os itens pertinentes à solicitação atual. Não complete lacunas, não invente procedimentos e não transforme exemplos em promessa de prazo, SLA ou confirmação operacional.\n${items.join('\n---\n')}`;
 }
 
-module.exports = { buildKnowledgeContext, lexicalSimilarity, normalizeText, searchTenantKnowledge, selectRelevantKnowledge };
+module.exports = { buildKnowledgeContext, editDistance, fuzzyTokenMatch, lexicalSimilarity, normalizeText, searchTenantKnowledge, selectRelevantKnowledge };

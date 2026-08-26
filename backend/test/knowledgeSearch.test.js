@@ -5,9 +5,17 @@ const path = require('node:path');
 const geminiService = require('../src/services/geminiService');
 const {
   buildKnowledgeContext,
+  editDistance,
+  fuzzyTokenMatch,
   lexicalSimilarity,
   selectRelevantKnowledge,
 } = require('../src/services/knowledgeSearchService');
+
+test('filtro tolera inversão simples no fabricante sem liberar palavras diferentes', () => {
+  assert.equal(editDistance('xerox', 'xerxo'), 1);
+  assert.equal(fuzzyTokenMatch('XERXO', 'qual gramatura usar na Xerox 7830'), true);
+  assert.equal(fuzzyTokenMatch('RICOH', 'qual gramatura usar na Xerox 7830'), false);
+});
 
 const KNOWLEDGES = [
   {
