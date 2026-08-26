@@ -206,3 +206,19 @@ sequenceDiagram
     API->>DB: Serve command and query traffic
     RT-->>API: Connection lifecycle and tenant room joins
 ```
+
+## Gemini runtime profiles
+
+The backend uses the maintained `@google/genai` SDK and keeps model selection
+server-side. Each profile has ordered fallbacks; the first available model is
+used and the selected model is written to the application log without prompt
+or customer data.
+
+- `GEMINI_CHAT_MODELS`: `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-2.5-flash`
+- `GEMINI_LIGHT_MODELS`: `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-2.5-flash-lite`
+- `GEMINI_MULTIMODAL_MODELS`: `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-2.5-flash`
+
+Gemini 3 chat requests use low thinking effort for predictable WhatsApp
+latency. Light tasks use minimal effort where supported. Gemini 2.5 fallbacks
+retain their compatible zero-budget configuration. Do not add legacy sampling
+parameters to Gemini 3.6/3.7 requests.

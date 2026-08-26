@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const crmController = require('./crmController');
+const { generateText } = require('../services/geminiService');
 
 const SENTINELA_SYNC_STALE_AFTER_MINUTES = 15;
 
@@ -546,8 +547,6 @@ async function getBenchmark(req, res) {
   }
 }
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
 async function getDetective(req, res) {
   const tenantId = req.user.tenantId;
 
@@ -629,9 +628,6 @@ async function getDetective(req, res) {
       aiDiagnosis = '**Chave do Gemini não configurada.** Vá em Ajustes > iLux Sentinela para cadastrar sua chave e liberar o diagnóstico automático por inteligência artificial.';
     } else {
       try {
-        const genAI = new GoogleGenerativeAI(settings.geminiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
         const prompt = `Você é o Detetive IA do iLux Sentinela, um analista operacional de suporte e inteligência de receita especialista em locação de impressoras.
         Analise o relatório operacional abaixo de duas semanas consecutivas da empresa e escreva um diagnóstico operacional conciso (em português, formato de parágrafos corridos, use negrito nas métricas chaves para dar impacto).
         Explique as possíveis causas dos desvios (ex: por que o SLA aumentou, impacto nas rescisões de contrato) e sugira 2 ações corretivas imediatas.
@@ -645,8 +641,10 @@ async function getDetective(req, res) {
 
         Diagnóstico:`;
 
-        const result = await model.generateContent(prompt);
-        aiDiagnosis = result.response.text().trim();
+        aiDiagnosis = await generateText(settings.geminiKey, prompt, {
+          profile: 'chat',
+          maxOutputTokens: 1400,
+        });
       } catch (err) {
         console.error('[revenueController] Falha ao gerar diagnóstico com Gemini:', err);
         aiDiagnosis = `**Erro na análise por IA:** ${err.message}. Mas você pode acompanhar as variações dos números no painel acima.`;
@@ -776,12 +774,6 @@ async function auditTicket(req, res) {
       return `[${m.createdAt.toLocaleTimeString('pt-BR')}] ${sender}: ${text}`;
     }).join('\n');
 
-    const genAI = new GoogleGenerativeAI(settings.geminiKey);
-    const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.5-flash',
-      generationConfig: { responseMimeType: "application/json" }
-    });
-
     const prompt = `Você é um auditor de qualidade de atendimento ao cliente por inteligência artificial (QA Analyst).
     Analise a conversa abaixo que ocorreu entre o cliente, a IA/Sistema (robô) e o atendente humano da empresa. Atribua uma nota de 0 a 100 de conformidade geral e elabore um parecer detalhado.
 
@@ -800,8 +792,11 @@ async function auditTicket(req, res) {
 
     JSON de retorno:`;
 
-    const result = await model.generateContent(prompt);
-    let responseText = result.response.text().trim();
+    let responseText = await generateText(settings.geminiKey, prompt, {
+      profile: 'chat',
+      maxOutputTokens: 2400,
+      json: true,
+    });
 
     // Limpar tag ```json se houver
     if (responseText.startsWith('```json')) {
