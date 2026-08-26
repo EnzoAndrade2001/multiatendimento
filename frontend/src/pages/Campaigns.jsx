@@ -61,6 +61,18 @@ const TYPES = [
 ];
 
 const EMPTY_PROGRESS = { status: 'DRAFT', total: 0, sent: 0, delivered: 0, failed: 0, skipped: 0, pending: 0 };
+const EXCLUSION_LABELS = {
+  noTag: 'Fora da tag selecionada',
+  duplicate: 'Número duplicado',
+  invalidPhone: 'Telefone inválido ou ausente',
+  noConsent: 'Sem aceite para esta finalidade',
+  noEquipment: 'Sem equipamento ativo',
+  optOut: 'Opt-out registrado',
+};
+
+function exclusionLabel(reason) {
+  return EXCLUSION_LABELS[reason] || reason;
+}
 
 function connected(instance) {
   const status = String(instance?.status || instance?.state || '').toLowerCase();
@@ -482,7 +494,7 @@ export default function Campaigns() {
           <div style={s.sideColumn}>
             <SurfaceCard style={s.card}>
               <div style={s.sectionHeading}><div><span style={s.eyebrow}>Prévia</span><h2 style={s.sectionTitle}>Conferência antes do envio</h2></div><Check size={20} color="var(--success-text)" /></div>
-              {preview ? <><div style={s.previewStats}><div><strong>{preview.total ?? 0}</strong><small>Encontrados</small></div><div style={s.statGood}><strong>{preview.eligible ?? preview.valid ?? 0}</strong><small>Receberão</small></div><div style={s.statWarn}><strong>{preview.skipped ?? preview.excluded ?? 0}</strong><small>Excluídos</small></div></div>{preview.reasons ? <div style={s.reasonList}>{Object.entries(preview.reasons).map(([reason, count]) => <span key={reason}>{count} × {reason}</span>)}</div> : null}<p style={s.hint}>A lista final é congelada no início da campanha e registrada no histórico.</p></> : <div style={s.emptyPreview}><Users size={28} /><p>Selecione o público e clique em <strong>Calcular prévia</strong>.</p></div>}
+              {preview ? <><div style={s.previewStats}><div><strong>{preview.total ?? 0}</strong><small>Na seleção</small></div><div style={s.statGood}><strong>{preview.eligible ?? preview.valid ?? 0}</strong><small>Receberão</small></div><div style={s.statWarn}><strong>{preview.skipped ?? preview.excluded ?? 0}</strong><small>Não receberão</small></div></div>{preview.reasons ? <div style={s.reasonList}>{Object.entries(preview.reasons).filter(([, count]) => Number(count) > 0).map(([reason, count]) => <span key={reason}>{count} × {exclusionLabel(reason)}</span>)}</div> : null}<p style={s.hint}>Na seleção = contatos da tag/contatos escolhidos. A lista final é congelada no início da campanha e registrada no histórico.</p></> : <div style={s.emptyPreview}><Users size={28} /><p>Selecione o público e clique em <strong>Calcular prévia</strong>.</p></div>}
               {message ? <div style={s.messagePreview}><small>Mensagem de exemplo</small><p>{message.replaceAll('[nome]', selectedContacts[0]?.name || 'Cliente')}</p></div> : null}
             </SurfaceCard>
             {activeCampaign ? <SurfaceCard style={s.card}><div style={s.sectionHeading}><div><span style={s.eyebrow}>Acompanhamento</span><h2 style={s.sectionTitle}>{activeCampaign.name || 'Campanha atual'}</h2></div><span style={statusStyle(activeCampaign.status)}>{activeCampaign.status}</span></div><div style={s.progressBar}><div style={{ ...s.progressFill, width: `${percentage}%` }} /></div><div style={s.progressMeta}><span>{processed} de {currentProgress.total || 0}</span><span>{Math.round(percentage)}%</span></div><div style={s.stats}><span style={{ color: 'var(--success-text)' }}>Enviadas: {(currentProgress.sent || 0) + (currentProgress.delivered || 0)}</span><span style={{ color: 'var(--danger-text)' }}>Falhas: {currentProgress.failed || 0}</span></div><div style={s.actionRow}>{['RUNNING', 'QUEUED'].includes(activeCampaign.status) ? <ActionButton variant="secondary" size="sm" onClick={() => campaignAction('pause', activeCampaign)}><Pause size={14} /> Pausar</ActionButton> : null}{activeCampaign.status === 'PAUSED' ? <ActionButton size="sm" onClick={() => campaignAction('resume', activeCampaign)}><Play size={14} /> Retomar</ActionButton> : null}{['RUNNING', 'QUEUED', 'PAUSED'].includes(activeCampaign.status) ? <ActionButton variant="danger" size="sm" onClick={() => campaignAction('cancel', activeCampaign)}><Square size={14} /> Cancelar</ActionButton> : null}{['FAILED', 'COMPLETED'].includes(activeCampaign.status) && activeCampaign.progress?.failed ? <ActionButton variant="secondary" size="sm" onClick={() => campaignAction('retry', activeCampaign)}><RotateCcw size={14} /> Reprocessar falhas</ActionButton> : null}</div></SurfaceCard> : null}
