@@ -5,6 +5,7 @@ const evolutionService = require('../services/evolutionService');
 const geminiService = require('../services/geminiService');
 const businessHourService = require('../services/businessHourService');
 const botPromptService = require('../services/botPromptService');
+const knowledgeSearchService = require('../services/knowledgeSearchService');
 const {
   guardBotReply,
   isUnsafeOperationalClaim,
@@ -93,7 +94,6 @@ function scheduleDisconnectConfirmation(instanceName, waInstanceId) {
 }
 
 const teamCache = new Map();
-const knowledgeCache = new Map();
 const HUMAN_ONLY_INSTANCE_PATTERNS = String(process.env.HUMAN_ONLY_INSTANCE_PATTERNS || 'captacao,captação,lead,leads,locacao,locação,comercial,vendas')
   .split(',')
   .map((value) => value.trim().toLowerCase())
@@ -120,35 +120,6 @@ async function getTeamsCached(tenantId) {
 
   const teams = await prisma.team.findMany({ where: { tenantId } });
   return setCacheEntry(teamCache, tenantId, teams);
-}
-
-async function getKnowledgeCached(tenantId) {
-  const cached = getCacheEntry(knowledgeCache, tenantId, 2 * 60 * 1000);
-  if (cached) return cached;
-
-  const knowledges = await prisma.knowledge.findMany({
-    where: { tenantId, active: true, embedding: { not: null } },
-    select: { id: true, question: true, answer: true, embedding: true }
-  });
-
-  return setCacheEntry(knowledgeCache, tenantId, knowledges);
-}
-
-function shouldUseKnowledgeSearch(message) {
-  const normalized = (message || '').trim().toLowerCase();
-  if (normalized.length < 18) return false;
-
-  return normalized.includes('?')
-    || normalized.includes('como')
-    || normalized.includes('qual')
-    || normalized.includes('quando')
-    || normalized.includes('onde')
-    || normalized.includes('porque')
-    || normalized.includes('por que')
-    || normalized.includes('procedimento')
-    || normalized.includes('configur')
-    || normalized.includes('instal')
-    || normalized.includes('erro');
 }
 
 function isHumanOnlyInstance(instanceName = '') {
@@ -927,36 +898,36 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   console.log(`[bot] Ticket ${ticket.id} | Equipamentos encontrados: ${equipments.length}`);
   if (equipments.length > 0) console.log(`[bot] Contexto de equipamentos enviado:\n${equipContext}`);
 
-  // Busca semântica de conhecimento
+  // Toda resposta gerada pela IA consulta a base. A busca híbrida usa embedding
+  // quando disponível e palavras/tags como contingência.
   let knowledgeContext = "";
   let topSimilarity = 0;
   let topContent = null;
   let found = false;
+  let topKnowledgeId = null;
+  let knowledgeMethod = null;
+  let knowledgeError = null;
 
-  if (settings.geminiKey && shouldUseKnowledgeSearch(currentUserTurn)) {
-    try {
-      const userEmbedding = await geminiService.getEmbedding(settings.geminiKey, currentUserTurn);
-      if (userEmbedding) {
-        const allKnowledges = await getKnowledgeCached(tenant.id);
-        
-        const relevant = allKnowledges.map(k => {
-          let vec = null;
-          try { vec = k.embedding; } catch(e) {}
-          return { ...k, similarity: geminiService.cosineSimilarity(userEmbedding, vec) };
-        })
-        .filter(k => k.similarity > 0.65)
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, 5);
-        
-        if (relevant.length > 0) {
-          found = true;
-          topSimilarity = relevant[0].similarity;
-          topContent = relevant[0].answer;
-          knowledgeContext = "\n\nUSE O SEGUINTE CONHECIMENTO DA EMPRESA:\n" + 
-            relevant.map(k => `Dúvida: ${k.question}\nResposta: ${k.answer}`).join("\n---\n");
-        }
-      }
-    } catch (err) { console.error('[bot] erro semântica:', err.message); }
+  try {
+    const knowledgeResult = await knowledgeSearchService.searchTenantKnowledge({
+      tenantId: tenant.id,
+      apiKey: settings.geminiKey,
+      query: currentUserTurn,
+    });
+    const relevant = knowledgeResult.matches;
+    knowledgeContext = knowledgeSearchService.buildKnowledgeContext(relevant);
+    found = relevant.length > 0;
+    if (found) {
+      topKnowledgeId = relevant[0].id;
+      topSimilarity = relevant[0].score;
+      topContent = relevant[0].answer;
+      knowledgeMethod = relevant[0].method;
+    }
+    knowledgeError = knowledgeResult.embeddingError;
+    console.log(`[knowledge] Ticket ${ticket.id} | consultados=${knowledgeResult.totalActive} | encontrados=${relevant.length} | método=${knowledgeMethod || 'sem correspondência'}`);
+  } catch (err) {
+    knowledgeError = err.message;
+    console.error('[knowledge] falha ao consultar base:', err.message);
   }
 
 
@@ -1067,10 +1038,14 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     await prisma.knowledgeLog.create({
       data: {
         tenantId: tenant.id,
+        knowledgeId: topKnowledgeId,
         query: currentUserTurn,
         content: topContent,
         similarity: topSimilarity,
-        found
+        found,
+        searched: true,
+        method: knowledgeMethod,
+        error: knowledgeError ? String(knowledgeError).slice(0, 500) : null,
       }
     });
   } catch (err) { console.error('[log] erro ao gravar auditoria:', err.message); }

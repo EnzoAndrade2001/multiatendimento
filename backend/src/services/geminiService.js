@@ -272,7 +272,7 @@ async function getEmbedding(apiKey, text) {
 }
 
 function cosineSimilarity(vecA, vecB) {
-  if (!vecA || !vecB) return 0;
+  if (!Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length === 0 || vecA.length !== vecB.length) return 0;
 
   let dotProduct = 0;
   let mA = 0;
@@ -286,8 +286,9 @@ function cosineSimilarity(vecA, vecB) {
 
   mA = Math.sqrt(mA);
   mB = Math.sqrt(mB);
+  if (!mA || !mB) return 0;
   const sim = dotProduct / (mA * mB);
-  return Number.isNaN(sim) ? 0 : sim;
+  return Number.isFinite(sim) ? sim : 0;
 }
 
 async function analyzeImage(apiKey, imageBase64, mimeType, prompt = 'Descreva esta imagem.') {

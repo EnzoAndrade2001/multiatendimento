@@ -179,6 +179,9 @@ export const deleteQuickResponse = (id) => api.delete(`/quick-responses/${id}`);
 
 // Knowledge Base
 export const getKnowledge = () => api.get('/knowledge');
+export const getKnowledgeStats = () => api.get('/knowledge/stats');
+export const testKnowledgeSearch = (query) => api.post('/knowledge/test', { query });
+export const reindexKnowledge = () => api.post('/knowledge/reindex');
 export const createKnowledge = (data) => api.post('/knowledge', data);
 export const updateKnowledge = (id, data) => api.put(`/knowledge/${id}`, data);
 export const deleteKnowledge = (id) => api.delete(`/knowledge/${id}`);
