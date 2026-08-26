@@ -460,7 +460,7 @@ export default function Campaigns() {
               </div>
             </div>
             {selectedContacts.length ? <div style={s.selectedPanel}><div style={s.selectedHeader}><strong>Contatos adicionados ({selectedContacts.length})</strong><ActionButton variant="secondary" size="sm" onClick={() => setShowSaveTag(true)}><Plus size={14} /> Salvar como grupo</ActionButton></div><div style={s.chipsWrap}>{selectedContacts.map((contact) => <span style={s.selectedChip} key={contact.id}>{contact.name || contact.phone}<button type="button" aria-label={`Remover ${contact.name || contact.phone}`} style={s.removeChip} onClick={() => setSelectedContacts((items) => items.filter((item) => item.id !== contact.id))}><X size={13} /></button></span>)}</div></div> : null}
-            <div style={s.consentNotice}><CheckCircle2 size={17} /><span>A tag selecionada autoriza este disparo de <strong>{typeInfo.label.toLowerCase()}</strong>. O sistema remove duplicados e números inválidos; contatos adicionados individualmente exigem o aceite correspondente e o opt-out sempre bloqueia.</span></div>
+            <div style={s.consentNotice}><CheckCircle2 size={17} /><span>A tag ou os contatos selecionados autorizam este disparo de <strong>{typeInfo.label.toLowerCase()}</strong>. O sistema remove duplicados e números inválidos; o opt-out sempre bloqueia.</span></div>
             <ActionButton variant="secondary" onClick={handlePreview} loading={previewLoading} disabled={!canEdit}><Users size={16} /> Calcular prévia do público</ActionButton>
 
             <div style={s.divider} />

@@ -109,12 +109,14 @@ async function loadAudience({ tenantId, tag, contactIds, category = 'MARKETING',
     ? contacts.filter((contact) => parseTags(contact.tags).some((item) => item.toLowerCase() === normalizedTag))
     : contacts;
   const noTag = contacts.length - taggedContacts.length;
+  const hasContactSelection = Array.isArray(contactIds) && contactIds.length > 0;
+  const authorizedBySelection = Boolean(normalizedTag) || hasContactSelection;
   if (normalizeCategory(category) === 'COUNTER') {
-    // A tag selecionada representa a autorização operacional do disparo. O aceite
-    // específico continua sendo exigido quando o público é montado manualmente.
+    // Uma tag ou uma seleção manual representa a autorização operacional do
+    // disparo. O opt-out global continua bloqueando o contato.
     const counter = buildCounterAudience(taggedContacts, {
       template: message,
-      requireOptIn: requireConsent && !Boolean(normalizedTag),
+      requireOptIn: requireConsent && !authorizedBySelection,
       excludeOptOut: true,
     });
     const skipCounts = counter.skipped.reduce((acc, item) => {
@@ -137,9 +139,6 @@ async function loadAudience({ tenantId, tag, contactIds, category = 'MARKETING',
     };
   }
   const consentField = CONSENT_FIELDS[normalizeCategory(category)];
-  // Para campanhas segmentadas, a própria tag é o critério de autorização usado
-  // pela operação. O opt-out global continua bloqueando o contato em qualquer caso.
-  const authorizedByTag = Boolean(normalizedTag);
   const seen = new Set();
   const rows = [];
   const exclusions = { noTag: 0, duplicate: 0, invalidPhone: 0, noConsent: 0, optOut: 0 };
@@ -165,7 +164,7 @@ async function loadAudience({ tenantId, tag, contactIds, category = 'MARKETING',
       rows.push({ contact, phone, status: 'SKIPPED', reason: 'Contato solicitou não receber mensagens' });
       continue;
     }
-    if (requireConsent && !authorizedByTag && consentField && !contact[consentField]) {
+    if (requireConsent && !authorizedBySelection && consentField && !contact[consentField]) {
       exclusions.noConsent++;
       rows.push({ contact, phone, status: 'SKIPPED', reason: `Sem aceite para ${normalizeCategory(category).toLowerCase()}` });
       continue;

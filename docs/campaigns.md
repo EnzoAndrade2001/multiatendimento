@@ -20,10 +20,9 @@ O módulo **Operação > Campanhas** usa uma fila persistida no PostgreSQL. Cada
 Os aceites são separados no contato por finalidade: cobrança, marketing,
 alertas e solicitação de contadores. Quando uma tag é selecionada no público,
 ela representa a autorização operacional para aquele disparo e não é necessário
-marcar novamente o aceite de cada contato. Para contatos adicionados
-individualmente, o aceite da finalidade continua sendo exigido. Em qualquer
-modalidade, `whatsappOptOutAt` sempre bloqueia novos disparos, independentemente
-do aceite anterior.
+marcar novamente o aceite de cada contato. A mesma regra vale quando os contatos
+são adicionados manualmente. Em qualquer modalidade, `whatsappOptOutAt` sempre
+bloqueia novos disparos, independentemente do aceite anterior.
 
 ## Solicitação de contadores
 
