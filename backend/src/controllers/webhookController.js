@@ -5,6 +5,11 @@ const evolutionService = require('../services/evolutionService');
 const geminiService = require('../services/geminiService');
 const businessHourService = require('../services/businessHourService');
 const botPromptService = require('../services/botPromptService');
+const {
+  guardBotReply,
+  isUnsafeOperationalClaim,
+  selectCurrentSessionHistory,
+} = require('../services/botSafetyService');
 
 let io;
 function setIo(socketIo) { io = socketIo; }
@@ -879,22 +884,25 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   if (msgLower.includes('toner') || msgLower.includes('tonner') || msgLower.includes('cilindro')) autoCategory = 'SUPRIMENTO';
   if (msgLower.includes('falha') || msgLower.includes('não imprime') || msgLower.includes('parou')) autoCategory = 'SUPORTE';
 
-  // 2. MEMÓRIA DE LONGO PRAZO (Filtra mensagens de alucinação anteriores para não "viciar" a IA)
+  // 2. MEMÓRIA DA SESSÃO ATUAL. Nunca mistura tickets ou sessões antigas.
   const history = await prisma.message.findMany({
-    where: { ticket: { contactId: contact.id }, id: { not: incomingMessage.id } },
+    where: { ticketId: ticket.id, id: { not: incomingMessage.id } },
     orderBy: { createdAt: 'desc' },
-    take: 15, 
+    take: 50,
   });
-  
-  // Remove do histórico mensagens onde o robô deu as opções "1 - Chamados Técnico", etc.
-  const cleanHistory = history.filter(m => {
-    if (!m.fromBot) return true;
-    const body = m.body.toLowerCase();
-    if (body.includes('chamados técnico') || body.includes('financeiro') || body.includes('opções que tenho disponíveis')) return false;
+
+  const currentSessionHistory = selectCurrentSessionHistory(history, incomingMessage.createdAt || new Date());
+
+  // Confirmações de O.S./status/prazo não alimentam a IA. Mesmo uma mensagem
+  // legítima de outra etapa não pode ser imitada ou ter o número incrementado.
+  const cleanHistory = currentSessionHistory.filter(m => {
+    const body = String(m.body || '').toLowerCase();
+    if (isUnsafeOperationalClaim(body)) return false;
+    if (m.fromBot && (body.includes('chamados técnico') || body.includes('financeiro') || body.includes('opções que tenho disponíveis'))) return false;
     return true;
   });
 
-  const reversedHistory = normalizeHistoryForAi([...cleanHistory].reverse());
+  const reversedHistory = normalizeHistoryForAi(cleanHistory);
 
   // 3. SYSTEM PROMPT (Prioridade absoluta para o que o usuário escreveu no painel)
   const userPrompt = settings.botSystemPrompt || 'Você é um Assistente de Atendimento cordial.';
@@ -998,6 +1006,30 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   
   botReply = botReply.replace(/\[\[ROUTE:.*?\]\]/g, '').trim();
 
+  // O Gemini não possui confirmação transacional do Firebird. Essa barreira
+  // roda depois da IA e antes do WhatsApp, portanto não depende do prompt.
+  const safety = guardBotReply(botReply);
+  if (safety.blocked) {
+    botReply = safety.reply;
+    console.warn('[bot-safety] resposta operacional não verificada bloqueada', {
+      tenantId: tenant.id,
+      ticketId: ticket.id,
+      reasons: safety.reasons,
+    });
+    try {
+      await prisma.ticketEvent.create({
+        data: {
+          ticketId: ticket.id,
+          tenantId: tenant.id,
+          type: 'bot_safety_blocked',
+          payload: JSON.stringify({ reasons: safety.reasons }),
+        },
+      });
+    } catch (err) {
+      console.error('[bot-safety] falha ao gravar auditoria:', err.message);
+    }
+  }
+
   // Adiciona o nome do Robô na mensagem do WhatsApp
   const botName = settings.botName || 'ROBÔ';
   const finalMessageBody = `*${botName}*\n${botReply}`;
@@ -1013,7 +1045,8 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     where: { id: ticket.id },
     data: { 
       teamId: targetTeam?.id,
-      priority: category === 'SUPORTE' ? 'high' : 'medium'
+      priority: category === 'SUPORTE' ? 'high' : 'medium',
+      ...(safety.blocked ? { status: 'pending' } : {}),
     }
   });
 

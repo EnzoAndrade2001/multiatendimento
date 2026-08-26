@@ -384,6 +384,16 @@ async function createOS(req, res) {
       include: { contact: true, equipment: true },
     });
 
+    if (os && (os.ticketId !== ticketId || os.contactId !== contactId || os.equipmentId !== equipmentId)) {
+      console.warn('[createOS] requestKey rejeitada por pertencer a outro contexto', {
+        serviceOrderId: os.id,
+        ticketId,
+      });
+      return res.status(409).json({
+        error: 'Esta solicitação de O.S. pertence a outra conversa. Feche o modal e abra uma nova solicitação.',
+      });
+    }
+
     if (!os) {
       os = await prisma.serviceOrder.findFirst({
         where: {
@@ -444,6 +454,26 @@ async function createOS(req, res) {
     const confirmed = await waitForIluxConfirmation(os.id, tenantId);
     if (!confirmed) return res.status(404).json({ error: 'Solicitação de O.S. não encontrada.' });
     if (confirmed.externalId) {
+      const matchesRequestedContext = confirmed.ticketId === ticketId
+        && confirmed.contactId === contactId
+        && confirmed.equipmentId === equipmentId
+        && /^\d+$/.test(String(confirmed.externalId));
+      if (!matchesRequestedContext) {
+        console.error('[createOS] confirmação do iLux rejeitada por contexto divergente', {
+          serviceOrderId: confirmed.id,
+          requested: { ticketId, contactId, equipmentId },
+          confirmed: {
+            ticketId: confirmed.ticketId,
+            contactId: confirmed.contactId,
+            equipmentId: confirmed.equipmentId,
+            externalId: confirmed.externalId,
+          },
+        });
+        return res.status(409).json({
+          error: 'O iLux confirmou uma O.S. com dados diferentes desta conversa. Nenhuma confirmação foi enviada ao cliente.',
+          serviceOrderId: confirmed.id,
+        });
+      }
       return res.status(201).json({ ...confirmed, confirmed: true });
     }
     if (confirmed.status === 'ERRO_INTEGRACAO') {
@@ -466,7 +496,7 @@ async function createOS(req, res) {
 async function getOSStatus(req, res) {
   const order = await prisma.serviceOrder.findFirst({
     where: { id: req.params.id, tenantId: req.user.tenantId },
-    select: { id: true, externalId: true, status: true, ticketId: true, updatedAt: true },
+    select: { id: true, externalId: true, status: true, ticketId: true, contactId: true, equipmentId: true, updatedAt: true },
   });
   if (!order) return res.status(404).json({ error: 'O.S. não encontrada.' });
   return res.json({ ...order, confirmed: Boolean(order.externalId) });

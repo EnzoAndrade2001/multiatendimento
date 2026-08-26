@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api, { BACKEND_URL, getEquipments } from '../services/api';
 import { CheckCircle2, ChevronDown, FileText, LoaderCircle, MapPin, Printer, Wand2 } from 'lucide-react';
 import EquipmentPickerModal, { equipmentAddress, equipmentOperationalLocation } from './EquipmentPickerModal';
 import { toast } from '../utils/toast';
 
 export default function CreateOsModal({ ticket, onClose, onCreated }) {
+  const modalContext = useRef({ ticketId: ticket.id, contactId: ticket.contact?.id });
   const [equipments, setEquipments] = useState([]);
   const [osTypes, setOsTypes] = useState([]);
   const [technicians, setTechnicians] = useState([]);
@@ -28,10 +29,36 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   }
 
   function completeOrder(order) {
+    const expected = {
+      ticketId: modalContext.current.ticketId,
+      contactId: modalContext.current.contactId,
+      equipmentId: formData.equipmentId,
+    };
+    const externalId = String(order?.externalId || '').trim();
+    const matchesContext = /^\d+$/.test(externalId)
+      && order?.ticketId === expected.ticketId
+      && order?.contactId === expected.contactId
+      && order?.equipmentId === expected.equipmentId;
+
+    if (!matchesContext) {
+      console.error('[CreateOsModal] confirmação de O.S. rejeitada por contexto divergente', {
+        orderId: order?.id,
+        expected,
+        received: {
+          ticketId: order?.ticketId,
+          contactId: order?.contactId,
+          equipmentId: order?.equipmentId,
+          hasExternalId: Boolean(externalId),
+        },
+      });
+      setError('A O.S. foi localizada, mas os dados não correspondem a esta conversa. Nenhuma confirmação foi enviada. Atualize e tente novamente.');
+      return false;
+    }
     setCreatedOrder(order);
-    Promise.resolve(onCreated?.(order)).catch((callbackError) => {
+    Promise.resolve(onCreated?.(order, expected)).catch((callbackError) => {
       console.error('[CreateOsModal] erro após confirmar O.S.:', callbackError);
     });
+    return true;
   }
 
   useEffect(() => {

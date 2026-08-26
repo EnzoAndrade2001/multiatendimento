@@ -903,9 +903,22 @@ export default function Inbox() {
         <CreateOsModal
           ticket={selectedTicket}
           onClose={() => setShowOsModal(false)}
-          onCreated={async (os) => {
+          onCreated={async (os, confirmedContext) => {
+            const ticketId = confirmedContext?.ticketId;
+            const contextIsValid = /^\d+$/.test(String(os?.externalId || ''))
+              && ticketId
+              && os.ticketId === ticketId
+              && os.contactId === confirmedContext.contactId
+              && os.equipmentId === confirmedContext.equipmentId;
+            if (!contextIsValid) {
+              console.error('[Inbox] envio de confirmação de O.S. bloqueado por contexto divergente', {
+                orderId: os?.id,
+                ticketId: os?.ticketId,
+              });
+              toast.error('A confirmação da O.S. não foi enviada porque os dados não correspondem a esta conversa.');
+              return;
+            }
             toast.success(`O.S. ${os.externalId} criada no iLux!`);
-            const ticketId = os.ticketId || selectedTicket.id;
             try {
               await sendMessage(
                 ticketId,
