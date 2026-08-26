@@ -86,6 +86,20 @@
   --text-muted: #AAB4C5;
   --text-dim: #7C899E;
   --text-inverse: #17130A;
+  --lead-form-bg: linear-gradient(180deg, rgba(18, 24, 37, 0.88), rgba(14, 18, 30, 0.98));
+  --lead-preview-bg: linear-gradient(180deg, rgba(16, 22, 35, 0.96), rgba(13, 17, 28, 0.98));
+  --lead-preview-header-bg: rgba(13, 18, 28, 0.92);
+  --lead-preview-stage-bg: linear-gradient(135deg, rgba(16, 88, 68, 0.30), rgba(11, 15, 24, 0.95)), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px);
+  --lead-preview-bubble-bg: linear-gradient(180deg, #0b6b5d, #075E54);
+  --lead-preview-bubble-media-bg: rgba(12, 18, 26, 0.82);
+  --lead-preview-bubble-empty-bg: rgba(12, 18, 26, 0.72);
+  --lead-preview-bubble-text: #ffffff;
+  --lead-preview-bubble-border: rgba(255, 255, 255, 0.06);
+  --lead-preview-media-border: rgba(255, 255, 255, 0.05);
+  --lead-preview-empty-border: rgba(255, 255, 255, 0.08);
+  --lead-preview-hint: rgba(255, 255, 255, 0.62);
+  --lead-preview-time: rgba(255, 255, 255, 0.66);
+  --lead-preview-image-bg: rgba(0, 0, 0, 0.18);
   color-scheme: dark;
 }
 
@@ -130,6 +144,20 @@ body.light-theme {
   --text-muted: #475569;
   --text-dim: #64748B;
   --text-inverse: #FFFFFF;
+  --lead-form-bg: linear-gradient(180deg, #ffffff, #f8fafc);
+  --lead-preview-bg: linear-gradient(180deg, #ffffff, #f5f7fb);
+  --lead-preview-header-bg: #ffffff;
+  --lead-preview-stage-bg: linear-gradient(135deg, rgba(22, 163, 74, 0.08), rgba(241, 245, 249, 0.96)), linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px), linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px);
+  --lead-preview-bubble-bg: linear-gradient(180deg, #dcf8d7, #c9f1c4);
+  --lead-preview-bubble-media-bg: #f1f5f9;
+  --lead-preview-bubble-empty-bg: #f8fafc;
+  --lead-preview-bubble-text: #173b2a;
+  --lead-preview-bubble-border: rgba(15, 23, 42, 0.10);
+  --lead-preview-media-border: rgba(15, 23, 42, 0.08);
+  --lead-preview-empty-border: rgba(15, 23, 42, 0.18);
+  --lead-preview-hint: #64748b;
+  --lead-preview-time: #64748b;
+  --lead-preview-image-bg: #e2e8f0;
   --accent: #806515;
   --accent-hover: #674F0C;
   --accent-light: rgba(128, 101, 21, 0.09);

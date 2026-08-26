@@ -287,10 +287,27 @@ async function getLeadCampaigns(req, res) {
         delivered: true, failed: true, skipped: true, delaySeconds: true,
         instanceId: true, createdAt: true, startedAt: true, completedAt: true,
         lastError: true,
+        metadata: true,
         instance: { select: { id: true, instanceName: true, phone: true, status: true } },
       },
     });
-    res.json(campaigns);
+    // Expõe somente o resumo de auditoria necessário para a tela. A chave de
+    // idempotência e a lista de IDs de leads permanecem exclusivamente no
+    // servidor/banco.
+    res.json(campaigns.map((campaign) => {
+      const metadata = campaign.metadata && typeof campaign.metadata === 'object' && !Array.isArray(campaign.metadata)
+        ? campaign.metadata
+        : {};
+      const { metadata: _ignored, ...safeCampaign } = campaign;
+      return {
+        ...safeCampaign,
+        audit: {
+          authorizationRecorded: metadata.consentConfirmed === true,
+          consentRequired: metadata.requireConsent === true,
+          selectedLeads: Array.isArray(metadata.sourceLeadIds) ? metadata.sourceLeadIds.length : campaign.total,
+        },
+      };
+    }));
   } catch (error) {
     console.error('[leads] histórico:', error.message);
     res.status(500).json({ error: 'Erro ao consultar o histórico de prospecção.' });

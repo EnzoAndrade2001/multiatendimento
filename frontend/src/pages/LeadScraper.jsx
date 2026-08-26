@@ -688,6 +688,12 @@ export default function LeadScraper() {
                     <span>{sent}/{campaign.total || 0} enviados</span>
                     {campaign.failed > 0 ? <span style={s.historyFailure}>{campaign.failed} falhas</span> : null}
                   </div>
+                  <details style={s.historyAudit}>
+                    <summary>Auditoria do disparo</summary>
+                    <span>{campaign.audit?.authorizationRecorded ? 'Autorização registrada pelo operador' : 'Seleção manual ou por tag (sem declaração adicional)'}</span>
+                    <span>{campaign.audit?.consentRequired ? 'Filtro de consentimento aplicado' : 'Filtro de consentimento não solicitado'}</span>
+                    <span>{campaign.audit?.selectedLeads ?? campaign.total ?? 0} lead(s) na seleção inicial</span>
+                  </details>
                 </div>
               );
             })}
@@ -1281,6 +1287,7 @@ const s = {
   historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.7rem 0.8rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-panel)', flexWrap: 'wrap' },
   historyMain: { display: 'grid', gap: '0.2rem', minWidth: 0 },
   historyStats: { display: 'flex', alignItems: 'center', gap: '0.65rem', color: 'var(--text-muted)', fontSize: '0.75rem', flexWrap: 'wrap' },
+  historyAudit: { display: 'grid', gap: '0.2rem', flex: '1 1 100%', paddingTop: '0.45rem', borderTop: '1px dashed var(--border-color)', color: 'var(--text-dim)', fontSize: '0.72rem' },
   historyStatus: { color: 'var(--accent)', fontWeight: 800, textTransform: 'uppercase' },
   historySuccess: { color: 'var(--success)', fontWeight: 800, textTransform: 'uppercase' },
   historyFailure: { color: 'var(--danger-text)', fontWeight: 800 },
@@ -1557,7 +1564,7 @@ const s = {
     padding: '1rem',
     borderRadius: '16px',
     border: '1px solid var(--border-color)',
-    background: 'linear-gradient(180deg, rgba(18, 24, 37, 0.88), rgba(14, 18, 30, 0.98))',
+    background: 'var(--lead-form-bg)',
   },
   sendPreviewColumn: {
     display: 'flex',
@@ -1681,7 +1688,7 @@ const s = {
     flex: 1,
   },
   whatsappPreview: {
-    background: 'linear-gradient(180deg, rgba(16, 22, 35, 0.96), rgba(13, 17, 28, 0.98))',
+    background: 'var(--lead-preview-bg)',
     borderRadius: '16px',
     border: '1px solid var(--border-color)',
     overflow: 'hidden',
@@ -1698,7 +1705,7 @@ const s = {
     gap: '1rem',
     padding: '0.95rem 1rem',
     borderBottom: '1px solid var(--border-color)',
-    background: 'rgba(13, 18, 28, 0.92)',
+    background: 'var(--lead-preview-header-bg)',
   },
   whatsappIdentity: {
     display: 'flex',
@@ -1750,8 +1757,7 @@ const s = {
   },
   phonePreviewStage: {
     padding: '1rem',
-    background:
-      'linear-gradient(135deg, rgba(16, 88, 68, 0.30), rgba(11, 15, 24, 0.95)), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px)',
+    background: 'var(--lead-preview-stage-bg)',
     backgroundSize: 'auto, 28px 28px, 28px 28px',
     display: 'flex',
     justifyContent: 'flex-end',
@@ -1768,7 +1774,7 @@ const s = {
   },
   chatStageHint: {
     alignSelf: 'flex-start',
-    color: 'rgba(255,255,255,0.62)',
+    color: 'var(--lead-preview-hint)',
     fontSize: '0.73rem',
     fontWeight: 600,
     paddingLeft: '0.2rem',
@@ -1776,34 +1782,34 @@ const s = {
   messageBubbleTextPreview: {
     width: '100%',
     maxWidth: '430px',
-    background: 'linear-gradient(180deg, #0b6b5d, #075E54)',
-    color: '#fff',
+    background: 'var(--lead-preview-bubble-bg)',
+    color: 'var(--lead-preview-bubble-text)',
     borderRadius: '16px 16px 4px 16px',
     padding: '0.7rem',
     boxShadow: '0 14px 30px rgba(0,0,0,0.25)',
-    border: '1px solid rgba(255,255,255,0.06)',
+    border: '1px solid var(--lead-preview-bubble-border)',
     alignSelf: 'flex-end',
   },
   messageBubbleMediaPreview: {
     width: '100%',
     maxWidth: '430px',
-    background: 'rgba(12, 18, 26, 0.82)',
-    color: '#fff',
+    background: 'var(--lead-preview-bubble-media-bg)',
+    color: 'var(--lead-preview-bubble-text)',
     borderRadius: '16px 16px 4px 16px',
     padding: '0.7rem',
     boxShadow: '0 14px 30px rgba(0,0,0,0.22)',
-    border: '1px solid rgba(255,255,255,0.05)',
+    border: '1px solid var(--lead-preview-media-border)',
     alignSelf: 'flex-end',
   },
   messageBubbleEmptyPreview: {
     width: '100%',
     maxWidth: '430px',
-    background: 'rgba(12, 18, 26, 0.72)',
-    color: '#fff',
+    background: 'var(--lead-preview-bubble-empty-bg)',
+    color: 'var(--lead-preview-bubble-text)',
     borderRadius: '16px 16px 4px 16px',
     padding: '0.7rem',
     boxShadow: '0 14px 30px rgba(0,0,0,0.22)',
-    border: '1px dashed rgba(255,255,255,0.08)',
+    border: '1px dashed var(--lead-preview-empty-border)',
     alignSelf: 'flex-end',
   },
   messageImagePreview: {
@@ -1813,7 +1819,7 @@ const s = {
     objectFit: 'contain',
     display: 'block',
     borderRadius: '12px',
-    background: 'rgba(0,0,0,0.18)',
+    background: 'var(--lead-preview-image-bg)',
     marginBottom: '0.45rem',
   },
   messageTextPreview: {
@@ -1825,7 +1831,7 @@ const s = {
     padding: '0.1rem 0.2rem 0',
   },
   messageEmptyPreview: {
-    color: 'rgba(255,255,255,0.68)',
+    color: 'var(--lead-preview-hint)',
     fontSize: '0.84rem',
     lineHeight: 1.4,
     padding: '0.35rem 0.2rem',
@@ -1833,7 +1839,7 @@ const s = {
   },
   messageTimePreview: {
     textAlign: 'right',
-    color: 'rgba(255,255,255,0.66)',
+    color: 'var(--lead-preview-time)',
     fontSize: '0.68rem',
     marginTop: '0.25rem',
     paddingRight: '0.15rem',
