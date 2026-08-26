@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Search, Radar, Trash2, Send, CheckSquare, Square, Star,
   Phone, MapPin, Globe, Loader, XCircle, Image, CheckCircle, RotateCcw, UserPlus, Smartphone, Clock, Save,
+  ClipboardList, RefreshCw,
 } from 'lucide-react';
-import { searchLeads, getLeads, getLeadInstances, getLeadCampaigns, getQuickResponses, getCampaignTemplates, createCampaignTemplate, createManualLeads, deleteLead, deleteAllLeads, sendToLeads, uploadLeadFile, convertLead } from '../services/api';
+import { searchLeads, getLeads, getLeadInstances, getLeadCampaigns, getLeadAudit, getQuickResponses, getCampaignTemplates, createCampaignTemplate, createManualLeads, deleteLead, deleteAllLeads, sendToLeads, uploadLeadFile, convertLead } from '../services/api';
 import { toast } from '../utils/toast';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -76,6 +77,11 @@ export default function LeadScraper() {
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [sendSummary, setSendSummary] = useState(null);
   const [campaignHistory, setCampaignHistory] = useState([]);
+  const [activeView, setActiveView] = useState('leads');
+  const [leadAudit, setLeadAudit] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
+  const [auditFilter, setAuditFilter] = useState('all');
   const [leadStats, setLeadStats] = useState({ total: 0, withPhone: 0, sent: 0, pending: 0 });
   const leadsRequestRef = useRef(0);
   const leadCacheRef = useRef(new Map());
@@ -141,7 +147,23 @@ export default function LeadScraper() {
     }
   }, []);
 
+  const loadLeadAudit = useCallback(async () => {
+    setAuditLoading(true);
+    setAuditError('');
+    try {
+      const { data } = await getLeadAudit({ limit: 100, recipientLimit: 2000 });
+      setLeadAudit(data || { summary: {}, campaigns: [], recipients: [], legacy: [] });
+    } catch (err) {
+      setAuditError(err?.response?.data?.error || 'Não foi possível carregar a auditoria da prospecção.');
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
   useEffect(() => { loadCampaignHistory(); }, [loadCampaignHistory]);
+  useEffect(() => {
+    if (activeView === 'audit') loadLeadAudit();
+  }, [activeView, loadLeadAudit]);
 
   useEffect(() => {
     if (!campaignHistory.some((campaign) => ['queued', 'running'].includes(String(campaign.status || '').toLowerCase()))) return undefined;
@@ -510,6 +532,33 @@ export default function LeadScraper() {
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
+  const viewTabs = (
+    <div style={s.viewTabs} role="tablist" aria-label="Prospecção">
+      <button type="button" role="tab" aria-selected={activeView === 'leads'} style={{ ...s.viewTab, ...(activeView === 'leads' ? s.viewTabActive : {}) }} onClick={() => setActiveView('leads')}>
+        <Radar size={16} /> Buscar leads
+      </button>
+      <button type="button" role="tab" aria-selected={activeView === 'audit'} style={{ ...s.viewTab, ...(activeView === 'audit' ? s.viewTabActive : {}) }} onClick={() => setActiveView('audit')}>
+        <ClipboardList size={16} /> Auditoria da prospecção
+        {leadAudit?.summary?.recipients || leadAudit?.summary?.legacyLeads ? <span style={s.viewTabBadge}>{Number(leadAudit?.summary?.recipients || 0) + Number(leadAudit?.summary?.legacyLeads || 0)}</span> : null}
+      </button>
+    </div>
+  );
+
+  if (activeView === 'audit') {
+    return (
+      <div style={s.container}>
+        <PageHeader
+          kicker="Prospecção"
+          title="Auditoria da prospecção"
+          subtitle="Confira o que foi enviado, o que falhou e quais registros antigos não possuem rastreio detalhado."
+          actions={<ActionButton variant="secondary" onClick={loadLeadAudit} loading={auditLoading}><RefreshCw size={16} /> Atualizar</ActionButton>}
+        />
+        {viewTabs}
+        <LeadProspectionAudit data={leadAudit} loading={auditLoading} error={auditError} filter={auditFilter} onFilterChange={setAuditFilter} />
+      </div>
+    );
+  }
+
   return (
     <div style={s.container}>
       <PageHeader
@@ -520,7 +569,9 @@ export default function LeadScraper() {
             ? `${leadStats.total ?? leads.length} leads • ${leadStats.withPhone ?? leadsWithPhone.length} com telefone • ${leadStats.sent ?? totalSent} enviados • ${leadStats.pending ?? totalUnsent} pendentes`
             : 'Encontre novos clientes buscando empresas no Google Maps.'
         }
+        actions={<ActionButton variant="secondary" onClick={() => setActiveView('audit')}><ClipboardList size={16} /> Auditoria</ActionButton>}
       />
+      {viewTabs}
 
       {/* SEARCH BAR */}
       <SurfaceCard style={s.searchCard}>
@@ -1194,6 +1245,91 @@ export default function LeadScraper() {
   );
 }
 
+function formatAuditDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function auditStatusLabel(status) {
+  const labels = {
+    SENT: 'Enviado', DELIVERED: 'Entregue', FAILED: 'Falhou', SKIPPED: 'Ignorado',
+    PENDING: 'Pendente', SENDING: 'Enviando', CANCELLED: 'Cancelado',
+  };
+  return labels[String(status || '').toUpperCase()] || status || '—';
+}
+
+function auditStatusStyle(status) {
+  const value = String(status || '').toUpperCase();
+  if (['SENT', 'DELIVERED'].includes(value)) return s.auditStatusSuccess;
+  if (value === 'FAILED') return s.auditStatusDanger;
+  if (value === 'SKIPPED') return s.auditStatusWarning;
+  return s.auditStatusNeutral;
+}
+
+function LeadProspectionAudit({ data, loading, error, filter, onFilterChange }) {
+  const summary = data?.summary || {};
+  const campaigns = Array.isArray(data?.campaigns) ? data.campaigns : [];
+  const recipients = Array.isArray(data?.recipients) ? data.recipients : [];
+  const legacy = Array.isArray(data?.legacy) ? data.legacy : [];
+  const filteredRecipients = filter === 'all'
+    ? recipients
+    : recipients.filter((recipient) => String(recipient.status || '').toUpperCase() === filter);
+
+  if (loading && !data) return <div style={s.auditLoading}><Loader size={18} className="spin" /> Carregando auditoria...</div>;
+
+  return (
+    <>
+      {error ? <div style={s.auditError} role="alert"><XCircle size={17} /> {error}</div> : null}
+      <div style={s.auditNotice}>
+        <ClipboardList size={18} />
+        <div><strong>Como ler este relatório</strong><span>Os novos disparos da Prospecção possuem rastreio por campanha e destinatário. O histórico legado mostra apenas o último envio gravado no lead.</span></div>
+      </div>
+
+      <div style={s.auditKpis} className="lead-audit-kpis">
+        <div style={s.auditKpi}><span>Campanhas auditadas</span><strong>{summary.campaigns || 0}</strong><small>disparos da Prospecção</small></div>
+        <div style={s.auditKpi}><span>Destinatários rastreados</span><strong>{summary.recipients || 0}</strong><small>com status individual</small></div>
+        <div style={s.auditKpi}><span>Enviados / entregues</span><strong>{Number(summary.sent || 0) + Number(summary.delivered || 0)}</strong><small>{summary.delivered || 0} entregues</small></div>
+        <div style={s.auditKpi}><span>Falhas / ignorados</span><strong>{Number(summary.failed || 0) + Number(summary.skipped || 0)}</strong><small>{summary.failed || 0} falhas · {summary.skipped || 0} ignorados</small></div>
+      </div>
+
+      <SurfaceCard style={s.auditCard}>
+        <div style={s.auditCardHeader}>
+          <div><span style={s.eyebrow}>Rastreabilidade</span><h2 style={s.sectionTitle}>Campanhas de prospecção</h2></div>
+          <span style={s.auditCount}>{campaigns.length} registrada(s)</span>
+        </div>
+        {campaigns.length ? <div style={s.auditCampaignList}>{campaigns.map((campaign) => <article key={campaign.id} style={s.auditCampaignItem} className="lead-audit-campaign-item">
+          <div style={s.auditCampaignMain}><strong>{campaign.name || 'Prospecção'}</strong><span>{formatAuditDate(campaign.createdAt)} · {campaign.instance?.instanceName || 'Instância não informada'}</span></div>
+          <div style={s.auditCampaignMeta}><span style={auditStatusStyle(campaign.status)}>{auditStatusLabel(campaign.status)}</span><span>{Number(campaign.sent || 0) + Number(campaign.delivered || 0)}/{campaign.total || 0} enviados</span><span>{campaign.failed || 0} falhas</span><span>{campaign.skipped || 0} ignorados</span></div>
+          <div style={s.auditCampaignAudit}><span>{campaign.audit?.authorizationRecorded ? 'Autorização registrada' : 'Sem declaração adicional'}</span><span>{campaign.audit?.consentRequired ? 'Filtro de aceite aplicado' : 'Filtro de aceite não solicitado'}</span><span>{campaign.audit?.selectedLeads ?? campaign.total ?? 0} na seleção inicial</span></div>
+        </article>)}</div> : <EmptyState title="Nenhuma campanha de prospecção registrada" description="Os próximos envios feitos em Buscar Leads aparecerão aqui com auditoria completa." style={s.auditEmpty} />}
+      </SurfaceCard>
+
+      <SurfaceCard style={s.auditCard}>
+        <div style={s.auditCardHeader}>
+          <div><span style={s.eyebrow}>Detalhamento</span><h2 style={s.sectionTitle}>Destinatários e tentativas</h2></div>
+          <select style={s.auditFilter} value={filter} onChange={(event) => onFilterChange(event.target.value)} aria-label="Filtrar status da auditoria">
+            <option value="all">Todos os status</option><option value="SENT">Enviados</option><option value="DELIVERED">Entregues</option><option value="FAILED">Falhas</option><option value="SKIPPED">Ignorados</option><option value="PENDING">Pendentes</option>
+          </select>
+        </div>
+        {filteredRecipients.length ? <div style={s.auditTableWrap}><table style={s.auditTable}><thead><tr><th>Data</th><th>Cliente / lead</th><th>Telefone</th><th>Campanha</th><th>Status</th><th>Tentativas</th><th>Detalhe</th></tr></thead><tbody>{filteredRecipients.map((recipient) => {
+          const phone = String(recipient.phone || '');
+          const detail = recipient.errorMessage || recipient.reason || '—';
+          return <tr key={recipient.id}><td>{formatAuditDate(recipient.sentAt || recipient.lastAttemptAt || recipient.createdAt)}</td><td><strong>{recipient.contactName || 'Lead sem nome'}</strong></td><td>{phone.startsWith('skip:') ? '—' : phone || '—'}</td><td>{recipient.campaign?.name || 'Prospecção'}</td><td><span style={auditStatusStyle(recipient.status)}>{auditStatusLabel(recipient.status)}</span></td><td>{recipient.attempts || 0}</td><td title={detail}>{detail}</td></tr>;
+        })}</tbody></table></div> : <EmptyState title="Nenhum destinatário para este filtro" description="Altere o filtro ou realize um novo disparo para gerar registros." style={s.auditEmpty} />}
+        {summary.recipientsTruncated ? <p style={s.auditFootnote}>A lista foi limitada para preservar o desempenho. Use a exportação da campanha para consultar todos os destinatários.</p> : null}
+      </SurfaceCard>
+
+      {legacy.length ? <SurfaceCard style={s.auditLegacy}>
+        <div style={s.auditCardHeader}><div><span style={s.eyebrow}>Histórico anterior</span><h2 style={s.sectionTitle}>Envios legados</h2></div><span style={s.auditCount}>{legacy.length} lead(s)</span></div>
+        <p style={s.auditLegacyText}>Estes registros possuem apenas o último envio e a quantidade acumulada no cadastro do lead. Eles não permitem identificar a mensagem, a instância ou o resultado de cada tentativa.</p>
+        <div style={s.auditTableWrap}><table style={s.auditTable}><thead><tr><th>Último envio</th><th>Lead</th><th>Telefone</th><th>Envios acumulados</th></tr></thead><tbody>{legacy.map((lead) => <tr key={lead.id}><td>{formatAuditDate(lead.sentAt)}</td><td><strong>{lead.name || 'Lead sem nome'}</strong></td><td>{lead.phone || '—'}</td><td>{lead.sentCount || 0}</td></tr>)}</tbody></table></div>
+      </SurfaceCard> : null}
+    </>
+  );
+}
+
 const s = {
   container: {
     padding: '2.5rem',
@@ -1203,6 +1339,42 @@ const s = {
     flex: 1,
     color: 'var(--text-main)',
   },
+  viewTabs: { display: 'flex', gap: '0.35rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1.5rem', overflowX: 'auto' },
+  viewTab: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem', border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: 'var(--text-muted)', padding: '0.85rem 1rem', cursor: 'pointer', fontWeight: 800, whiteSpace: 'nowrap' },
+  viewTabActive: { color: 'var(--accent)', borderBottomColor: 'var(--accent)' },
+  viewTabBadge: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '1.25rem', height: '1.25rem', padding: '0 0.25rem', borderRadius: '999px', background: 'var(--accent-light)', color: 'var(--accent)', fontSize: '0.68rem' },
+  auditLoading: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', minHeight: '220px', color: 'var(--text-muted)' },
+  auditError: { display: 'flex', alignItems: 'center', gap: '0.55rem', padding: '0.8rem 0.95rem', marginBottom: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--danger-border)', background: 'var(--danger-light)', color: 'var(--danger-text)', fontSize: '0.82rem' },
+  auditNotice: { display: 'flex', alignItems: 'flex-start', gap: '0.7rem', padding: '0.9rem 1rem', marginBottom: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--accent-border)', background: 'var(--accent-light)', color: 'var(--text-muted)', fontSize: '0.8rem', lineHeight: 1.45 },
+  'auditNotice strong': { display: 'block', color: 'var(--text-main)', marginBottom: '0.15rem' },
+  'auditNotice span': { display: 'block' },
+  auditKpis: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.8rem', marginBottom: '1rem' },
+  auditKpi: { display: 'grid', gap: '0.25rem', padding: '0.9rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--bg-panel)' },
+  'auditKpi span': { color: 'var(--text-dim)', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' },
+  'auditKpi strong': { color: 'var(--text-main)', fontSize: '1.35rem', fontVariantNumeric: 'tabular-nums' },
+  'auditKpi small': { color: 'var(--text-muted)', fontSize: '0.72rem' },
+  auditCard: { padding: '1rem 1.15rem', marginBottom: '1rem' },
+  auditCardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.8rem' },
+  auditCount: { color: 'var(--text-muted)', fontSize: '0.75rem' },
+  auditCampaignList: { display: 'grid', gap: '0.55rem' },
+  auditCampaignItem: { display: 'grid', gridTemplateColumns: 'minmax(180px, 1.2fr) minmax(280px, 1fr) minmax(220px, 1fr)', alignItems: 'center', gap: '0.8rem', padding: '0.8rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)' },
+  auditCampaignMain: { display: 'grid', gap: '0.2rem', minWidth: 0 },
+  'auditCampaignMain span': { color: 'var(--text-muted)', fontSize: '0.74rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  auditCampaignMeta: { display: 'flex', alignItems: 'center', gap: '0.7rem', flexWrap: 'wrap', color: 'var(--text-muted)', fontSize: '0.74rem' },
+  auditCampaignAudit: { display: 'flex', flexDirection: 'column', gap: '0.18rem', color: 'var(--text-dim)', fontSize: '0.7rem' },
+  auditStatusSuccess: { color: 'var(--success-text)', background: 'var(--success-light)', border: '1px solid var(--success-border)', borderRadius: '999px', padding: '0.18rem 0.45rem', fontSize: '0.68rem', fontWeight: 800, whiteSpace: 'nowrap' },
+  auditStatusDanger: { color: 'var(--danger-text)', background: 'var(--danger-light)', border: '1px solid var(--danger-border)', borderRadius: '999px', padding: '0.18rem 0.45rem', fontSize: '0.68rem', fontWeight: 800, whiteSpace: 'nowrap' },
+  auditStatusWarning: { color: 'var(--warning-text)', background: 'var(--warning-light)', border: '1px solid var(--warning-border)', borderRadius: '999px', padding: '0.18rem 0.45rem', fontSize: '0.68rem', fontWeight: 800, whiteSpace: 'nowrap' },
+  auditStatusNeutral: { color: 'var(--text-muted)', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '0.18rem 0.45rem', fontSize: '0.68rem', fontWeight: 800, whiteSpace: 'nowrap' },
+  auditFilter: { minWidth: '10rem', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.55rem 0.7rem', color: 'var(--text-main)', fontSize: '0.78rem' },
+  auditTableWrap: { overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' },
+  auditTable: { width: '100%', minWidth: '900px', borderCollapse: 'collapse', color: 'var(--text-muted)', fontSize: '0.75rem' },
+  'auditTable th': { textAlign: 'left', padding: '0.7rem 0.75rem', color: 'var(--text-dim)', background: 'var(--bg-panel)', borderBottom: '1px solid var(--border-color)', fontSize: '0.68rem', fontWeight: 850, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' },
+  'auditTable td': { padding: '0.7rem 0.75rem', borderBottom: '1px solid var(--border-color)', verticalAlign: 'top', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis' },
+  auditEmpty: { border: 0, background: 'transparent', padding: '1.4rem 0.5rem' },
+  auditFootnote: { color: 'var(--text-dim)', fontSize: '0.72rem', margin: '0.7rem 0 0' },
+  auditLegacy: { padding: '1rem 1.15rem', marginBottom: '1rem', border: '1px solid var(--warning-border)' },
+  auditLegacyText: { color: 'var(--text-muted)', fontSize: '0.78rem', lineHeight: 1.45, margin: '0 0 0.8rem' },
   searchCard: { padding: '1.5rem', marginBottom: '1.5rem' },
   searchRow: {
     display: 'flex',

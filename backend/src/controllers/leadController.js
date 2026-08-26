@@ -273,6 +273,87 @@ async function getLeadHistory(req, res) {
   } catch (error) { res.status(500).json({ error: 'Erro ao consultar histórico do lead.' }); }
 }
 
+function campaignAuditSummary(campaign) {
+  const metadata = campaign?.metadata && typeof campaign.metadata === 'object' && !Array.isArray(campaign.metadata)
+    ? campaign.metadata
+    : {};
+  return {
+    authorizationRecorded: metadata.consentConfirmed === true,
+    consentRequired: metadata.requireConsent === true,
+    selectedLeads: Array.isArray(metadata.sourceLeadIds) ? metadata.sourceLeadIds.length : Number(campaign?.total || 0),
+  };
+}
+
+function safeLeadCampaign(campaign) {
+  const { metadata: _ignored, ...safeCampaign } = campaign;
+  return { ...safeCampaign, audit: campaignAuditSummary(campaign) };
+}
+
+// GET /api/leads/audit — auditoria dos disparos feitos pela tela Prospecção.
+// A resposta separa campanhas novas (com rastreio por destinatário) do legado,
+// que só possui o último envio agregado no cadastro do lead.
+async function getLeadAudit(req, res) {
+  try {
+    const tenantId = req.user.tenantId;
+    const campaignLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 250);
+    const recipientLimit = Math.min(Math.max(Number.parseInt(req.query.recipientLimit, 10) || 2000, 1), 5000);
+    const campaigns = await prisma.campaign.findMany({
+      where: { tenantId, category: 'PROSPECTING' },
+      orderBy: { createdAt: 'desc' },
+      take: campaignLimit,
+      select: {
+        id: true, name: true, category: true, status: true, total: true, sent: true,
+        delivered: true, failed: true, skipped: true, delaySeconds: true,
+        instanceId: true, createdAt: true, startedAt: true, completedAt: true,
+        lastError: true, metadata: true,
+        instance: { select: { id: true, instanceName: true, phone: true, status: true } },
+      },
+    });
+    const campaignIds = campaigns.map((campaign) => campaign.id);
+    const recipients = campaignIds.length
+      ? await prisma.campaignRecipient.findMany({
+        where: { tenantId, campaignId: { in: campaignIds } },
+        orderBy: { createdAt: 'desc' },
+        take: recipientLimit,
+        select: {
+          id: true, campaignId: true, leadId: true, phone: true, contactName: true,
+          status: true, reason: true, errorMessage: true, attempts: true,
+          lastAttemptAt: true, sentAt: true, deliveredAt: true, skippedAt: true, createdAt: true,
+          campaign: { select: { id: true, name: true, createdAt: true } },
+          instance: { select: { id: true, instanceName: true, phone: true, status: true } },
+        },
+      })
+      : [];
+    const legacy = await prisma.lead.findMany({
+      where: { tenantId, sentAt: { not: null }, campaignRecipients: { none: {} } },
+      orderBy: { sentAt: 'desc' },
+      take: 500,
+      select: { id: true, name: true, phone: true, sentAt: true, sentCount: true },
+    });
+    const count = (status) => recipients.filter((recipient) => recipient.status === status).length;
+    const summary = {
+      campaigns: campaigns.length,
+      recipients: recipients.length,
+      sent: count('SENT'),
+      delivered: count('DELIVERED'),
+      failed: count('FAILED'),
+      skipped: count('SKIPPED'),
+      pending: count('PENDING') + count('SENDING'),
+      legacyLeads: legacy.length,
+      recipientsTruncated: recipients.length >= recipientLimit,
+    };
+    res.json({
+      summary,
+      campaigns: campaigns.map(safeLeadCampaign),
+      recipients,
+      legacy,
+    });
+  } catch (error) {
+    console.error('[leads] auditoria:', error.message);
+    res.status(500).json({ error: 'Erro ao consultar a auditoria da prospecção.' });
+  }
+}
+
 // GET /api/leads/campaigns — histórico próprio da prospecção, sem expor as
 // campanhas financeiras/operacionais para quem só possui leads.manage.
 async function getLeadCampaigns(req, res) {
@@ -294,20 +375,7 @@ async function getLeadCampaigns(req, res) {
     // Expõe somente o resumo de auditoria necessário para a tela. A chave de
     // idempotência e a lista de IDs de leads permanecem exclusivamente no
     // servidor/banco.
-    res.json(campaigns.map((campaign) => {
-      const metadata = campaign.metadata && typeof campaign.metadata === 'object' && !Array.isArray(campaign.metadata)
-        ? campaign.metadata
-        : {};
-      const { metadata: _ignored, ...safeCampaign } = campaign;
-      return {
-        ...safeCampaign,
-        audit: {
-          authorizationRecorded: metadata.consentConfirmed === true,
-          consentRequired: metadata.requireConsent === true,
-          selectedLeads: Array.isArray(metadata.sourceLeadIds) ? metadata.sourceLeadIds.length : campaign.total,
-        },
-      };
-    }));
+    res.json(campaigns.map(safeLeadCampaign));
   } catch (error) {
     console.error('[leads] histórico:', error.message);
     res.status(500).json({ error: 'Erro ao consultar o histórico de prospecção.' });
@@ -467,4 +535,4 @@ async function sendToLeads(req, res) {
   }
 }
 
-module.exports = { searchLeads, getLeads, getLeadInstances, getLeadHistory, getLeadCampaigns, convertLead, createManualLeads, deleteLead, deleteAllLeads, sendToLeads, normalizeLeadPhone, normalizeMedia, renderLeadMessage };
+module.exports = { searchLeads, getLeads, getLeadInstances, getLeadHistory, getLeadCampaigns, getLeadAudit, convertLead, createManualLeads, deleteLead, deleteAllLeads, sendToLeads, normalizeLeadPhone, normalizeMedia, renderLeadMessage };

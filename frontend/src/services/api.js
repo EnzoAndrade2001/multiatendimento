@@ -245,6 +245,7 @@ export const sendOSManagerCopy = (id) => api.post(`/os/${id}/send-manager-copy`)
 export const searchLeads = (data) => api.post('/leads/search', data);
 export const getLeads = (params) => api.get('/leads', { params });
 export const getLeadInstances = () => api.get('/leads/instances');
+export const getLeadAudit = (params = {}) => api.get('/leads/audit', { params });
 export const getLeadCampaigns = (params = {}) => api.get('/leads/campaigns', { params });
 export const convertLead = (id, data = {}) => api.post(`/leads/${encodeURIComponent(id)}/convert`, data);
 export const uploadLeadFile = (file) => {

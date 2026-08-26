@@ -23,6 +23,7 @@ router.use(auth, requirePermission('leads.manage'));
 
 router.get('/', leadController.getLeads);
 router.get('/instances', leadController.getLeadInstances);
+router.get('/audit', leadController.getLeadAudit);
 router.get('/campaigns', leadController.getLeadCampaigns);
 router.get('/:id/history', leadController.getLeadHistory);
 router.post('/:id/convert', leadController.convertLead);

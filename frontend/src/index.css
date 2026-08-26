@@ -394,6 +394,16 @@ body.auth-spec-page {
   border-radius: 999px;
 }
 
+@media (max-width: 900px) {
+  .lead-audit-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .lead-audit-campaign-item {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
 @media (max-width: 768px) {
   body.auth-spec-page::-webkit-scrollbar,
   .auth-spec-page ::-webkit-scrollbar {
