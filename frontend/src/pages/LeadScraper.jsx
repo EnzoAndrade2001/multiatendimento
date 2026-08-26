@@ -634,8 +634,9 @@ export default function LeadScraper() {
           title={`${selectedAlreadySent > 0 ? 'Reenviar' : 'Enviar'} WhatsApp para ${selected.size} lead(s)`}
           onClose={() => setShowSendModal(false)}
           maxWidth="76rem"
+          contentStyle={s.sendModalContent}
         >
-          <div style={s.sendGrid}>
+          <div className="lead-send-grid" style={s.sendGrid}>
             {selectedAlreadySent > 0 ? (
               <div style={{ ...s.resendAlert, gridColumn: '1 / -1' }}>
                 <RotateCcw size={16} />
@@ -936,6 +937,10 @@ export default function LeadScraper() {
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .spin { animation: spin 1s linear infinite; }
+        .lead-send-grid { min-width: 0; }
+        @media (max-width: 760px) {
+          .lead-send-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        }
       `}</style>
     </div>
   );
@@ -1175,6 +1180,11 @@ const s = {
     gap: '1.25rem',
     overflowX: 'hidden',
   },
+  sendModalContent: {
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    overscrollBehavior: 'contain',
+  },
   resendAlert: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -1233,9 +1243,12 @@ const s = {
   templateActionBtn: { flex: '1 1 160px' },
   sendGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+    gridTemplateColumns: 'minmax(0, 1.12fr) minmax(300px, 0.88fr)',
     gap: '1rem',
     alignItems: 'start',
+    minWidth: 0,
+    padding: 'clamp(0.85rem, 2vw, 1.5rem)',
+    boxSizing: 'border-box',
   },
   sendFormColumn: {
     display: 'flex',
