@@ -33,6 +33,9 @@ import { Empty } from './inbox/helpers.jsx';
 import { useInboxMessages, useInboxRealtime, useInboxTickets } from './inbox/hooks';
 import { usePermissions } from '../auth/PermissionContext';
 
+const MAX_INBOX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_INBOX_FILES = 10;
+
 class InboxSectionErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -101,6 +104,7 @@ export default function Inbox() {
   const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 });
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [view, setView] = useState('list'); // 'list' or 'chat'
   const [updateTrigger, setUpdateTrigger] = useState(0); // Forca atualizacao de componentes filhos
   const [replyingTo, setReplyingTo] = useState(null);
@@ -140,8 +144,11 @@ export default function Inbox() {
   const {
     counts,
     debouncedLoadTickets,
+    error: ticketsError,
     filters,
     loadTickets,
+    loading: ticketsLoading,
+    lastUpdatedAt: ticketsLastUpdatedAt,
     search,
     setFilters,
     setSearch,
@@ -156,6 +163,7 @@ export default function Inbox() {
     handleLoadMoreMessages,
     hasMoreMessages,
     loadMessages,
+    error: messagesError,
     loading,
     loadingMoreMessages,
     messages,
@@ -183,8 +191,14 @@ export default function Inbox() {
   }
 
   async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast.error('Seu navegador nao oferece suporte a gravacao de audio.');
+      return;
+    }
+
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 44100, channelCount: 1 } 
       });
       const recorder = new MediaRecorder(stream);
@@ -207,15 +221,26 @@ export default function Inbox() {
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       setRecordingTime(0);
-      timerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
-    } catch (e) { toast.error('Permissao de microfone negada'); }
+      timerRef.current = setInterval(() => setRecordingTime((previous) => {
+        if (previous >= 179) {
+          window.setTimeout(() => stopRecording(), 0);
+          return 180;
+        }
+        return previous + 1;
+      }), 1000);
+    } catch (e) {
+      stream?.getTracks?.().forEach((track) => track.stop());
+      toast.error(e?.name === 'NotAllowedError' ? 'Permissao de microfone negada.' : 'Nao foi possivel iniciar a gravacao.');
+    }
   }
 
   function stopRecording() {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
       setIsRecording(false);
       clearInterval(timerRef.current);
+      timerRef.current = null;
     }
   }
 
@@ -338,7 +363,7 @@ export default function Inbox() {
     }
   }, []);
 
-  useInboxRealtime({
+  const { isDisconnected, onReconnect } = useInboxRealtime({
     debouncedLoadTickets,
     historySearchRef,
     loadInitial,
@@ -388,9 +413,9 @@ export default function Inbox() {
   async function handleSend(e) {
     e?.preventDefault();
     if (!text.trim() && files.length === 0) return;
-    if (sendLockRef.current) return; // ignora clique/Enter duplicado enquanto o envio anterior ainda esta em andamento
+    if (sendLockRef.current || sendingMessage) return; // evita clique/Enter duplicado durante todo o ciclo do envio
     sendLockRef.current = true;
-    setTimeout(() => { sendLockRef.current = false; }, 400);
+    setSendingMessage(true);
 
     if (isNote) {
       const noteBody = text;
@@ -406,6 +431,8 @@ export default function Inbox() {
         if (selectedIdRef.current === noteTicketId) setText(noteBody);
         toast.error('Falha ao salvar a nota. O texto foi mantido no campo — verifique a conexão e tente novamente. ' + (err.response?.data?.error || err.message));
       }
+      sendLockRef.current = false;
+      setSendingMessage(false);
       return;
     }
 
@@ -413,28 +440,44 @@ export default function Inbox() {
       const currentFiles = [...files];
       const currentText = text;
       const qId = replyingTo?.externalId;
+      const previousReply = replyingTo;
       setText('');
       setFiles([]);
       setReplyingTo(null);
       
       toast.info(`Enviando ${currentFiles.length} anexo(s) em segundo plano...`);
       (async () => {
-        for (let i = 0; i < currentFiles.length; i++) {
-          try {
-            await sendMediaMessage(selectedId, currentFiles[i], i === 0 ? currentText : '', qId);
-            if (i < currentFiles.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 350));
+        const failedFiles = [];
+        try {
+          for (let i = 0; i < currentFiles.length; i++) {
+            try {
+              await sendMediaMessage(selectedId, currentFiles[i], i === 0 ? currentText : '', qId);
+              if (i < currentFiles.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 350));
+              }
+            } catch (e) {
+              console.error('Erro ao enviar arquivo:', currentFiles[i].name, e);
+              failedFiles.push(currentFiles[i]);
+              toast.error(`Falha ao enviar ${currentFiles[i].name}: ` + (e.response?.data?.error || e.message));
             }
-          } catch (e) {
-            console.error('Erro ao enviar arquivo:', currentFiles[i].name, e);
-            toast.error(`Falha ao enviar ${currentFiles[i].name}: ` + (e.response?.data?.error || e.message));
           }
+          await loadMessages({ background: true });
+          if (failedFiles.length && selectedIdRef.current === selectedId) {
+            setFiles(failedFiles);
+            if (currentText) setText(currentText);
+            if (previousReply) setReplyingTo(previousReply);
+            toast.info(`${failedFiles.length} anexo(s) ficou(ram) no rascunho para tentar novamente.`);
+          }
+        } finally {
+          sendLockRef.current = false;
+          setSendingMessage(false);
         }
-        await loadMessages({ background: true });
       })();
       return;
     } else {
       await doSend(text, null);
+      sendLockRef.current = false;
+      setSendingMessage(false);
     }
   }
 
@@ -643,9 +686,12 @@ export default function Inbox() {
       `}</style>
       <TicketSidebar
         counts={counts}
+        error={ticketsError}
         filters={filters}
         isMobile={isMobile}
+        loading={ticketsLoading}
         onTicketPreference={handleTicketPreference}
+        onRefresh={loadTickets}
         search={search}
         selectedId={selectedId}
         selectTicket={selectTicket}
@@ -658,6 +704,7 @@ export default function Inbox() {
         tickets={tickets}
         users={users}
         view={view}
+        lastUpdatedAt={ticketsLastUpdatedAt}
       />
 
       {/* Main Chat */}
@@ -670,12 +717,31 @@ export default function Inbox() {
         onDrop={e => {
           e.preventDefault();
           if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            setFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
+            const incomingFiles = Array.from(e.dataTransfer.files);
+            const oversized = incomingFiles.filter((file) => file.size > MAX_INBOX_FILE_SIZE);
+            const accepted = incomingFiles.filter((file) => file.size <= MAX_INBOX_FILE_SIZE);
+            if (oversized.length) {
+              toast.error(`${oversized.length} arquivo(s) excede(m) o limite de 20 MB e foram ignorado(s).`);
+            }
+            setFiles((previous) => {
+              const unique = accepted.filter((file) => !previous.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified));
+              const available = Math.max(0, MAX_INBOX_FILES - previous.length);
+              if (unique.length > available) toast.info(`O envio aceita no máximo ${MAX_INBOX_FILES} anexos por vez.`);
+              return [...previous, ...unique.slice(0, available)];
+            });
           }
         }}
       >
         {selectedTicket ? (
           <>
+            {messagesError ? (
+              <div role="alert" style={s.inboxErrorBanner}>
+                <span>Nao foi possivel carregar as mensagens desta conversa.</span>
+                <button type="button" className="inbox-control" style={s.inboxErrorAction} onClick={() => loadMessages()}>
+                  Tentar novamente
+                </button>
+              </div>
+            ) : null}
             <InboxSectionErrorBoundary key={`header-${selectedTicket.id}`} label="cabecalho da conversa">
               <ChatHeader
                 canCreateOs={can('inbox.create_os')}
@@ -755,6 +821,9 @@ export default function Inbox() {
                 text={text}
                 isNote={isNote}
                 setIsNote={setIsNote}
+                isDisconnected={isDisconnected}
+                onReconnect={onReconnect}
+                sendingMessage={sendingMessage}
                 onQuickResponseUse={registerQuickResponseUse}
               />
             </InboxSectionErrorBoundary>
@@ -1009,6 +1078,10 @@ export const inboxStyles = {
     flexShrink: 0
   },
   searchWrap: { padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem', borderBottom: '1px solid var(--border-color)' },
+  inboxErrorBanner: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', margin: '0.75rem 1rem', padding: '0.65rem 0.75rem', borderRadius: 'var(--radius-md)', background: 'var(--danger-light)', border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '0.76rem', lineHeight: 1.35 },
+  inboxErrorAction: { flexShrink: 0, minHeight: '30px', padding: '0 0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid currentColor', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 },
+  sidebarLoading: { padding: '0.65rem 1rem', color: 'var(--text-muted)', fontSize: '0.74rem', fontWeight: 600 },
+  sidebarUpdated: { padding: '0.45rem 1rem 0', color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 600 },
   searchRow: { display: 'flex', gap: '8px', marginBottom: '4px' },
   searchShell: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.7rem', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0 0.95rem' },
   searchIcon: { color: 'var(--text-dim)', flexShrink: 0 },
@@ -1208,7 +1281,7 @@ export const inboxStyles = {
   noteTime: { fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'right', fontWeight: 500 },
   
   infoPanelBackdrop: { position: 'absolute', inset: 0, zIndex: 190, border: 'none', padding: 0, background: 'rgba(5,8,14,0.48)', cursor: 'default' },
-  infoPanel: { width: '400px', borderLeft: '1px solid var(--border-color)', background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', boxShadow: 'none' },
+  infoPanel: { width: '400px', maxWidth: '100%', minWidth: 0, borderLeft: '1px solid var(--border-color)', background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', boxShadow: 'none' },
   infoPanelHeader: { padding: '1.2rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' },
   infoPanelHeaderMain: { minWidth: 0 },
   infoPanelEyebrow: { fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-dim)', fontWeight: 600, marginBottom: '0.35rem' },
@@ -1217,7 +1290,7 @@ export const inboxStyles = {
   infoPanelTab: { flex: 1, minHeight: '36px', borderRadius: 'var(--radius-sm)', border: '1px solid transparent', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 600, fontSize: '0.75rem' },
   infoPanelTabActive: { background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)' },
   infoClose: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', width: '36px', height: '36px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  infoScroll: { flex: 1, overflowY: 'auto', padding: '1rem 1.1rem 1.5rem', userSelect: 'text', WebkitUserSelect: 'text' },
+  infoScroll: { flex: 1, overflowY: 'auto', scrollbarGutter: 'stable', padding: '1rem 1.1rem 1.5rem', userSelect: 'text', WebkitUserSelect: 'text' },
   infoProfile: { display: 'flex', flexDirection: 'column', marginBottom: '1.1rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' },
   infoIdentityRow: { display: 'flex', alignItems: 'center', gap: '0.85rem', minWidth: 0 },
   infoIdentityMain: { flex: 1, minWidth: 0 },
@@ -1226,7 +1299,7 @@ export const inboxStyles = {
   infoPhoneButton: { background: 'none', border: 'none', cursor: 'pointer', padding: 0, userSelect: 'text', WebkitUserSelect: 'text' },
   infoBadgeRow: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap', justifyContent: 'flex-start' },
   infoBadge: { background: 'rgba(255,255,255,0.04)', color: 'var(--text-main)', padding: '4px 9px', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', fontWeight: 600, border: '1px solid rgba(255,255,255,0.1)' },
-  infoActionRow: { display: 'flex', gap: '0.5rem', marginTop: '0.8rem', flexWrap: 'wrap', justifyContent: 'flex-start' },
+  infoActionRow: { display: 'flex', gap: '0.5rem', marginTop: '0.8rem', flexWrap: 'wrap', justifyContent: 'flex-start', position: 'sticky', top: 0, zIndex: 3, padding: '0.55rem 0', background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-color)' },
   infoActionBtn: { background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)', minHeight: '36px', padding: '0 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
   infoActionBtnPrimary: { background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', boxShadow: 'none' },
   infoSection: { marginBottom: '2rem' },

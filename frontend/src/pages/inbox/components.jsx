@@ -34,6 +34,7 @@ import {
   PinOff,
   Mail,
   Smile,
+  LoaderCircle,
 } from 'lucide-react';
 import { toast } from '../../utils/toast';
 import { Empty, fmt, statusColor, statusLabel } from './helpers.jsx';
@@ -168,25 +169,25 @@ function getPriorityMeta(priority) {
 function getStatusMeta(status) {
   const statusMap = {
     pending: {
-      label: 'Aguardando',
+      label: 'Aguardando equipe',
       color: 'var(--warning)',
       background: 'var(--warning-light)',
       border: '1px solid var(--warning-light)',
     },
     bot: {
-      label: 'Aguardando',
+      label: 'Bot em atendimento',
       color: 'var(--warning)',
       background: 'var(--warning-light)',
       border: '1px solid var(--warning-light)',
     },
     open: {
-      label: 'Atendimento',
+      label: 'Em atendimento',
       color: 'var(--success)',
       background: 'var(--success-light)',
       border: '1px solid var(--success-border)',
     },
     resolved: {
-      label: 'Resolvido',
+      label: 'Encerrado',
       color: 'var(--text-dim)',
       background: 'var(--border-light)',
       border: '1px solid var(--border-color)',
@@ -347,6 +348,11 @@ function ensureDraftFile(file, prefix = 'anexo') {
   });
 }
 
+// O endpoint de mÃ­dia usa o limite padrÃ£o de 20 MB do upload. Validar aqui
+// evita limpar o rascunho e sÃ³ descobrir o problema depois do request.
+const MAX_DRAFT_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_DRAFT_FILES = 10;
+
 function formatFileSize(size) {
   if (!Number.isFinite(size) || size <= 0) return 'sem tamanho';
   if (size < 1024) return `${size} B`;
@@ -408,9 +414,19 @@ function DraftAttachmentPreview({ file, onRemove, styles }) {
   );
 }
 
-function triggerMediaDownload(url) {
+function triggerMediaDownload(url, fileName = '') {
   if (!url) return;
-  window.open(url, '_blank', 'noopener,noreferrer');
+  // A mesma ação funciona para arquivos locais e para URLs servidas pelo
+  // backend. Em origens externas o navegador pode ignorar `download`, mas
+  // ainda abre o documento em uma nova aba como fallback.
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+  if (fileName) anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 export function MediaContent({ message, onImageClick, styles }) {
@@ -464,7 +480,7 @@ export function MediaContent({ message, onImageClick, styles }) {
           <img src={url} alt={fileName} style={styles.attachmentPreviewImage} onClick={() => onImageClick(url)} />
         </div>
         {message.fileName && (
-          <button type="button" style={styles.attachmentFooterBtn} onClick={() => triggerMediaDownload(url)} title="Abrir imagem">
+          <button type="button" style={styles.attachmentFooterBtn} onClick={() => triggerMediaDownload(url, fileName)} title="Abrir imagem" aria-label={`Abrir ${fileName}`}>
             <Download size={14} strokeWidth={2.2} />
             <span style={styles.attachmentFooterText}>{fileName}</span>
           </button>
@@ -484,9 +500,9 @@ export function MediaContent({ message, onImageClick, styles }) {
         </div>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fileName}</div>
-          <div style={{ fontSize: '0.7rem', color: 'rgba(0,0,0,0.5)', fontWeight: 600 }}>{isPdf ? 'Documento PDF' : 'Arquivo'}</div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>{isPdf ? 'Documento PDF' : 'Arquivo'}</div>
         </div>
-        <button type="button" onClick={() => triggerMediaDownload(url)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: 'rgba(255,255,255,0.05)', color: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} title="Baixar">
+        <button type="button" onClick={() => triggerMediaDownload(url, fileName)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: 'rgba(255,255,255,0.05)', color: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} title="Baixar" aria-label={`Baixar ${fileName}`}>
           <Download size={16} strokeWidth={2.2} />
         </button>
       </div>
@@ -794,9 +810,9 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
         <div style={{ ...styles.mediaGrid, gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : styles.mediaGrid.gridTemplateColumns }}>
           {media.filter((item) => item.mediaType === 'image' || item.mediaType === 'video').slice(0, 12).map((item) => (
             item.mediaType === 'image' ? (
-              <img key={item.id} src={getMediaUrl(item.mediaUrl)} style={styles.mediaThumb} onClick={() => onImageClick(getMediaUrl(item.mediaUrl))} />
+              <img key={item.id} src={getMediaUrl(item.mediaUrl)} alt="Imagem enviada pelo cliente" style={styles.mediaThumb} onClick={() => onImageClick(getMediaUrl(item.mediaUrl))} />
             ) : (
-              <video key={item.id} src={getMediaUrl(item.mediaUrl)} style={{...styles.mediaThumb, background: '#000'}} controls={false} onClick={() => triggerMediaDownload(getMediaUrl(item.mediaUrl))} />
+              <video key={item.id} src={getMediaUrl(item.mediaUrl)} aria-label="Vídeo enviado pelo cliente" style={{...styles.mediaThumb, background: '#000'}} controls={false} onClick={() => triggerMediaDownload(getMediaUrl(item.mediaUrl), 'video.mp4')} />
             )
           ))}
         </div>
@@ -817,7 +833,7 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
                   <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{docName}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{new Date(item.createdAt).toLocaleDateString('pt-BR')}</div>
                 </div>
-                <button type="button" onClick={() => triggerMediaDownload(getMediaUrl(item.mediaUrl))} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <button type="button" onClick={() => triggerMediaDownload(getMediaUrl(item.mediaUrl), docName)} aria-label={`Baixar ${docName}`} title={`Baixar ${docName}`} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                   <Download size={16} />
                 </button>
               </div>
@@ -866,7 +882,7 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
         </button>
       </div>
 
-      <div style={styles.infoPanelTabs}>
+      <div style={styles.infoPanelTabs} role="tablist" aria-label="Seções da ficha do cliente">
         {[
           { id: 'overview', label: 'Resumo' },
           { id: 'notes', label: 'Notas' },
@@ -876,6 +892,9 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
             key={tabItem.id}
             type="button"
             onClick={() => setPanelTab(tabItem.id)}
+            role="tab"
+            aria-selected={panelTab === tabItem.id}
+            aria-controls={`contact-panel-${tabItem.id}`}
             style={{
               ...styles.infoPanelTab,
               ...(panelTab === tabItem.id ? styles.infoPanelTabActive : {}),
@@ -980,7 +999,7 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
               </span>
             ) : null}
           </div>
-          <div style={styles.infoActionRow}>
+          <div style={styles.infoActionRow} aria-label="Ações rápidas do cliente">
             <button type="button" className="inbox-control" onClick={() => copyText(contactName, 'Nome copiado')} style={styles.infoActionBtn}>
               Copiar nome
             </button>
@@ -999,9 +1018,9 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
           </div>
         </div>
 
-        {panelTab === 'overview' ? overviewTab : null}
-        {panelTab === 'notes' ? notesTab : null}
-        {panelTab === 'media' ? mediaTab : null}
+        {panelTab === 'overview' ? <div role="tabpanel" id="contact-panel-overview" aria-label="Resumo do cliente">{overviewTab}</div> : null}
+        {panelTab === 'notes' ? <div role="tabpanel" id="contact-panel-notes" aria-label="Notas do cliente">{notesTab}</div> : null}
+        {panelTab === 'media' ? <div role="tabpanel" id="contact-panel-media" aria-label="Mídias do cliente">{mediaTab}</div> : null}
       </div>
 
       {profileModal ? (
@@ -1201,7 +1220,8 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
       onClick={() => onSelect(ticket.id)}
       role="button"
       tabIndex={0}
-      aria-label={`Abrir conversa com ${contactName}`}
+      aria-current={isSelected ? 'true' : undefined}
+      aria-label={`Abrir conversa com ${contactName}. Status: ${statusMeta.label}.${ticket.isUnread || ticket.unreadCount > 0 ? ` ${ticket.unreadCount || 1} mensagem(ns) não lida(s).` : ''}${awaitingCustomer ? ' Aguardando resposta do cliente.' : ''}`}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -1227,9 +1247,11 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
               ...styles.rowStatusPill,
               background: statusMeta.background,
               color: statusMeta.color,
-              border: statusMeta.border,
-            }}
-          >
+               border: statusMeta.border,
+             }}
+             role="status"
+             aria-label={`Status: ${statusMeta.label}`}
+           >
             <span style={{ ...styles.dot, background: statusMeta.color, color: statusMeta.color, boxShadow: 'none' }} />
             {getInstanceLabel(ticket)} - {statusMeta.label}
           </span>
@@ -1245,7 +1267,7 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
               {priorityMeta.label}
             </span>
           ) : null}
-          {(ticket.isUnread || ticket.unreadCount > 0) ? <div style={styles.unreadBadge}>{ticket.unreadCount > 0 ? ticket.unreadCount : '•'}</div> : null}
+          {(ticket.isUnread || ticket.unreadCount > 0) ? <div style={styles.unreadBadge} role="status" aria-label={`${ticket.unreadCount > 0 ? ticket.unreadCount : 1} mensagem(ns) não lida(s)`}>{ticket.unreadCount > 0 ? ticket.unreadCount : '•'}</div> : null}
         </div>
 
         <div style={styles.rowOperationalLine}>
@@ -1274,10 +1296,10 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
             <span style={styles.rowMetaSpacer} />
           )}
           <div style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
-            <button type="button" className="inbox-control" style={styles.ticketQuickAction} title={ticket.isPinned ? 'Desafixar conversa' : 'Fixar conversa no topo'} aria-label={ticket.isPinned ? 'Desafixar conversa' : 'Fixar conversa'} onClick={(event) => { event.stopPropagation(); onPreference(ticket.id, { isPinned: !ticket.isPinned }); }}>
+            <button type="button" className="inbox-control" style={styles.ticketQuickAction} title={ticket.isPinned ? 'Desafixar conversa' : 'Fixar conversa no topo'} aria-label={ticket.isPinned ? 'Desafixar conversa' : 'Fixar conversa'} aria-pressed={Boolean(ticket.isPinned)} onClick={(event) => { event.stopPropagation(); onPreference(ticket.id, { isPinned: !ticket.isPinned }); }}>
               {ticket.isPinned ? <PinOff size={13} /> : <Pin size={13} />}
             </button>
-            <button type="button" className="inbox-control" style={styles.ticketQuickAction} title="Marcar como não lida" aria-label="Marcar conversa como não lida" onClick={(event) => { event.stopPropagation(); onPreference(ticket.id, { isUnread: true }); }}>
+            <button type="button" className="inbox-control" style={styles.ticketQuickAction} title="Marcar como não lida" aria-label="Marcar conversa como não lida" aria-pressed={Boolean(ticket.isUnread || ticket.unreadCount > 0)} onClick={(event) => { event.stopPropagation(); onPreference(ticket.id, { isUnread: true }); }}>
               <Mail size={13} />
             </button>
           </div>
@@ -1289,9 +1311,12 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
 
 export const TicketSidebar = React.memo(function TicketSidebar({
   counts,
+  error,
   filters,
   isMobile,
+  loading,
   onTicketPreference,
+  onRefresh,
   search,
   selectedId,
   selectTicket,
@@ -1304,6 +1329,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
   users,
   teams,
   view,
+  lastUpdatedAt,
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('inbox:sort') || 'recent');
@@ -1371,7 +1397,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
   const activeTabLabel = {
     mine: 'Minhas conversas',
     pending: 'Fila de espera',
-    all: 'Todos os contatos',
+    all: 'Todas as conversas (uma por cliente)',
   }[tab] || 'Inbox';
 
   const visibleTickets = filteredTickets.slice(0, visibleLimit);
@@ -1409,10 +1435,14 @@ export const TicketSidebar = React.memo(function TicketSidebar({
           {['mine', 'pending', 'all'].map((tabId) => (
             <button
               key={tabId}
+              type="button"
               onClick={() => setTab(tabId)}
               style={{ ...styles.tab, ...(tab === tabId ? styles.tabActive : {}) }}
+              aria-pressed={tab === tabId}
+              aria-label={`${tabId === 'mine' ? 'Minhas conversas' : tabId === 'pending' ? 'Fila de espera' : 'Todas as conversas, agrupadas por cliente'}${counts[tabId] != null ? `, ${counts[tabId]} conversas` : ''}`}
+              title={tabId === 'all' ? 'Uma conversa por cliente; o histórico completo fica dentro da conversa' : undefined}
             >
-              {tabId === 'mine' ? 'Meus' : tabId === 'pending' ? 'Espera' : 'Contatos'}
+              {tabId === 'mine' ? 'Meus' : tabId === 'pending' ? 'Espera' : 'Todas'}
               {counts[tabId] > 0 && <span style={styles.badge}>{counts[tabId]}</span>}
             </button>
           ))}
@@ -1425,10 +1455,10 @@ export const TicketSidebar = React.memo(function TicketSidebar({
             <Search size={15} strokeWidth={2.2} style={styles.searchIcon} />
             <input
               style={styles.search}
-              placeholder="Buscar cliente ou telefone"
+              placeholder="Buscar cliente, telefone ou CPF/CNPJ"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              aria-label="Buscar cliente ou telefone"
+              aria-label="Buscar cliente, telefone ou CPF/CNPJ"
             />
             {search ? (
               <button type="button" className="inbox-control" style={styles.searchClearIcon} onClick={() => setSearch('')} aria-label="Limpar busca" title="Limpar busca">
@@ -1521,6 +1551,23 @@ export const TicketSidebar = React.memo(function TicketSidebar({
           ) : null}
         </div> : null}
       </div>
+
+      {error ? (
+        <div role="alert" style={styles.inboxErrorBanner}>
+          <span>Não foi possível atualizar a lista de conversas.</span>
+          <button type="button" className="inbox-control" style={styles.inboxErrorAction} onClick={onRefresh} disabled={loading}>
+            {loading ? 'Tentando...' : 'Tentar novamente'}
+          </button>
+        </div>
+      ) : null}
+      {loading && tickets.length === 0 ? (
+        <div style={styles.sidebarLoading} role="status" aria-live="polite">Carregando conversas...</div>
+      ) : null}
+      {!loading && lastUpdatedAt && !error ? (
+        <div style={styles.sidebarUpdated} aria-live="polite">
+          Atualizado às {new Date(lastUpdatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      ) : null}
 
       <div style={styles.list}>
         {visibleTickets.map((ticket) => (
@@ -2212,6 +2259,7 @@ export const MessageComposer = React.memo(function MessageComposer({
   setIsNote,
   isDisconnected,
   onReconnect,
+  sendingMessage,
   onQuickResponseUse,
 }) {
   const fileInputRef = useRef(null);
@@ -2242,13 +2290,39 @@ export const MessageComposer = React.memo(function MessageComposer({
   }, [text, isMobile]);
 
   function appendFiles(incomingFiles, sourceLabel = 'anexos') {
+    const rejectedFiles = [];
     const normalizedFiles = incomingFiles
       .map((file, index) => ensureDraftFile(file, sourceLabel === 'colagem' ? `imagem-colada-${index + 1}` : 'anexo'))
-      .filter(Boolean);
+      .filter((file) => {
+        if (!file) return false;
+        if (file.size > MAX_DRAFT_FILE_SIZE) {
+          rejectedFiles.push(`${file.name} (limite de 20 MB)`);
+          return false;
+        }
+        return true;
+      });
+
+    if (rejectedFiles.length) {
+      toast.error(`Arquivo(s) ignorado(s): ${rejectedFiles.join(', ')}`);
+    }
 
     if (!normalizedFiles.length) return;
 
-    setFiles((previous) => [...previous, ...normalizedFiles]);
+    setFiles((previous) => {
+      const existingKeys = new Set(previous.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+      const availableSlots = Math.max(0, MAX_DRAFT_FILES - previous.length);
+      const uniqueFiles = normalizedFiles.filter((file) => {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+      });
+      const acceptedFiles = uniqueFiles.slice(0, availableSlots);
+      if (uniqueFiles.length > acceptedFiles.length) {
+        toast.info(`O envio aceita no mÃ¡ximo ${MAX_DRAFT_FILES} anexos por vez.`);
+      }
+      return [...previous, ...acceptedFiles];
+    });
   }
 
   function handleFileSelection(event) {
@@ -2353,7 +2427,26 @@ export const MessageComposer = React.memo(function MessageComposer({
           </div>
         ) : null}
 
-        {isDisconnected && !isNote ? (
+        {sendingMessage ? (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 'var(--space-3)',
+              padding: 'var(--space-5)',
+              background: 'var(--bg-surface)',
+              borderTop: '1px solid var(--border-color)',
+              color: 'var(--text-muted)',
+              fontWeight: 700,
+            }}
+          >
+            <LoaderCircle size={18} className="spin" />
+            {isNote ? 'Salvando nota interna...' : 'Enviando mensagem...'}
+          </div>
+        ) : isDisconnected && !isNote ? (
           <div style={{
             display: 'flex',
             flexDirection: 'row',
@@ -2396,7 +2489,7 @@ export const MessageComposer = React.memo(function MessageComposer({
           <>
             <div style={{ ...styles.composerShell, gap: isMobile ? '0.55rem' : styles.composerShell.gap, padding: isMobile ? '0.55rem' : styles.composerShell.padding }}>
               {!isNote && (
-                <button type="button" style={{ ...styles.attachBtn, width: isMobile ? '42px' : styles.attachBtn.width, height: isMobile ? '42px' : styles.attachBtn.height }} onClick={() => fileInputRef.current?.click()} title="Adicionar anexo">
+                <button type="button" style={{ ...styles.attachBtn, width: isMobile ? '42px' : styles.attachBtn.width, height: isMobile ? '42px' : styles.attachBtn.height }} onClick={() => fileInputRef.current?.click()} title="Adicionar anexo" aria-label="Adicionar anexo">
                   <Paperclip size={18} strokeWidth={2.4} />
                 </button>
               )}
@@ -2468,7 +2561,15 @@ export const MessageComposer = React.memo(function MessageComposer({
                 {(!text.trim() && files.length === 0 && !isNote) ? <Mic size={18} strokeWidth={2.4} /> : <SendHorizontal size={18} strokeWidth={2.4} />}
               </button>
 
-              <input ref={fileInputRef} type="file" hidden multiple onChange={handleFileSelection} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                onChange={handleFileSelection}
+                style={{ display: 'none' }}
+              />
+
             </div>
           </>
         )}

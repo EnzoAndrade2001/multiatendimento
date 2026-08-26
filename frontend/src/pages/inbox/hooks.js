@@ -63,12 +63,16 @@ export function useInboxTickets({ me }) {
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ priority: '', agentId: '', teamId: '' });
   const [counts, setCounts] = useState({ mine: 0, pending: 0, all: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
 
   const tabRef = useRef(tab);
   const filtersRef = useRef(filters);
   const searchRef = useRef(search);
   const meRef = useRef(me);
   const debounceTimerRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     tabRef.current = tab;
@@ -93,21 +97,42 @@ export function useInboxTickets({ me }) {
   }, []);
 
   const loadTickets = useCallback(async () => {
-    try {
-      const currentTab = tabRef.current;
-      const currentFilters = filtersRef.current;
-      const currentSearch = searchRef.current || '';
+    const requestId = ++requestIdRef.current;
+    const currentTab = tabRef.current;
+    const currentFilters = filtersRef.current || {};
+    const currentSearch = searchRef.current || '';
+    const filtersKey = JSON.stringify(currentFilters);
 
+    setLoading(true);
+    setError(null);
+
+    try {
       const { data } = await getTickets(
         currentTab === 'mine' ? null : currentTab,
         currentTab === 'mine',
         { ...currentFilters, search: currentSearch }
       );
 
+      // Uma busca antiga não pode sobrescrever a lista depois que o usuário
+      // trocou de aba, filtro ou termo de pesquisa.
+      const isCurrentRequest = requestId === requestIdRef.current;
+      const isCurrentView = tabRef.current === currentTab
+        && (searchRef.current || '') === currentSearch
+        && JSON.stringify(filtersRef.current || {}) === filtersKey;
+      if (!isCurrentRequest || !isCurrentView) return;
+
       setTickets(normalizeTicketsForTab(data.tickets || [], currentTab));
       setCounts(data.counts || { mine: 0, pending: 0, all: 0 });
+      setLastUpdatedAt(new Date().toISOString());
     } catch (error) {
       console.error(error);
+      if (requestId === requestIdRef.current) {
+        setError(error);
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -187,8 +212,11 @@ export function useInboxTickets({ me }) {
   return {
     counts,
     debouncedLoadTickets,
+    error,
     filters,
     loadTickets,
+    loading,
+    lastUpdatedAt,
     search,
     setFilters,
     setSearch,
@@ -214,6 +242,8 @@ export function useInboxMessages({
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [nextMessagesCursor, setNextMessagesCursor] = useState(null);
+  const [error, setError] = useState(null);
+  const requestIdRef = useRef(0);
 
   const loadMessages = useCallback(async ({
     ticketId = selectedIdRef.current,
@@ -223,12 +253,15 @@ export function useInboxMessages({
   } = {}) => {
     if (!ticketId) return;
 
+    const requestId = ++requestIdRef.current;
+
     if (replace) {
       if (!background) setLoading(true);
     }
     else setLoadingMoreMessages(true);
 
     setSummary(null);
+    setError(null);
     const previousScrollHeight = scrollRef.current?.scrollHeight || 0;
     const previousScrollTop = scrollRef.current?.scrollTop || 0;
 
@@ -240,6 +273,10 @@ export function useInboxMessages({
         ...(before ? { before } : {}),
       });
       const incomingItems = normalizeMessageItems(data?.items);
+
+      // Ao trocar de conversa, a resposta pendente da conversa anterior deve
+      // ser descartada para não contaminar o histórico atual.
+      if (requestId !== requestIdRef.current || ticketId !== selectedIdRef.current) return;
 
       if (replace) {
         shouldScrollToBottomRef.current = true;
@@ -258,9 +295,14 @@ export function useInboxMessages({
       setNextMessagesCursor(data?.nextCursor || null);
     } catch (error) {
       console.error(error);
+      if (requestId === requestIdRef.current && ticketId === selectedIdRef.current) {
+        setError(error);
+      }
     } finally {
-      if (replace) setLoading(false);
-      else setLoadingMoreMessages(false);
+      if (requestId === requestIdRef.current) {
+        if (replace) setLoading(false);
+        else setLoadingMoreMessages(false);
+      }
     }
   }, [historySearch, messagePageSize, scrollRef, selectedIdRef, setSummary, shouldScrollToBottomRef]);
 
@@ -276,6 +318,7 @@ export function useInboxMessages({
     loading,
     loadingMoreMessages,
     messages,
+    error,
     nextMessagesCursor,
     setMessages,
   };
@@ -293,6 +336,16 @@ export function useInboxRealtime({
   upsertTicket,
   debouncedLoadTickets,
 }) {
+  const [isDisconnected, setIsDisconnected] = useState(false);
+  const socketRef = useRef(null);
+
+  const onReconnect = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    setIsDisconnected(false);
+    socket.connect();
+  }, []);
+
   useEffect(() => {
     loadInitial();
     const token = localStorage.getItem('token');
@@ -300,6 +353,8 @@ export function useInboxRealtime({
       auth: { token },
       reconnectionDelayMax: 10000,
     });
+    socketRef.current = socket;
+    setIsDisconnected(!socket.connected);
 
     const refreshTimer = setInterval(() => {
       loadTickets();
@@ -342,6 +397,7 @@ export function useInboxRealtime({
     });
 
     socket.on('connect', () => {
+      setIsDisconnected(false);
       loadTickets();
       if (selectedIdRef.current) {
         loadMessages({ ticketId: selectedIdRef.current, replace: true, background: true }).catch((error) => console.error(error));
@@ -387,10 +443,17 @@ export function useInboxRealtime({
 
     socket.on('connect_error', (error) => {
       console.error('[socket] erro de conexao:', error.message);
+      setIsDisconnected(true);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('[socket] conexao encerrada:', reason);
+      setIsDisconnected(true);
     });
 
     return () => {
       clearInterval(refreshTimer);
+      if (socketRef.current === socket) socketRef.current = null;
       socket.disconnect();
     };
   }, [
@@ -405,4 +468,6 @@ export function useInboxRealtime({
     shouldScrollToBottomRef,
     upsertTicket,
   ]);
+
+  return { isDisconnected, onReconnect };
 }
