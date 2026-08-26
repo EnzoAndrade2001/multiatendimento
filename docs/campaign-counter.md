@@ -13,6 +13,24 @@ modelo, série e localização.
 - `[equipamentos]`: lista numerada de todos os equipamentos ativos, uma linha
   por equipamento.
 
+## Modelos de mensagem
+
+`Respostas rápidas` continuam sendo os modelos curtos usados durante um
+atendimento (`/quick-responses`). `Modelos de campanha` ficam em
+`/campaigns/templates` e guardam nome, categoria e corpo para uso em lotes.
+Ao criar uma campanha, os dois catálogos podem aparecer no seletor: o modelo
+de campanha é a cópia editável e o de atendimento é identificado como
+`Resposta rápida` (somente leitura). Salvar a mensagem como modelo sempre cria
+um registro no catálogo de campanhas, sem alterar ou excluir a resposta rápida
+original. Duplicatas com o mesmo corpo devem ser exibidas uma única vez,
+priorizando o modelo de campanha.
+
+Os marcadores de nome usados no atendimento (`[nome]`) são compatíveis com as
+campanhas. Também são aceitos `[name]`, `[cliente]`, `[telefone]`, `[cpf]`,
+`[cnpj]`, `[cidade]` e, nas campanhas de contadores, os marcadores de
+equipamento descritos acima. Marcadores desconhecidos permanecem visíveis na
+prévia para que o operador possa corrigir o texto antes de enviar.
+
 Exemplo:
 
 ```text

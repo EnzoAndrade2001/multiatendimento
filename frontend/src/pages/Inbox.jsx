@@ -13,6 +13,7 @@ import api, {
   summarizeTicket,
   reopenTicket,
   getQuickResponses,
+  useQuickResponse,
   scheduleMessage,
   sendAudioMessage,
   deleteMessage,
@@ -544,6 +545,13 @@ export default function Inbox() {
     }
   }, [quickResponses]);
 
+  // A métrica é somente informativa; um erro de permissão ou de versão antiga
+  // do backend nunca pode impedir que o atendente escolha a resposta rápida.
+  const registerQuickResponseUse = useCallback((id) => {
+    if (!id) return;
+    useQuickResponse(id).catch(() => {});
+  }, []);
+
   const selectedTicket = useMemo(
     () => tickets.find(t => t.id === selectedId),
     [tickets, selectedId]
@@ -747,6 +755,7 @@ export default function Inbox() {
                 text={text}
                 isNote={isNote}
                 setIsNote={setIsNote}
+                onQuickResponseUse={registerQuickResponseUse}
               />
             </InboxSectionErrorBoundary>
           </>

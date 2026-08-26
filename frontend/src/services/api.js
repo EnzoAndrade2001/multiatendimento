@@ -175,7 +175,10 @@ export const updateTenant = (id, data) => api.patch(`/superadmin/tenants/${id}`,
 
 // Quick Responses
 export const getQuickResponses = () => api.get('/quick-responses');
+// Registra o uso sem bloquear o envio caso a instalação ainda não tenha essa rota.
+export const useQuickResponse = (id) => api.post(`/quick-responses/${encodeURIComponent(id)}/use`);
 export const createQuickResponse = (data) => api.post('/quick-responses', data);
+export const updateQuickResponse = (id, data) => api.patch(`/quick-responses/${encodeURIComponent(id)}`, data);
 export const deleteQuickResponse = (id) => api.delete(`/quick-responses/${id}`);
 
 // Knowledge Base

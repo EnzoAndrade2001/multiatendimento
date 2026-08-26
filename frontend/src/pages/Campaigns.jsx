@@ -231,8 +231,31 @@ export default function Campaigns() {
   async function loadInitial() {
     const results = await Promise.allSettled([getTags(), getCampaignTemplates(), getQuickResponses(), getCampaignInstances(), getCampaigns()]);
     if (results[0].status === 'fulfilled') setAvailableTags((results[0].value.data || []).map((item) => item.name));
-    if (results[1].status === 'fulfilled') setTemplates(results[1].value.data || []);
-    else if (results[2].status === 'fulfilled') setTemplates(results[2].value.data || []);
+    // Os catálogos têm finalidades diferentes: CampaignTemplate é gerenciado
+    // nesta tela; QuickResponse pertence ao atendimento. Ainda assim, uma
+    // resposta rápida pode servir de ponto de partida para uma campanha. Ela
+    // recebe a origem e fica somente leitura; salvar como modelo cria uma
+    // cópia no catálogo de campanhas. Deduplicamos pelo corpo para não exibir
+    // duas opções idênticas quando o operador já fez essa cópia.
+    const campaignRows = results[1].status === 'fulfilled'
+      ? (Array.isArray(results[1].value.data) ? results[1].value.data : results[1].value.data?.templates || [])
+      : [];
+    const quickRows = results[2].status === 'fulfilled'
+      ? (Array.isArray(results[2].value.data) ? results[2].value.data : results[2].value.data?.responses || [])
+      : [];
+    const normalizedTemplates = [
+      ...campaignRows.map((item) => ({ ...item, source: 'campaign', body: item.body || item.message || '', name: item.name || item.shortcut || 'Modelo de campanha' })),
+      ...quickRows.map((item) => ({ ...item, source: 'quick_response', body: item.message || item.body || '', name: item.shortcut || item.name || 'Resposta rápida' })),
+    ].filter((item) => item.body.trim());
+    const uniqueTemplates = [];
+    const seenBodies = new Set();
+    for (const item of normalizedTemplates) {
+      const key = item.body.trim().toLocaleLowerCase();
+      if (seenBodies.has(key)) continue;
+      seenBodies.add(key);
+      uniqueTemplates.push(item);
+    }
+    setTemplates(uniqueTemplates);
     if (results[3].status === 'fulfilled') {
       const data = results[3].value.data;
       setInstances(Array.isArray(data) ? data : data?.instances || []);
@@ -559,7 +582,7 @@ export default function Campaigns() {
             </div>
             <select id="campaign-template" style={s.input} value="" onChange={(e) => { if (e.target.value) setMessage(e.target.value); }} disabled={!canEdit}>
               <option value="">Selecione um modelo...</option>
-              {templates.map((template) => <option key={template.id} value={template.body || template.message}>{template.shortcut || template.name} — {(template.body || template.message || '').slice(0, 55)}</option>)}
+              {templates.map((template) => <option key={`${template.source || 'campaign'}-${template.id}`} value={template.body || template.message}>{template.source === 'quick_response' ? 'Atendimento' : 'Campanha'} · {template.shortcut || template.name} — {(template.body || template.message || '').slice(0, 55)}</option>)}
             </select>
             <label style={s.label} htmlFor="campaign-message">Mensagem</label>
             <textarea id="campaign-message" style={s.textarea} placeholder={campaignType === 'COUNTER' ? 'Ex.: Olá, [nome]. Poderia enviar os contadores dos seus equipamentos?' : 'Escreva sua mensagem aqui...'} value={message} onChange={(e) => setMessage(e.target.value)} disabled={!canEdit} />

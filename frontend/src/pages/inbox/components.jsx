@@ -2212,6 +2212,7 @@ export const MessageComposer = React.memo(function MessageComposer({
   setIsNote,
   isDisconnected,
   onReconnect,
+  onQuickResponseUse,
 }) {
   const fileInputRef = useRef(null);
   const textInputRef = useRef(null);
@@ -2289,7 +2290,7 @@ export const MessageComposer = React.memo(function MessageComposer({
       {filteredQuick.length > 0 && (
         <div style={styles.quickList}>
           {filteredQuick.map((response) => (
-            <div key={response.id} style={styles.quickItem} onClick={() => { setText(response.message); setFilteredQuick([]); }}>
+            <div key={response.id} style={styles.quickItem} onClick={() => { setText(response.message); setFilteredQuick([]); onQuickResponseUse?.(response.id); }}>
               <strong>{response.shortcut}</strong>: {response.message}
             </div>
           ))}
