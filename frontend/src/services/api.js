@@ -263,6 +263,7 @@ export const deleteContact = (id) => api.delete(`/contacts/${id}`);
 // CRM Firebird
 export const getCrmSummary = () => api.get('/crm/summary');
 export const getCrmCustomers = (params = {}) => api.get('/crm/customers', { params });
+export const exportCrmCustomers = (params = {}) => api.get('/crm/customers/export', { params, responseType: 'blob', timeout: 60000 });
 export const getCrmCustomer = (id) => api.get(`/crm/customers/${id}`, { timeout: 10000 });
 export const getCrmCustomerContracts = (id) => api.get(`/crm/customers/${id}/contracts`, { timeout: 15000 });
 export const getCrmCustomerServiceOrders = (id, options = 25) => {

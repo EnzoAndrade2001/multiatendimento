@@ -5,6 +5,7 @@ const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req,
 const {
   getSummary,
   listCustomers,
+  exportCustomers,
   getCustomer,
   getCustomerContracts,
   getCustomerServiceOrders,
@@ -21,6 +22,8 @@ router.use(authenticate);
 router.use(requirePermission('crm.view'));
 
 router.get('/summary', asyncRoute(getSummary));
+// Keep export before /customers/:id so the literal path is not interpreted as an id.
+router.get('/customers/export', asyncRoute(exportCustomers));
 router.get('/customers', asyncRoute(listCustomers));
 router.get('/customers/:id', asyncRoute(getCustomer));
 router.get('/customers/:id/contracts', asyncRoute(getCustomerContracts));

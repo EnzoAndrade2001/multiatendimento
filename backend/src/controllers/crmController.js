@@ -5,6 +5,10 @@ const billingDocuments = require('../services/billingDocumentService');
 const HISTORY_DEFAULT_LIMIT = 25;
 const HISTORY_MAX_LIMIT = 100;
 const HISTORY_MAX_OFFSET = 100000;
+const CUSTOMER_DEFAULT_LIMIT = 100;
+const CUSTOMER_MAX_LIMIT = 250;
+const CUSTOMER_MAX_EXPORT = 10000;
+const CUSTOMER_SYNC_CHUNK = 80;
 
 function parseHistoryPagination(query = {}) {
   const rawLimit = Number.parseInt(query.limit, 10);
@@ -641,11 +645,61 @@ async function getSummary(req, res) {
   });
 }
 
-async function listCustomers(req, res) {
-  const tenantId = req.user.tenantId;
-  const q = String(req.query.q || '').trim();
-  const take = Math.min(Number(req.query.limit || 100) || 100, 250);
+function asBoolean(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'sim', 'on', 'ativo'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'nao', 'não', 'off', 'inativo'].includes(normalized)) return false;
+  return null;
+}
 
+function parseCustomerListOptions(query = {}) {
+  const hasPage = query.page !== undefined || query.pageSize !== undefined || query.offset !== undefined;
+  const paginate = asBoolean(query.paginate) === true || hasPage;
+  const rawPage = Number.parseInt(query.page, 10);
+  const rawPageSize = Number.parseInt(query.pageSize ?? query.limit, 10);
+  const pageSize = Number.isFinite(rawPageSize)
+    ? Math.min(Math.max(rawPageSize, 1), CUSTOMER_MAX_LIMIT)
+    : CUSTOMER_DEFAULT_LIMIT;
+  const rawOffset = Number.parseInt(query.offset, 10);
+  const requestedPage = Number.isFinite(rawPage) ? Math.max(rawPage, 1) : 1;
+  const offset = Number.isFinite(rawOffset)
+    ? Math.max(rawOffset, 0)
+    : (requestedPage - 1) * pageSize;
+  const page = Number.isFinite(rawPage)
+    ? requestedPage
+    : Math.floor(offset / pageSize) + 1;
+  const q = String(query.q || '').trim();
+  const city = String(query.city || query.cidade || '').trim();
+  const state = String(query.state || query.uf || query.estado || '').trim();
+  const contractStatus = String(query.contractStatus || query.contract || query.contrato || '').trim().toLowerCase();
+  const financialStatus = String(query.financialStatus || query.financeiro || '').trim().toLowerCase();
+  const view = String(query.view || query.visao || '').trim().toLowerCase();
+  const sort = String(query.sort || query.ordenar || 'name').trim().toLowerCase();
+  const order = String(query.order || query.direction || 'asc').trim().toLowerCase() === 'desc' ? 'desc' : 'asc';
+  return {
+    q,
+    city,
+    state,
+    contractStatus,
+    financialStatus,
+    view,
+    hasContract: asBoolean(query.hasContract ?? query.comContrato),
+    contractedOnly: asBoolean(query.contractedOnly ?? query.equipmentInContract ?? query.emContrato),
+    hasOpenOrders: asBoolean(query.hasOpenOrders ?? query.openOrders ?? query.osAbertas),
+    hasPhone: asBoolean(query.hasPhone ?? query.comTelefone),
+    sort,
+    order,
+    page,
+    pageSize,
+    offset,
+    paginate,
+  };
+}
+
+function customerWhereFromOptions(tenantId, options) {
+  const { q, city, state, hasPhone } = options;
   const where = { tenantId };
   if (q) {
     where.OR = [
@@ -673,11 +727,216 @@ async function listCustomers(req, res) {
       },
     ];
   }
+  if (city) where.city = { contains: city, mode: 'insensitive' };
+  if (state) where.state = { contains: state, mode: 'insensitive' };
+  if (hasPhone === true) where.phone = { not: null };
+  if (hasPhone === false) where.phone = null;
+  return where;
+}
 
+async function findCustomerSyncRecords(tenantId, entity, externalIds) {
+  const ids = [...new Set(externalIds.map((id) => text(id)).filter(Boolean))];
+  if (!ids.length) return [];
+  const records = [];
+  for (let index = 0; index < ids.length; index += CUSTOMER_SYNC_CHUNK) {
+    const chunk = ids.slice(index, index + CUSTOMER_SYNC_CHUNK);
+    const rows = await prisma.externalSyncRecord.findMany({
+      where: {
+        tenantId,
+        source: 'firebird',
+        entity,
+        OR: chunk.map((externalId) => ({ payload: { path: ['clientExternalId'], equals: externalId } })),
+      },
+      select: { id: true, externalId: true, payload: true, receivedAt: true, syncedAt: true },
+    });
+    records.push(...rows);
+  }
+  return records;
+}
+
+function customerMetricTemplate(customer) {
+  return {
+    contractsCount: 0,
+    activeContractsCount: 0,
+    contractedEquipmentsCount: 0,
+    openServiceOrdersCount: 0,
+    overdueReceivablesCount: 0,
+    openReceivablesCount: 0,
+    monthlyValue: asNumber(rawValue(customer.raw || {}, 'total_mensalidade')) || 0,
+    contractMonthlyValue: 0,
+    lastServiceOrderAt: null,
+  };
+}
+
+async function loadCustomerOperationalMetrics(tenantId, customers) {
+  const metrics = new Map(customers.map((customer) => [customer.id, customerMetricTemplate(customer)]));
+  if (!customers.length) return metrics;
+  const externalIds = customers.map((customer) => customer.externalId).filter(Boolean);
+  const customerIds = customers.map((customer) => customer.id);
+  const [contractRecords, orderRecords, receivableRecords, localOrders, allEquipments] = await Promise.all([
+    findCustomerSyncRecords(tenantId, 'contracts', externalIds),
+    findCustomerSyncRecords(tenantId, 'serviceOrders', externalIds),
+    findCustomerSyncRecords(tenantId, 'receivables', externalIds),
+    prisma.serviceOrder.findMany({
+      where: {
+        tenantId,
+        contact: { is: { crmCustomerId: { in: customerIds } } },
+      },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        closedAt: true,
+        contact: { select: { crmCustomerId: true } },
+      },
+    }),
+    prisma.crmEquipment.findMany({
+      where: { tenantId, customerId: { in: customerIds } },
+      select: { customerId: true, externalId: true, contractExternalId: true, isActive: true },
+    }),
+  ]);
+  const customerByExternalId = new Map(customers.map((customer) => [text(customer.externalId), customer]));
+  const activeContractIdsByCustomer = new Map();
+  for (const record of contractRecords) {
+    const normalized = normalizeContract(record);
+    const customer = customerByExternalId.get(text(normalized.clientExternalId));
+    if (!customer) continue;
+    const metric = metrics.get(customer.id);
+    metric.contractsCount += 1;
+    if (normalized.isActive) {
+      metric.activeContractsCount += 1;
+      metric.contractMonthlyValue += normalized.monthlyValue || normalized.value || 0;
+      const ids = activeContractIdsByCustomer.get(customer.id) || new Set();
+      if (normalized.externalId) ids.add(text(normalized.externalId));
+      activeContractIdsByCustomer.set(customer.id, ids);
+    }
+  }
+  const equipmentsByCustomer = new Map();
+  for (const equipment of allEquipments) {
+    const list = equipmentsByCustomer.get(equipment.customerId) || [];
+    list.push(equipment);
+    equipmentsByCustomer.set(equipment.customerId, list);
+  }
+  for (const customer of customers) {
+    const metric = metrics.get(customer.id);
+    const activeContractIds = activeContractIdsByCustomer.get(customer.id) || new Set();
+    const equipments = equipmentsByCustomer.get(customer.id) || customer.equipments || [];
+    metric.contractedEquipmentsCount = equipments.filter((equipment) => (
+      equipment.isActive !== false
+      && equipment.contractExternalId
+      && activeContractIds.has(text(equipment.contractExternalId))
+    )).length;
+    if (metric.contractMonthlyValue > 0) metric.monthlyValue = metric.contractMonthlyValue;
+    // A CRM customer can carry the contract total only in its raw snapshot.
+    // Keep the explicit customer value when no contract record was imported.
+    if (!metric.contractsCount && metric.monthlyValue === 0) {
+      metric.monthlyValue = asNumber(rawValue(customer.raw || {}, 'total_mensalidade')) || 0;
+    }
+  }
+  const orderKeys = new Set();
+  for (const record of orderRecords) {
+    const normalized = normalizeExternalOrder(record.payload, { externalId: record.externalId });
+    const customer = customerByExternalId.get(text(normalized.clientExternalId));
+    if (!customer) continue;
+    const metric = metrics.get(customer.id);
+    const key = `${customer.id}:${normalized.externalId || record.id}`;
+    if (orderKeys.has(key)) continue;
+    orderKeys.add(key);
+    if (normalized.status !== 'FINALIZADA') metric.openServiceOrdersCount += 1;
+    const timestamp = orderTimestamp(normalized);
+    if (timestamp && (!metric.lastServiceOrderAt || timestamp > new Date(metric.lastServiceOrderAt).getTime())) {
+      metric.lastServiceOrderAt = normalized.openedAt || normalized.updatedAt || null;
+    }
+  }
+  for (const order of localOrders) {
+    const customerId = order.contact?.crmCustomerId;
+    const metric = metrics.get(customerId);
+    if (!metric) continue;
+    const key = `${customerId}:local:${order.id}`;
+    if (orderKeys.has(key)) continue;
+    orderKeys.add(key);
+    if (String(order.status || '').toUpperCase() !== 'FINALIZADA' && !order.closedAt) metric.openServiceOrdersCount += 1;
+    const timestamp = order.createdAt || order.updatedAt;
+    if (timestamp && (!metric.lastServiceOrderAt || new Date(timestamp).getTime() > new Date(metric.lastServiceOrderAt).getTime())) {
+      metric.lastServiceOrderAt = timestamp;
+    }
+  }
+  for (const record of receivableRecords) {
+    const normalized = normalizeReceivable(record);
+    const customer = customerByExternalId.get(text(normalized.clientExternalId));
+    if (!customer) continue;
+    const metric = metrics.get(customer.id);
+    if (normalized.openValue > 0) metric.openReceivablesCount += 1;
+    if (normalized.status === 'overdue') metric.overdueReceivablesCount += 1;
+  }
+  return metrics;
+}
+
+function applyCustomerOperationalFilters(customers, options) {
+  return customers.filter((customer) => {
+    const view = options.view;
+    if (view === 'contracted' && !(customer.contractedEquipmentsCount > 0 || customer.activeContractsCount > 0)) return false;
+    if (view === 'open' && customer.openServiceOrdersCount <= 0) return false;
+    if (view === 'attention' && !(
+      customer.openServiceOrdersCount > 0
+      || customer.overdueReceivablesCount > 0
+      || !customer.phone
+      || customer.contractedEquipmentsCount <= 0
+    )) return false;
+    if (view === 'without-contract' && !(customer.contractedEquipmentsCount <= 0 && customer.activeContractsCount <= 0)) return false;
+    if (options.hasContract !== null && Boolean(customer.activeContractsCount > 0) !== options.hasContract) return false;
+    if (options.contractedOnly !== null && Boolean(customer.contractedEquipmentsCount > 0) !== options.contractedOnly) return false;
+    if (options.hasOpenOrders !== null && Boolean(customer.openServiceOrdersCount > 0) !== options.hasOpenOrders) return false;
+    if (options.contractStatus) {
+      const active = customer.activeContractsCount > 0;
+      const total = customer.contractsCount > 0;
+      if (['active', 'ativo', 'vigente', 'aberto'].includes(options.contractStatus) && !active) return false;
+      if (['inactive', 'inativo', 'encerrado', 'cancelado', 'fechado'].includes(options.contractStatus) && (!total || active)) return false;
+      if (['none', 'sem', 'sem-contrato', 'nenhum'].includes(options.contractStatus) && total) return false;
+    }
+    if (options.financialStatus) {
+      if (['overdue', 'vencido', 'inadimplente'].includes(options.financialStatus) && !customer.overdueReceivablesCount) return false;
+      if (['open', 'aberto', 'pendente'].includes(options.financialStatus) && !customer.openReceivablesCount) return false;
+      if (['clear', 'regular', 'pago', 'sem-pendencia'].includes(options.financialStatus) && customer.openReceivablesCount) return false;
+    }
+    return true;
+  });
+}
+
+function sortCustomers(customers, options) {
+  const direction = options.order === 'desc' ? -1 : 1;
+  const sortKey = options.sort;
+  const value = (customer) => {
+    if (sortKey === 'attention' || sortKey === 'atencao') {
+      return Number(customer.overdueReceivablesCount || 0) * 4
+        + Number(customer.openServiceOrdersCount || 0) * 2
+        + (customer.contractedEquipmentsCount > 0 ? 0 : 1)
+        + (customer.phone ? 0 : 1);
+    }
+    if (sortKey === 'monthlyvalue' || sortKey === 'mensalidade') return Number(customer.monthlyValue || 0);
+    if (sortKey === 'openorders' || sortKey === 'osabertas') return Number(customer.openServiceOrdersCount || 0);
+    if (sortKey === 'contracts' || sortKey === 'contratos') return Number(customer.activeContractsCount || 0);
+    if (sortKey === 'equipments' || sortKey === 'equipamentos') return Number(customer.contractedEquipmentsCount || 0);
+    if (sortKey === 'overdue' || sortKey === 'vencidos') return Number(customer.overdueReceivablesCount || 0);
+    if (sortKey === 'updatedat' || sortKey === 'atualizado') return new Date(customer.updatedAt || 0).getTime() || 0;
+    return String(customer.fantasyName || customer.name || '').toLocaleLowerCase('pt-BR');
+  };
+  return customers.sort((left, right) => {
+    const a = value(left);
+    const b = value(right);
+    if (a < b) return -1 * direction;
+    if (a > b) return 1 * direction;
+    return String(left.name || '').localeCompare(String(right.name || ''), 'pt-BR') * direction;
+  });
+}
+
+async function queryCustomers(tenantId, query = {}, { forExport = false } = {}) {
+  const options = parseCustomerListOptions(query);
+  const where = customerWhereFromOptions(tenantId, options);
   const customers = await prisma.crmCustomer.findMany({
     where,
     orderBy: { name: 'asc' },
-    take,
     include: {
       _count: { select: { equipments: true, whatsappContacts: true } },
       equipments: {
@@ -686,8 +945,99 @@ async function listCustomers(req, res) {
       },
     },
   });
+  const metricSorts = new Set(['monthlyvalue', 'mensalidade', 'openorders', 'osabertas', 'contracts', 'contratos', 'equipments', 'equipamentos', 'overdue', 'vencidos', 'attention', 'atencao']);
+  const needsAllMetrics = forExport
+    || options.hasContract !== null
+    || options.contractedOnly !== null
+    || options.hasOpenOrders !== null
+    || Boolean(options.view)
+    || Boolean(options.contractStatus)
+    || Boolean(options.financialStatus)
+    || metricSorts.has(options.sort);
+  const metricCustomers = needsAllMetrics
+    ? customers
+    : customers.slice(options.offset, options.offset + options.pageSize);
+  const metrics = await loadCustomerOperationalMetrics(tenantId, metricCustomers);
+  const enriched = customers.map((customer) => {
+    const { contractMonthlyValue: _contractMonthlyValue, ...publicMetrics } = metrics.get(customer.id) || {};
+    return {
+      ...customer,
+      ...publicMetrics,
+      totalEquipmentCount: customer._count?.equipments || customer.equipments?.length || 0,
+      whatsappContactCount: customer._count?.whatsappContacts || 0,
+    };
+  });
+  const filtered = sortCustomers(applyCustomerOperationalFilters(enriched, options), options);
+  const total = filtered.length;
+  const max = forExport ? CUSTOMER_MAX_EXPORT : options.pageSize;
+  const offset = forExport ? 0 : options.offset;
+  const items = filtered.slice(offset, offset + max);
+  return {
+    items,
+    total,
+    page: options.page,
+    pageSize: options.pageSize,
+    limit: options.pageSize,
+    offset,
+    hasMore: offset + items.length < total,
+    filters: {
+      q: options.q,
+      city: options.city || null,
+      state: options.state || null,
+      contractStatus: options.contractStatus || null,
+      financialStatus: options.financialStatus || null,
+      view: options.view || null,
+      hasContract: options.hasContract,
+      contractedOnly: options.contractedOnly,
+      hasOpenOrders: options.hasOpenOrders,
+      hasPhone: options.hasPhone,
+      sort: options.sort,
+      order: options.order,
+    },
+  };
+}
 
-  res.json(customers);
+function csvEscape(value) {
+  const normalized = value === undefined || value === null ? '' : String(value);
+  return /[";\r\n]/.test(normalized) ? `"${normalized.replace(/"/g, '""')}"` : normalized;
+}
+
+async function exportCustomers(req, res) {
+  const result = await queryCustomers(req.user.tenantId, req.query, { forExport: true });
+  const columns = [
+    ['Código ILUX', (customer) => customer.externalId],
+    ['Nome fantasia', (customer) => customer.fantasyName || customer.name],
+    ['Razão social', (customer) => customer.name],
+    ['CNPJ/CPF', (customer) => customer.cpfCnpj],
+    ['Telefone', (customer) => customer.phone],
+    ['E-mail', (customer) => customer.email],
+    ['Cidade', (customer) => customer.city],
+    ['UF', (customer) => customer.state],
+    ['Equipamentos cadastrados', (customer) => customer.totalEquipmentCount],
+    ['Equipamentos em contrato', (customer) => customer.contractedEquipmentsCount],
+    ['Contratos ativos', (customer) => customer.activeContractsCount],
+    ['O.S. abertas', (customer) => customer.openServiceOrdersCount],
+    ['Títulos vencidos', (customer) => customer.overdueReceivablesCount],
+    ['Mensalidade', (customer) => customer.monthlyValue],
+    ['Última O.S.', (customer) => customer.lastServiceOrderAt],
+  ];
+  const lines = [columns.map(([label]) => csvEscape(label)).join(';')];
+  for (const customer of result.items) lines.push(columns.map(([, read]) => csvEscape(read(customer))).join(';'));
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="crm-clientes-${date}.csv"`);
+  res.setHeader('X-Total-Count', String(result.total));
+  res.setHeader('X-Export-Limit', String(CUSTOMER_MAX_EXPORT));
+  return res.send(`\uFEFF${lines.join('\r\n')}`);
+}
+
+async function listCustomers(req, res) {
+  const result = await queryCustomers(req.user.tenantId, req.query);
+  res.setHeader('X-Total-Count', String(result.total));
+  // The original endpoint returned an array and is still used by compact
+  // selectors. Pagination is opt-in to avoid breaking those consumers.
+  if (!parseCustomerListOptions(req.query).paginate) return res.json(result.items);
+  return res.json(result);
 }
 
 async function getCustomer(req, res) {
@@ -1383,6 +1733,7 @@ async function listEquipments(req, res) {
 module.exports = {
   getSummary,
   listCustomers,
+  exportCustomers,
   getCustomer,
   getCustomerContracts,
   getCustomerServiceOrders,
@@ -1401,4 +1752,6 @@ module.exports = {
   paginateServiceOrders,
   getCrmCapabilities,
   syncMetadata,
+  parseCustomerListOptions,
+  queryCustomers,
 };

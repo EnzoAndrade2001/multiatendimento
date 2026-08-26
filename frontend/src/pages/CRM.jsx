@@ -29,6 +29,7 @@ import {
   Send,
   ShieldCheck,
   Siren,
+  SlidersHorizontal,
   User,
   Wrench,
   X,
@@ -42,6 +43,7 @@ import {
   getCrmCustomer360,
   getCrmReceivableDocuments,
   getCrmCustomers,
+  exportCrmCustomers,
   getCrmSummary,
   getCrmFlaggedDocuments,
   prepareCrmReceivableDocument,
@@ -53,12 +55,36 @@ import { usePermissions } from '../auth/PermissionContext';
 import { CrmContactActions, CrmEquipmentFilters, filterCrmEquipments } from '../components/CrmOperationalControls';
 
 const EMPTY_SUMMARY = { customers: 0, equipments: 0, linkedEquipments: 0, contractedEquipments: 0, activeContracts: 0, openServiceOrders: 0 };
+const CRM_PAGE_SIZE = 60;
+const CRM_VIEW_OPTIONS = [
+  { id: 'all', label: 'Todos' },
+  { id: 'contracted', label: 'Em contrato' },
+  { id: 'open', label: 'O.S. abertas' },
+  { id: 'attention', label: 'Requer atenção' },
+  { id: 'without-contract', label: 'Sem contrato' },
+];
+
+function readSavedCrmViews() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem('crm-saved-views') || '[]');
+    return Array.isArray(value) ? value.slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function CRM() {
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [customers, setCustomers] = useState([]);
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageMeta, setPageMeta] = useState({ total: 0, pageSize: CRM_PAGE_SIZE, hasMore: false });
+  const [viewFilter, setViewFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name');
+  const [savedViews, setSavedViews] = useState(readSavedCrmViews);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState({ city: '', state: '', hasPhone: '', contractStatus: '', financialStatus: '' });
   const [modalLoading, setModalLoading] = useState(false);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [modalError, setModalError] = useState('');
@@ -68,7 +94,7 @@ export default function CRM() {
   const [flaggedDocuments, setFlaggedDocuments] = useState([]);
   const [flaggedExpanded, setFlaggedExpanded] = useState(false);
 
-  useEffect(() => { load(''); }, []);
+  useEffect(() => { load('', 1); }, []);
   useEffect(() => {
     // Reativo: só existe aqui o que alguém já tentou abrir e falhou (documento
     // ambíguo ou ainda não localizado nas pastas). Usuário sem acesso financeiro
@@ -78,15 +104,35 @@ export default function CRM() {
       .catch(() => {});
   }, []);
 
-  async function load(search = q) {
+  async function load(search = q, nextPage = 1, options = {}) {
+    const activeView = options.viewFilter ?? viewFilter;
+    const activeSort = options.sortBy ?? sortBy;
+    const activeFilters = options.filtersOverride ?? advancedFilters;
+    const customerFilters = {
+      view: activeView === 'all' ? undefined : activeView,
+      sort: activeSort === 'attention' ? 'attention' : activeSort === 'open' ? 'openOrders' : activeSort === 'contracted' ? 'equipments' : activeSort === 'updated' ? 'updatedAt' : 'name',
+      city: activeFilters.city?.trim() || undefined,
+      state: activeFilters.state?.trim() || undefined,
+      hasPhone: activeFilters.hasPhone || undefined,
+      contractStatus: activeFilters.contractStatus || undefined,
+      financialStatus: activeFilters.financialStatus || undefined,
+    };
     setLoading(true);
     try {
       const [summaryResponse, customersResponse] = await Promise.all([
         getCrmSummary(),
-        getCrmCustomers({ q: search, limit: 120 }),
+        getCrmCustomers({ q: search, limit: CRM_PAGE_SIZE, page: nextPage, pageSize: CRM_PAGE_SIZE, paginate: true, ...customerFilters }),
       ]);
       setSummary({ ...EMPTY_SUMMARY, ...(summaryResponse.data || {}) });
-      setCustomers(Array.isArray(customersResponse.data) ? customersResponse.data : []);
+      const payload = customersResponse.data;
+      const items = Array.isArray(payload) ? payload : (Array.isArray(payload?.items) ? payload.items : []);
+      setCustomers(items);
+      setPage(Array.isArray(payload) ? 1 : Number(payload?.page || nextPage));
+      setPageMeta({
+        total: Number(payload?.total ?? (Array.isArray(payload) ? items.length : 0)),
+        pageSize: Number(payload?.pageSize || payload?.limit || CRM_PAGE_SIZE),
+        hasMore: Boolean(payload?.hasMore),
+      });
     } finally {
       setLoading(false);
     }
@@ -154,7 +200,89 @@ export default function CRM() {
 
   function submitSearch(event) {
     event.preventDefault();
-    load(q);
+    load(q, 1);
+  }
+
+  const customerMetrics = useMemo(() => new Map(customers.map((customer) => [customer.id, getCustomerListMetrics(customer)])), [customers]);
+  const filteredCustomers = useMemo(() => {
+    const filtered = customers.filter((customer) => matchesCrmView(customer, viewFilter));
+    return filtered.sort((firstCustomer, secondCustomer) => compareCrmCustomers(firstCustomer, secondCustomer, sortBy));
+  }, [customers, viewFilter, sortBy]);
+  const viewCounts = useMemo(() => Object.fromEntries(CRM_VIEW_OPTIONS.map(({ id }) => [
+    id,
+    customers.filter((customer) => matchesCrmView(customer, id)).length,
+  ])), [customers]);
+
+  function chooseView(view) {
+    setViewFilter(view);
+    setPage(1);
+    load(q, 1, { viewFilter: view });
+  }
+
+  function saveCurrentView() {
+    const name = window.prompt('Nome para esta visão do CRM:');
+    const normalized = String(name || '').trim();
+    if (!normalized) return;
+    const next = [{ id: `${Date.now()}`, name: normalized, filter: viewFilter, sort: sortBy, filters: advancedFilters }, ...savedViews.filter((item) => item.name.toLowerCase() !== normalized.toLowerCase())].slice(0, 8);
+    setSavedViews(next);
+    try { window.localStorage.setItem('crm-saved-views', JSON.stringify(next)); } catch { /* storage is optional */ }
+    toast.success('Visão salva');
+  }
+
+  function applySavedView(view) {
+    if (!view) return;
+    const nextFilters = { city: '', state: '', hasPhone: '', contractStatus: '', financialStatus: '', ...(view.filters || {}) };
+    setViewFilter(view.filter || 'all');
+    setSortBy(view.sort || 'name');
+    setAdvancedFilters(nextFilters);
+    setPage(1);
+    load(q, 1, { viewFilter: view.filter || 'all', sortBy: view.sort || 'name', filtersOverride: nextFilters });
+  }
+
+  function clearSearch() {
+    setQ('');
+    load('', 1);
+  }
+
+  function applyAdvancedFilters(nextFilters = advancedFilters) {
+    setAdvancedFilters(nextFilters);
+    setPage(1);
+    load(q, 1, { filtersOverride: nextFilters });
+  }
+
+  function openWhatsApp(customer) {
+    const phone = String(customer?.phone || '').replace(/\D/g, '');
+    if (!phone) return openCustomer(customer, 'contacts');
+    window.open(`https://wa.me/${phone}`, '_blank', 'noopener,noreferrer');
+  }
+
+  async function exportCustomers() {
+    try {
+      const activeView = viewFilter;
+      const params = {
+        q,
+        view: activeView === 'all' ? undefined : activeView,
+        sort: sortBy === 'attention' ? 'attention' : sortBy === 'open' ? 'openOrders' : sortBy === 'contracted' ? 'equipments' : sortBy === 'updated' ? 'updatedAt' : 'name',
+        city: advancedFilters.city?.trim() || undefined,
+        state: advancedFilters.state?.trim() || undefined,
+        hasPhone: advancedFilters.hasPhone || undefined,
+        contractStatus: advancedFilters.contractStatus || undefined,
+        financialStatus: advancedFilters.financialStatus || undefined,
+      };
+      const response = await exportCrmCustomers(params);
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `crm-clientes-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Exportação do CRM iniciada');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível exportar os clientes');
+    }
   }
 
   return (
@@ -174,8 +302,11 @@ export default function CRM() {
               <span>Consulta operacional</span>
             </div>
           </div>
-          <button type="button" style={s.refreshBtn} onClick={() => load()} disabled={loading}>
+          <button type="button" style={s.refreshBtn} onClick={() => load(q, page)} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> Atualizar
+          </button>
+          <button type="button" style={s.refreshBtn} onClick={exportCustomers} disabled={loading}>
+            <Download size={16} /> Exportar CSV
           </button>
         </div>
       </div>
@@ -236,17 +367,66 @@ export default function CRM() {
           onChange={(event) => setQ(event.target.value)}
           placeholder="Busque por cliente, CNPJ, telefone, série, patrimônio, endereço ou código ILUX"
         />
-        {q ? <button type="button" style={s.clearSearch} onClick={() => { setQ(''); load(''); }} aria-label="Limpar busca"><X size={16} /></button> : null}
+        {q ? <button type="button" style={s.clearSearch} onClick={clearSearch} aria-label="Limpar busca"><X size={16} /></button> : null}
         <button type="submit" style={s.searchBtn} disabled={loading}>{loading ? 'Buscando...' : 'Buscar'}</button>
       </form>
 
-      <div style={s.resultHeader}>
-        <strong>{customers.length.toLocaleString('pt-BR')} clientes encontrados</strong>
-        {q ? <span>Resultado para “{q}”</span> : <span>Ordenados por nome</span>}
+      <div className="crm-list-toolbar" style={s.listToolbar}>
+        <div style={s.viewChips} role="group" aria-label="Visões do CRM">
+          {CRM_VIEW_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              style={{ ...s.viewChip, ...(viewFilter === option.id ? s.viewChipActive : {}) }}
+              aria-pressed={viewFilter === option.id}
+              onClick={() => chooseView(option.id)}
+            >
+              {option.label} <span style={s.viewChipCount}>{option.id === 'all' && pageMeta.total ? pageMeta.total.toLocaleString('pt-BR') : viewCounts[option.id]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="list-controls" style={s.listControls}>
+          <button type="button" style={{ ...s.saveViewBtn, ...(filtersOpen ? s.viewChipActive : {}) }} onClick={() => setFiltersOpen((current) => !current)} aria-expanded={filtersOpen}><SlidersHorizontal size={14} /> Filtros</button>
+          {savedViews.length ? (
+            <select value="" style={s.viewSelect} onChange={(event) => applySavedView(savedViews.find((item) => item.id === event.target.value))} aria-label="Aplicar visão salva">
+              <option value="">Visões salvas</option>
+              {savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
+            </select>
+          ) : null}
+          <button type="button" style={s.saveViewBtn} onClick={saveCurrentView}>Salvar visão</button>
+          <label className="sort-field" style={s.sortField}>
+            <span>Ordenar</span>
+            <select className="sort-select" value={sortBy} style={s.sortSelect} onChange={(event) => { const nextSort = event.target.value; setSortBy(nextSort); setPage(1); load(q, 1, { sortBy: nextSort }); }} aria-label="Ordenar clientes">
+              <option value="name">Nome</option>
+              <option value="attention">Atenção primeiro</option>
+              <option value="open">O.S. abertas</option>
+              <option value="contracted">Equipamentos em contrato</option>
+              <option value="updated">Atualização recente</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {filtersOpen ? (
+        <div style={s.advancedFilters} aria-label="Filtros avançados do CRM">
+          <label style={s.advancedFilterField}><span>Cidade</span><input style={s.advancedFilterInput} value={advancedFilters.city} onChange={(event) => setAdvancedFilters((current) => ({ ...current, city: event.target.value }))} placeholder="Todas as cidades" /></label>
+          <label style={s.advancedFilterField}><span>UF</span><input style={s.advancedFilterInput} value={advancedFilters.state} onChange={(event) => setAdvancedFilters((current) => ({ ...current, state: event.target.value.toUpperCase() }))} maxLength={2} placeholder="Todas" /></label>
+          <label style={s.advancedFilterField}><span>Telefone</span><select style={s.advancedFilterInput} value={advancedFilters.hasPhone} onChange={(event) => setAdvancedFilters((current) => ({ ...current, hasPhone: event.target.value }))}><option value="">Todos</option><option value="true">Com telefone</option><option value="false">Sem telefone</option></select></label>
+          <label style={s.advancedFilterField}><span>Contrato</span><select style={s.advancedFilterInput} value={advancedFilters.contractStatus} onChange={(event) => setAdvancedFilters((current) => ({ ...current, contractStatus: event.target.value }))}><option value="">Todos</option><option value="active">Contrato ativo</option><option value="inactive">Contrato encerrado</option><option value="none">Sem contrato</option></select></label>
+          <label style={s.advancedFilterField}><span>Financeiro</span><select style={s.advancedFilterInput} value={advancedFilters.financialStatus} onChange={(event) => setAdvancedFilters((current) => ({ ...current, financialStatus: event.target.value }))}><option value="">Todos</option><option value="overdue">Títulos vencidos</option><option value="open">Pendências em aberto</option><option value="clear">Sem pendências</option></select></label>
+          <div style={s.advancedFilterActions}><button type="button" style={s.secondaryBtn} onClick={() => applyAdvancedFilters({ city: '', state: '', hasPhone: '', contractStatus: '', financialStatus: '' })}>Limpar</button><button type="button" style={s.primaryBtn} onClick={() => applyAdvancedFilters()}>Aplicar filtros</button></div>
+        </div>
+      ) : null}
+
+      <div className="crm-result-header" style={s.resultHeader}>
+        <strong>Exibindo {filteredCustomers.length.toLocaleString('pt-BR')} nesta página de {(pageMeta.total || customers.length).toLocaleString('pt-BR')} clientes</strong>
+        {q ? <span>Resultado para “{q}” · {sortLabel(sortBy)}</span> : <span>{sortLabel(sortBy)}</span>}
       </div>
 
       <div className="crm-customer-grid" style={s.customerGrid}>
-        {customers.map((customer) => (
+        {filteredCustomers.map((customer) => {
+          const metrics = customerMetrics.get(customer.id) || getCustomerListMetrics(customer);
+          return (
           <article
             key={customer.id}
             className="crm-customer-card"
@@ -263,22 +443,47 @@ export default function CRM() {
                 {customer.fantasyName && customer.name !== customer.fantasyName ? <p style={s.legalName}>{customer.name}</p> : null}
               </div>
             </div>
+            <div style={s.cardStatusRow}>
+              {metrics.openOrders > 0 ? <span style={{ ...s.statusPill, ...s.statusPillWarning }}><ClipboardList size={12} /> {metrics.openOrders} O.S. aberta{metrics.openOrders === 1 ? '' : 's'}</span> : null}
+              {metrics.overdue > 0 ? <span style={{ ...s.statusPill, ...s.statusPillDanger }}><CircleDollarSign size={12} /> {metrics.overdue} vencido{metrics.overdue === 1 ? '' : 's'}</span> : null}
+              {metrics.contracted > 0 ? <span style={{ ...s.statusPill, ...s.statusPillSuccess }}><ShieldCheck size={12} /> Em contrato</span> : null}
+              {metrics.contracted === 0 && metrics.contracts === 0 ? <span style={s.statusPill}><AlertCircle size={12} /> Sem contrato</span> : null}
+            </div>
             <div style={s.metaGrid}>
               <Meta icon={<Hash size={14} />} text={customer.cpfCnpj || `ILUX ${customer.externalId || '—'}`} />
               <Meta icon={<Phone size={14} />} text={customer.phone || 'Telefone não informado'} />
               <Meta icon={<MapPin size={14} />} text={joinLocation(customer) || 'Localização não informada'} wide />
+            </div>
+            <div style={s.cardMetrics} aria-label="Resumo operacional">
+              <span><Printer size={13} /> <strong>{metrics.equipments}</strong> equipamentos</span>
+              <span><ShieldCheck size={13} /> <strong>{metrics.contracted}</strong> em contrato</span>
+              <span><CircleDollarSign size={13} /> <strong>{formatCurrency(metrics.monthlyValue)}</strong>/mês</span>
             </div>
             <div style={s.cardFooter}>
               <div style={s.counts}>
                 <span style={s.badge}><Printer size={13} /> {countOf(customer, 'equipments')} equip.</span>
                 {hasValue(customer.contractsCount) || Array.isArray(customer.contracts) ? <span style={s.badgeMuted}><FileText size={13} /> {countOf(customer, 'contracts')} contratos</span> : null}
               </div>
-              <span style={s.openHint}>Abrir perfil <ChevronRight size={16} /></span>
+              <div style={s.cardActions} onClick={(event) => event.stopPropagation()}>
+                {customer.phone ? <button type="button" style={s.iconCardAction} title="Abrir WhatsApp" aria-label={`Abrir WhatsApp de ${customer.fantasyName || customer.name}`} onClick={() => openWhatsApp(customer)}><Send size={14} /></button> : null}
+                <button type="button" style={s.cardAction} onClick={() => openCustomer(customer, 'os')}><ClipboardList size={13} /> O.S.</button>
+                <button type="button" style={s.openHint} onClick={() => openCustomer(customer)}>Abrir perfil <ChevronRight size={16} /></button>
+              </div>
             </div>
           </article>
-        ))}
+          );
+        })}
         {!loading && customers.length === 0 ? <div style={s.emptyState}>Nenhum cliente encontrado com os filtros informados. Tente outro termo ou limpe a busca.</div> : null}
+        {!loading && customers.length > 0 && filteredCustomers.length === 0 ? <div style={s.emptyState}>Nenhum cliente nesta visão. Tente outra visão ou limpe os filtros.</div> : null}
       </div>
+
+      {(pageMeta.hasMore || page > 1) ? (
+        <div style={s.pagination} aria-label="Paginação de clientes">
+          <button type="button" style={s.paginationBtn} disabled={loading || page <= 1} onClick={() => load(q, page - 1)}>Anterior</button>
+          <span>Página <strong>{page}</strong> de <strong>{Math.max(1, Math.ceil((pageMeta.total || customers.length) / (pageMeta.pageSize || CRM_PAGE_SIZE)))}</strong></span>
+          <button type="button" style={s.paginationBtn} disabled={loading || !pageMeta.hasMore} onClick={() => load(q, page + 1)}>Próxima</button>
+        </div>
+      ) : null}
 
       {selectedCustomer ? (
         <CustomerModal
@@ -1322,6 +1527,50 @@ function countOf(customer, relation) {
   return Number(customer._count?.[relation] || customer[`${relation}Count`] || 0);
 }
 
+function getCustomerListMetrics(customer) {
+  const equipments = countOf(customer, 'equipments');
+  const equipmentItems = arrayOf(customer.equipments);
+  const contracted = Number(pick(customer, 'contractedEquipmentsCount', 'contractedEquipmentCount')) || filterCrmEquipments(equipmentItems, 'contracted').length;
+  const contracts = Number(pick(customer, 'contractsCount', 'contractCount')) || (Array.isArray(customer.contracts) ? customer.contracts.length : 0);
+  const activeContracts = Number(pick(customer, 'activeContractsCount', 'activeContractCount')) || (Array.isArray(customer.contracts) ? customer.contracts.filter(isContractActive).length : 0);
+  const openOrders = Number(pick(customer, 'openServiceOrdersCount', 'openOrdersCount', 'serviceOrdersOpen')) || 0;
+  const overdue = Number(pick(customer, 'overdueReceivablesCount', 'overdueCount', 'overdueTitles')) || 0;
+  const monthlyValue = Number(pick(customer, 'monthlyValue', 'monthlyContractValue', 'activeMonthlyValue')) || 0;
+  return { equipments, contracted, contracts, activeContracts, openOrders, overdue, monthlyValue };
+}
+
+function matchesCrmView(customer, view) {
+  if (view === 'all') return true;
+  const metrics = getCustomerListMetrics(customer);
+  if (view === 'contracted') return metrics.contracted > 0 || metrics.activeContracts > 0;
+  if (view === 'open') return metrics.openOrders > 0;
+  if (view === 'attention') return metrics.openOrders > 0 || metrics.overdue > 0 || !customer.phone || metrics.contracted === 0;
+  if (view === 'without-contract') return metrics.contracted === 0 && metrics.activeContracts === 0;
+  return true;
+}
+
+function compareCrmCustomers(firstCustomer, secondCustomer, sortBy) {
+  const firstMetrics = getCustomerListMetrics(firstCustomer);
+  const secondMetrics = getCustomerListMetrics(secondCustomer);
+  if (sortBy === 'attention') {
+    const firstScore = firstMetrics.overdue * 4 + firstMetrics.openOrders * 2 + (firstMetrics.contracted === 0 ? 1 : 0);
+    const secondScore = secondMetrics.overdue * 4 + secondMetrics.openOrders * 2 + (secondMetrics.contracted === 0 ? 1 : 0);
+    if (firstScore !== secondScore) return secondScore - firstScore;
+  }
+  if (sortBy === 'open' && firstMetrics.openOrders !== secondMetrics.openOrders) return secondMetrics.openOrders - firstMetrics.openOrders;
+  if (sortBy === 'contracted' && firstMetrics.contracted !== secondMetrics.contracted) return secondMetrics.contracted - firstMetrics.contracted;
+  if (sortBy === 'updated') {
+    const firstDate = new Date(firstCustomer.updatedAt || firstCustomer.externalUpdatedAt || 0).getTime() || 0;
+    const secondDate = new Date(secondCustomer.updatedAt || secondCustomer.externalUpdatedAt || 0).getTime() || 0;
+    if (firstDate !== secondDate) return secondDate - firstDate;
+  }
+  return String(firstCustomer.fantasyName || firstCustomer.name || '').localeCompare(String(secondCustomer.fantasyName || secondCustomer.name || ''), 'pt-BR', { sensitivity: 'base' });
+}
+
+function sortLabel(sortBy) {
+  return { name: 'Ordenados por nome', attention: 'Atenção primeiro', open: 'O.S. abertas primeiro', contracted: 'Equipamentos em contrato', updated: 'Atualizados recentemente' }[sortBy] || 'Ordenados por nome';
+}
+
 function hasValue(value) { return value !== null && value !== undefined && value !== ''; }
 function joinLocation(item) { return [item.address, item.complement, item.neighborhood, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
 function equipmentLocation(item) { return [item.address, item.complement, pick(item, 'department', 'sector'), item.installLocation, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
@@ -1478,6 +1727,7 @@ const crmResponsiveCss = `
   .crm-page input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .crm-profile-modal input:not([type='checkbox']) { min-width: 0; width: 100%; background: transparent; border: 0; outline: 0; color: var(--text-main); font: inherit; }
   .crm-profile-modal input[type='date'] { width: auto; min-width: 132px; padding: .35rem .45rem; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-base); color: var(--text-main); }
+  .crm-list-toolbar select { max-width: 100%; }
   @media (max-width: 900px) {
     .crm-page { padding: 1.25rem !important; }
     .crm-page-header { align-items: stretch !important; }
@@ -1497,6 +1747,11 @@ const crmResponsiveCss = `
     .crm-search input { flex-basis: calc(100% - 3rem) !important; }
     .crm-search button[type='submit'] { width: 100%; }
     .crm-customer-grid { grid-template-columns: 1fr !important; }
+    .crm-list-toolbar, .crm-list-toolbar > * { width: 100%; }
+    .crm-list-toolbar .list-controls { justify-content: flex-start; }
+    .crm-list-toolbar .sort-field { flex: 1 1 auto; }
+    .crm-list-toolbar .sort-select { flex: 1 1 auto; }
+    .crm-result-header { align-items: flex-start !important; flex-direction: column !important; gap: .25rem; }
     .crm-profile-header > div { min-width: 0; }
     .crm-profile-header h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .crm-finance-detail { width: calc(100vw - 1.5rem) !important; max-height: calc(100vh - 1.5rem) !important; }
@@ -1583,6 +1838,20 @@ const s = {
   searchInput: { flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-main)', fontSize: '0.93rem' },
   clearSearch: { display: 'grid', placeItems: 'center', color: 'var(--text-muted)', background: 'transparent', border: 0, cursor: 'pointer' },
   searchBtn: { background: 'var(--accent)', color: 'var(--text-inverse)', border: 0, borderRadius: 10, padding: '0.7rem 1.1rem', fontWeight: 900, cursor: 'pointer' },
+  listToolbar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem', flexWrap: 'wrap', margin: '0.25rem 0 0.2rem' },
+  viewChips: { display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' },
+  viewChip: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem', minHeight: 32, padding: '0.35rem 0.65rem', border: '1px solid var(--border-color)', borderRadius: 999, background: 'var(--bg-surface)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 750 },
+  viewChipActive: { background: 'var(--accent-light)', color: 'var(--accent)', borderColor: 'var(--accent-border)' },
+  viewChipCount: { opacity: 0.8, fontVariantNumeric: 'tabular-nums' },
+  listControls: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' },
+  viewSelect: { maxWidth: 155, minHeight: 32, padding: '0.35rem 0.55rem', border: '1px solid var(--border-color)', borderRadius: 9, background: 'var(--bg-surface)', color: 'var(--text-main)', fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 700 },
+  saveViewBtn: { minHeight: 32, padding: '0.35rem 0.65rem', border: '1px solid var(--border-color)', borderRadius: 9, background: 'var(--bg-surface)', color: 'var(--text-main)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 800 },
+  advancedFilters: { display: 'flex', alignItems: 'flex-end', gap: '0.65rem', flexWrap: 'wrap', margin: '0.15rem 0 0.7rem', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 12, background: 'var(--bg-panel)' },
+  advancedFilterField: { display: 'grid', gap: '0.3rem', minWidth: 140, flex: '1 1 150px', color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 800 },
+  advancedFilterInput: { minHeight: 32, padding: '0.35rem 0.55rem', border: '1px solid var(--border-color)', borderRadius: 9, background: 'var(--bg-surface)', color: 'var(--text-main)', fontFamily: 'inherit', fontSize: '0.75rem' },
+  advancedFilterActions: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto' },
+  sortField: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 700 },
+  sortSelect: { minHeight: 32, padding: '0.35rem 0.55rem', border: '1px solid var(--border-color)', borderRadius: 9, background: 'var(--bg-surface)', color: 'var(--text-main)', fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 700 },
   resultHeader: { display: 'flex', justifyContent: 'space-between', color: 'var(--text-dim)', fontSize: 'var(--text-xs)', padding: '0.25rem 0.15rem 0.8rem' },
   customerGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '0.9rem' },
   customerCard: { minHeight: 180, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.9rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1rem', cursor: 'pointer' },
@@ -1590,15 +1859,26 @@ const s = {
   avatar: { width: 40, height: 40, flex: '0 0 auto', borderRadius: 12, display: 'grid', placeItems: 'center', color: 'var(--accent)', background: 'var(--accent-light)' },
   customerName: { margin: 0, fontSize: '1rem', color: 'var(--text-main)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   legalName: { margin: '0.3rem 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' },
+  cardStatusRow: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' },
+  statusPill: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem', minHeight: 23, padding: '0.2rem 0.45rem', border: '1px solid var(--border-color)', borderRadius: 999, color: 'var(--text-dim)', background: 'var(--bg-base)', fontSize: '0.67rem', fontWeight: 800 },
+  statusPillWarning: { borderColor: 'var(--warning-border)', color: 'var(--warning-text)', background: 'var(--warning-light)' },
+  statusPillDanger: { borderColor: 'var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-light)' },
+  statusPillSuccess: { borderColor: 'var(--success-border)', color: 'var(--success-text)', background: 'var(--success-light)' },
   metaGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: '0.5rem' },
   meta: { display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', minWidth: 0 },
   metaWide: { gridColumn: '1 / -1' },
+  cardMetrics: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.45rem 0.8rem', color: 'var(--text-dim)', fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums' },
+  cardActions: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap', marginLeft: 'auto' },
+  iconCardAction: { width: 30, height: 30, display: 'grid', placeItems: 'center', border: '1px solid var(--success-border)', borderRadius: 8, background: 'var(--success-light)', color: 'var(--success-text)', cursor: 'pointer' },
+  cardAction: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem', minHeight: 30, padding: '0.35rem 0.5rem', border: '1px solid var(--border-color)', borderRadius: 8, background: 'var(--bg-base)', color: 'var(--text-main)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.68rem', fontWeight: 800 },
   cardFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' },
   counts: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap' },
   badge: { display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 999, padding: '0.25rem 0.5rem', fontSize: 'var(--text-xs)', fontWeight: 700 },
   badgeMuted: { display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '0.25rem 0.5rem', fontSize: 'var(--text-xs)', fontWeight: 600 },
   openHint: { display: 'inline-flex', alignItems: 'center', gap: 2, color: 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: 900, whiteSpace: 'nowrap' },
   emptyState: { gridColumn: '1 / -1', textAlign: 'center', color: 'var(--text-muted)', padding: '2rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14 },
+  pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', marginTop: '1rem', color: 'var(--text-muted)', fontSize: '0.78rem' },
+  paginationBtn: { minHeight: 34, padding: '0.4rem 0.75rem', border: '1px solid var(--border-color)', borderRadius: 9, background: 'var(--bg-surface)', color: 'var(--text-main)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 800 },
   modalBackdrop: { position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(0,0,0,.76)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' },
   modal: { width: 'min(1180px, 97vw)', height: 'min(860px, 94vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 22, boxShadow: '0 28px 90px rgba(0,0,0,.55)' },
   modalHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', padding: '1.15rem 1.4rem', borderBottom: '1px solid var(--border-color)' },
