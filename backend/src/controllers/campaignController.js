@@ -110,7 +110,13 @@ async function loadAudience({ tenantId, tag, contactIds, category = 'MARKETING',
     : contacts;
   const noTag = contacts.length - taggedContacts.length;
   if (normalizeCategory(category) === 'COUNTER') {
-    const counter = buildCounterAudience(taggedContacts, { template: message, requireOptIn: requireConsent, excludeOptOut: true });
+    // A tag selecionada representa a autorização operacional do disparo. O aceite
+    // específico continua sendo exigido quando o público é montado manualmente.
+    const counter = buildCounterAudience(taggedContacts, {
+      template: message,
+      requireOptIn: requireConsent && !Boolean(normalizedTag),
+      excludeOptOut: true,
+    });
     const skipCounts = counter.skipped.reduce((acc, item) => {
       if (item.reason === 'invalid_phone') acc.invalidPhone++;
       else if (item.reason === 'duplicate_phone') acc.duplicate++;
@@ -131,6 +137,9 @@ async function loadAudience({ tenantId, tag, contactIds, category = 'MARKETING',
     };
   }
   const consentField = CONSENT_FIELDS[normalizeCategory(category)];
+  // Para campanhas segmentadas, a própria tag é o critério de autorização usado
+  // pela operação. O opt-out global continua bloqueando o contato em qualquer caso.
+  const authorizedByTag = Boolean(normalizedTag);
   const seen = new Set();
   const rows = [];
   const exclusions = { noTag: 0, duplicate: 0, invalidPhone: 0, noConsent: 0, optOut: 0 };
@@ -156,7 +165,7 @@ async function loadAudience({ tenantId, tag, contactIds, category = 'MARKETING',
       rows.push({ contact, phone, status: 'SKIPPED', reason: 'Contato solicitou não receber mensagens' });
       continue;
     }
-    if (requireConsent && consentField && !contact[consentField]) {
+    if (requireConsent && !authorizedByTag && consentField && !contact[consentField]) {
       exclusions.noConsent++;
       rows.push({ contact, phone, status: 'SKIPPED', reason: `Sem aceite para ${normalizeCategory(category).toLowerCase()}` });
       continue;
