@@ -94,6 +94,35 @@ async function reprocess(req, res) {
   res.status(202).json({ status: 'PROCESSING' });
 }
 
+async function update(req, res) {
+  try {
+    const document = await prisma.knowledgeDocument.findFirst({ where: { id: req.params.id, tenantId: req.user.tenantId } });
+    if (!document) return res.status(404).json({ error: 'Documento não encontrado.' });
+    const title = text(req.body.title);
+    const category = text(req.body.category, 30).toUpperCase();
+    const audience = text(req.body.audience, 30).toUpperCase();
+    if (!title) return res.status(400).json({ error: 'Informe o título do documento.' });
+    if (!documentService.CATEGORIES.has(category) || !documentService.AUDIENCES.has(audience)) return res.status(400).json({ error: 'Categoria ou público inválido.' });
+    const updated = await prisma.knowledgeDocument.update({
+      where: { id: document.id },
+      data: {
+        title,
+        description: text(req.body.description, 2000) || null,
+        category,
+        audience,
+        manufacturer: text(req.body.manufacturer) || null,
+        equipmentModel: text(req.body.equipmentModel) || null,
+        version: text(req.body.version, 80) || null,
+        language: text(req.body.language, 20) || document.language,
+      },
+    });
+    res.json(serialize(updated));
+  } catch (error) {
+    console.error('[knowledge-document] atualizar:', error.message);
+    res.status(500).json({ error: 'Não foi possível atualizar os dados do documento.' });
+  }
+}
+
 async function publish(req, res) {
   const document = await prisma.knowledgeDocument.findFirst({ where: { id: req.params.id, tenantId: req.user.tenantId } });
   if (!document) return res.status(404).json({ error: 'Documento não encontrado.' });
@@ -120,4 +149,4 @@ async function remove(req, res) {
   res.sendStatus(204);
 }
 
-module.exports = { create, detail, download, list, publish, remove, reprocess, unpublish };
+module.exports = { create, detail, download, list, publish, remove, reprocess, unpublish, update };

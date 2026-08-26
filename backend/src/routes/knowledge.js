@@ -16,6 +16,7 @@ router.get('/documents', documentController.list);
 router.post('/documents', knowledgeUpload.single('file'), documentController.create);
 router.get('/documents/:id', documentController.detail);
 router.get('/documents/:id/download', documentController.download);
+router.patch('/documents/:id', documentController.update);
 router.post('/documents/:id/process', documentController.reprocess);
 router.post('/documents/:id/publish', documentController.publish);
 router.post('/documents/:id/unpublish', documentController.unpublish);

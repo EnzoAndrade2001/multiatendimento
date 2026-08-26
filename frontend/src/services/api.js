@@ -188,6 +188,7 @@ export const deleteKnowledge = (id) => api.delete(`/knowledge/${id}`);
 export const getKnowledgeDocuments = () => api.get('/knowledge/documents');
 export const getKnowledgeDocument = (id) => api.get(`/knowledge/documents/${id}`);
 export const uploadKnowledgeDocument = (formData, onUploadProgress) => api.post('/knowledge/documents', formData, { headers: { 'Content-Type': 'multipart/form-data' }, onUploadProgress });
+export const updateKnowledgeDocument = (id, data) => api.patch(`/knowledge/documents/${id}`, data);
 export const publishKnowledgeDocument = (id) => api.post(`/knowledge/documents/${id}/publish`);
 export const unpublishKnowledgeDocument = (id) => api.post(`/knowledge/documents/${id}/unpublish`);
 export const reprocessKnowledgeDocument = (id) => api.post(`/knowledge/documents/${id}/process`);

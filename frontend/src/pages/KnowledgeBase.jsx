@@ -16,6 +16,7 @@ import {
   reprocessKnowledgeDocument,
   unpublishKnowledgeDocument,
   uploadKnowledgeDocument,
+  updateKnowledgeDocument,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -45,6 +46,7 @@ export default function KnowledgeBase() {
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [documentForm, setDocumentForm] = useState(EMPTY_DOCUMENT);
   const [documentBusy, setDocumentBusy] = useState(false);
+  const [editingDocument, setEditingDocument] = useState(null);
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -71,19 +73,32 @@ export default function KnowledgeBase() {
 
   async function handleDocumentUpload(event) {
     event.preventDefault();
-    if (!documentForm.file || documentBusy) return;
+    if ((!editingDocument && !documentForm.file) || documentBusy) return;
     setDocumentBusy(true);
     try {
-      const payload = new FormData();
-      Object.entries(documentForm).forEach(([key, value]) => { if (key !== 'file' && value) payload.append(key, value); });
-      payload.append('file', documentForm.file);
-      await uploadKnowledgeDocument(payload);
-      toast.success('Documento recebido. O processamento continuará em segundo plano.');
+      if (editingDocument) {
+        const { file, supersedesId, ...metadata } = documentForm;
+        await updateKnowledgeDocument(editingDocument.id, metadata);
+        toast.success('Dados do documento atualizados.');
+      } else {
+        const payload = new FormData();
+        Object.entries(documentForm).forEach(([key, value]) => { if (key !== 'file' && value) payload.append(key, value); });
+        payload.append('file', documentForm.file);
+        await uploadKnowledgeDocument(payload);
+        toast.success('Documento recebido. O processamento continuará em segundo plano.');
+      }
       setShowDocumentModal(false);
+      setEditingDocument(null);
       setDocumentForm(EMPTY_DOCUMENT);
       await load();
     } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível enviar o documento.'); }
     finally { setDocumentBusy(false); }
+  }
+
+  function openDocumentEdit(item) {
+    setEditingDocument(item);
+    setDocumentForm({ title: item.title || '', description: item.description || '', category: item.category || 'MANUAL', audience: item.audience || 'CUSTOMER', manufacturer: item.manufacturer || '', equipmentModel: item.equipmentModel || '', version: item.version || '', language: item.language || 'pt-BR', supersedesId: item.supersedesId || '', file: null });
+    setShowDocumentModal(true);
   }
 
   async function documentAction(action, item) {
@@ -297,6 +312,7 @@ export default function KnowledgeBase() {
               {item.processingError ? <div style={s.noMatch}><AlertTriangle size={17} /> {item.processingError}</div> : null}
               <div style={s.usage}>Usado {item.usageCount30d || 0} vez(es) nos últimos 30 dias. Apenas documentos CUSTOMER e publicados podem orientar o bot.</div>
               <div style={s.cardActions}>
+                <ActionButton variant="secondary" style={s.actionBtn} onClick={() => openDocumentEdit(item)}>Editar dados</ActionButton>
                 <ActionButton variant="secondary" style={s.actionBtn} onClick={() => documentAction('download', item)}><Download size={15} /> Baixar</ActionButton>
                 {item.status === 'DRAFT' ? <ActionButton style={s.actionBtn} onClick={() => documentAction('publish', item)}>Publicar</ActionButton> : null}
                 {item.status === 'PUBLISHED' ? <ActionButton variant="secondary" style={s.actionBtn} onClick={() => documentAction('unpublish', item)}>Retirar</ActionButton> : null}
@@ -309,15 +325,14 @@ export default function KnowledgeBase() {
         </div>
       )}
 
-      {showDocumentModal ? <ModalShell kicker="Base documental" title="Anexar manual ou portfólio" onClose={() => setShowDocumentModal(false)} maxWidth="42rem">
+      {showDocumentModal ? <ModalShell kicker="Base documental" title={editingDocument ? 'Editar dados do documento' : 'Anexar manual ou portfólio'} onClose={() => { setShowDocumentModal(false); setEditingDocument(null); }} maxWidth="42rem">
         <form onSubmit={handleDocumentUpload} style={s.modalBody}>
           <label style={s.label}>Título</label><input style={s.input} required value={documentForm.title} onChange={(e) => setDocumentForm({ ...documentForm, title: e.target.value })} placeholder="Ex: Manual técnico Ricoh MP C3004" />
           <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Categoria</span><select style={s.input} value={documentForm.category} onChange={(e) => setDocumentForm({ ...documentForm, category: e.target.value })}><option value="MANUAL">Manual</option><option value="PROCEDURE">Procedimento</option><option value="PORTFOLIO">Portfólio</option></select></label><label style={s.fieldGroup}><span style={s.label}>Quem pode usar</span><select style={s.input} value={documentForm.audience} onChange={(e) => setDocumentForm({ ...documentForm, audience: e.target.value })}><option value="CUSTOMER">Bot com clientes</option><option value="AGENT">Somente atendentes</option><option value="TECHNICIAN">Somente técnicos</option></select></label></div>
           <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Fabricante</span><input style={s.input} value={documentForm.manufacturer} onChange={(e) => setDocumentForm({ ...documentForm, manufacturer: e.target.value })} placeholder="Ricoh" /></label><label style={s.fieldGroup}><span style={s.label}>Modelo do equipamento</span><input style={s.input} value={documentForm.equipmentModel} onChange={(e) => setDocumentForm({ ...documentForm, equipmentModel: e.target.value })} placeholder="MP C3004" /></label></div>
-          <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Versão</span><input style={s.input} value={documentForm.version} onChange={(e) => setDocumentForm({ ...documentForm, version: e.target.value })} /></label><label style={s.fieldGroup}><span style={s.label}>Arquivo (máx. 25 MB)</span><input style={s.input} type="file" required accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.webp" onChange={(e) => setDocumentForm({ ...documentForm, file: e.target.files?.[0] || null })} /></label></div>
-          <label style={s.fieldGroup}><span style={s.label}>Substitui uma versão anterior? (opcional)</span><select style={s.input} value={documentForm.supersedesId} onChange={(e) => setDocumentForm({ ...documentForm, supersedesId: e.target.value })}><option value="">Não, é um documento novo</option>{documents.filter((item) => item.status !== 'REPLACED').map((item) => <option key={item.id} value={item.id}>{item.title}{item.version ? ` — versão ${item.version}` : ''}</option>)}</select><small style={s.fieldHelp}>Ao publicar a nova versão, a anterior será retirada automaticamente das respostas.</small></label>
-          <div style={s.noMatch}><AlertTriangle size={17} /> O arquivo será processado como rascunho. Ele só passa a orientar o bot depois que um administrador clicar em Publicar.</div>
-          <div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowDocumentModal(false)}>Cancelar</ActionButton><ActionButton type="submit" loading={documentBusy}><Upload size={17} /> Enviar e processar</ActionButton></div>
+          <div style={s.formGrid}><label style={s.fieldGroup}><span style={s.label}>Versão</span><input style={s.input} value={documentForm.version} onChange={(e) => setDocumentForm({ ...documentForm, version: e.target.value })} /></label>{!editingDocument ? <label style={s.fieldGroup}><span style={s.label}>Arquivo (máx. 25 MB)</span><input style={s.input} type="file" required accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.webp" onChange={(e) => setDocumentForm({ ...documentForm, file: e.target.files?.[0] || null })} /></label> : null}</div>
+          {!editingDocument ? <><label style={s.fieldGroup}><span style={s.label}>Substitui uma versão anterior? (opcional)</span><select style={s.input} value={documentForm.supersedesId} onChange={(e) => setDocumentForm({ ...documentForm, supersedesId: e.target.value })}><option value="">Não, é um documento novo</option>{documents.filter((item) => item.status !== 'REPLACED').map((item) => <option key={item.id} value={item.id}>{item.title}{item.version ? ` — versão ${item.version}` : ''}</option>)}</select><small style={s.fieldHelp}>Ao publicar a nova versão, a anterior será retirada automaticamente das respostas.</small></label><div style={s.noMatch}><AlertTriangle size={17} /> O arquivo será processado como rascunho. Ele só passa a orientar o bot depois que um administrador clicar em Publicar.</div></> : <div style={s.noMatch}><AlertTriangle size={17} /> A correção dos dados é aplicada imediatamente e não altera o arquivo nem exige nova indexação.</div>}
+          <div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => { setShowDocumentModal(false); setEditingDocument(null); }}>Cancelar</ActionButton><ActionButton type="submit" loading={documentBusy}>{editingDocument ? 'Salvar alterações' : <><Upload size={17} /> Enviar e processar</>}</ActionButton></div>
         </form>
       </ModalShell> : null}
     </div>
