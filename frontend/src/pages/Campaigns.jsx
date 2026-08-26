@@ -609,7 +609,12 @@ export default function Campaigns() {
             <SurfaceCard style={s.card}>
               <div style={s.sectionHeading}><div><span style={s.eyebrow}>Prévia</span><h2 style={s.sectionTitle}>Conferência antes do envio</h2></div><Check size={20} color="var(--success-text)" /></div>
               {preview ? <><div style={s.previewStats}><div><strong>{preview.total ?? 0}</strong><small>Na seleção</small></div><div style={s.statGood}><strong>{preview.eligible ?? preview.valid ?? 0}</strong><small>Receberão</small></div><div style={s.statWarn}><strong>{preview.skipped ?? preview.excluded ?? 0}</strong><small>Não receberão</small></div></div>{preview.reasons ? <div style={s.reasonList}>{Object.entries(preview.reasons).filter(([, count]) => Number(count) > 0).map(([reason, count]) => <span key={reason}>{count} × {exclusionLabel(reason)}</span>)}</div> : null}<p style={s.hint}>Na seleção = contatos da tag/contatos escolhidos. A lista final é congelada no início da campanha e registrada no histórico.</p></> : <div style={s.emptyPreview}><Users size={28} /><p>Selecione o público e clique em <strong>Calcular prévia</strong>.</p></div>}
-              {message ? <div style={s.messagePreview}><small>Mensagem de exemplo</small><p>{message.replaceAll('[nome]', selectedContacts[0]?.name || 'Cliente')}</p></div> : null}
+              <CampaignWhatsAppPreview
+                instance={selectedInstance}
+                message={message.trim() || (campaignType === 'COUNTER' ? 'Olá, [nome]. Poderia nos enviar os contadores dos seus equipamentos?' : '')}
+                attachment={attachment}
+                sampleName={selectedContacts[0]?.name || 'Cliente'}
+              />
             </SurfaceCard>
             {activeCampaign ? <SurfaceCard style={s.card}><div style={s.sectionHeading}><div><span style={s.eyebrow}>Acompanhamento</span><h2 style={s.sectionTitle}>{activeCampaign.name || 'Campanha atual'}</h2></div><span style={statusStyle(activeCampaign.status)}>{activeCampaign.status}</span></div><div style={s.progressBar}><div style={{ ...s.progressFill, width: `${percentage}%` }} /></div><div style={s.progressMeta}><span>{processed} de {currentProgress.total || 0}</span><span>{Math.round(percentage)}%</span></div><div style={s.stats}><span style={{ color: 'var(--success-text)' }}>Enviadas: {(currentProgress.sent || 0) + (currentProgress.delivered || 0)}</span><span style={{ color: 'var(--danger-text)' }}>Falhas: {currentProgress.failed || 0}</span></div><div style={s.actionRow}>{['RUNNING', 'QUEUED'].includes(activeCampaign.status) ? <ActionButton variant="secondary" size="sm" onClick={() => campaignAction('pause', activeCampaign)}><Pause size={14} /> Pausar</ActionButton> : null}{activeCampaign.status === 'PAUSED' ? <ActionButton size="sm" onClick={() => campaignAction('resume', activeCampaign)}><Play size={14} /> Retomar</ActionButton> : null}{['RUNNING', 'QUEUED', 'PAUSED'].includes(activeCampaign.status) ? <ActionButton variant="danger" size="sm" onClick={() => campaignAction('cancel', activeCampaign)}><Square size={14} /> Cancelar</ActionButton> : null}{['FAILED', 'COMPLETED'].includes(activeCampaign.status) && activeCampaign.progress?.failed ? <ActionButton variant="secondary" size="sm" onClick={() => campaignAction('retry', activeCampaign)}><RotateCcw size={14} /> Reprocessar falhas</ActionButton> : null}</div></SurfaceCard> : null}
           </div>
@@ -624,6 +629,64 @@ export default function Campaigns() {
       {showSaveTag ? <ModalShell kicker="Salvar grupo" title="Criar grupo de contatos" onClose={() => setShowSaveTag(false)} maxWidth="28rem"><div style={s.modalBody}><p style={s.modalText}>Dê um nome para este grupo de {selectedContacts.length} contatos.</p><input autoFocus style={s.input} placeholder="Ex.: CLIENTES_MANUTENCAO" value={newTagName} onChange={(e) => setNewTagName(e.target.value)} /><div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowSaveTag(false)}>Cancelar</ActionButton><ActionButton onClick={handleSaveTag}>Salvar grupo</ActionButton></div></div></ModalShell> : null}
       {showTest ? <ModalShell kicker="Mensagem de teste" title="Enviar para um número de teste" onClose={() => setShowTest(false)} maxWidth="28rem"><div style={s.modalBody}><p style={s.modalText}>A mensagem será enviada somente para este número usando a instância selecionada.</p><input autoFocus style={s.input} placeholder="5551999999999" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} /><div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowTest(false)}>Cancelar</ActionButton><ActionButton onClick={handleTest}>Enviar teste</ActionButton></div></div></ModalShell> : null}
       {showSaveTemplate ? <ModalShell kicker="Modelos de mensagem" title="Salvar modelo" onClose={() => setShowSaveTemplate(false)} maxWidth="34rem"><div style={s.modalBody}><p style={s.modalText}>Salve uma mensagem reutilizável para as próximas campanhas de <strong>{typeInfo.label}</strong>. As variáveis como [nome] serão preenchidas no envio.</p><label style={s.label} htmlFor="template-name">Nome do modelo</label><input id="template-name" autoFocus style={s.input} placeholder="Ex.: Aviso de manutenção" value={templateDraft.name} onChange={(e) => setTemplateDraft((draft) => ({ ...draft, name: e.target.value }))} /><label style={s.label} htmlFor="template-body">Mensagem do modelo</label><textarea id="template-body" style={{ ...s.textarea, minHeight: '130px' }} placeholder="Escreva a mensagem que será reutilizada..." value={templateDraft.body} onChange={(e) => setTemplateDraft((draft) => ({ ...draft, body: e.target.value }))} /><div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowSaveTemplate(false)}>Cancelar</ActionButton><ActionButton onClick={handleSaveTemplate} loading={savingTemplate}>Salvar modelo</ActionButton></div></div></ModalShell> : null}
+    </div>
+  );
+}
+
+function CampaignWhatsAppPreview({ instance, message, attachment, sampleName = 'Cliente' }) {
+  const instanceName = instance?.instanceName?.split('_').pop()?.toUpperCase() || instance?.instanceName || 'INSTÂNCIA';
+  const isConnected = connected(instance);
+  const previewMessage = String(message || '')
+    .replaceAll('[nome]', sampleName)
+    .replaceAll('[empresa]', 'Empresa exemplo')
+    .replaceAll('[equipamento]', 'Equipamento exemplo')
+    .replaceAll('[vencimento]', '30/09/2026');
+  const mediaType = String(attachment?.mediaType || '').toLowerCase();
+  const isImage = mediaType === 'image' || String(attachment?.mimeType || '').startsWith('image/');
+
+  return (
+    <div style={s.whatsappPreview} aria-label="Prévia da mensagem no WhatsApp">
+      <div style={s.whatsappPreviewHeader}>
+        <div style={s.whatsappIdentity}>
+          <div style={s.whatsappAvatar}>{instanceName.slice(0, 2)}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={s.whatsappTitle}>Prévia do WhatsApp</div>
+            <div style={s.whatsappSubtitle}>{instanceName} · {isConnected ? 'conectada' : 'selecione uma instância conectada'}</div>
+          </div>
+        </div>
+        <div style={s.whatsappMeta}>
+          <span style={{ ...s.whatsappMetaDot, background: isConnected ? '#25D366' : 'var(--text-dim)' }} />
+          <span>{isConnected ? 'Pronta para envio' : 'Aguardando conexão'}</span>
+        </div>
+      </div>
+      <div style={s.phonePreviewStage}>
+        <div style={s.chatStageWrap}>
+          <div style={s.chatStageHint}>Como a mensagem deve aparecer no celular</div>
+          {previewMessage.trim() ? (
+            <div style={s.messageBubbleTextPreview}>
+              <div style={s.messageTextPreview}>{previewMessage}</div>
+              <div style={s.messageTimePreview}>agora</div>
+            </div>
+          ) : null}
+          {attachment ? (
+            <div style={s.messageBubbleMediaPreview}>
+              {isImage && attachment.url ? <img src={attachment.url} alt="Prévia do anexo" style={s.messageImagePreview} /> : (
+                <div style={s.documentPreview}>
+                  <Paperclip size={22} />
+                  <span>{attachment.name || 'Arquivo anexado'}</span>
+                </div>
+              )}
+              <div style={s.messageTimePreview}>agora</div>
+            </div>
+          ) : null}
+          {!previewMessage.trim() && !attachment ? (
+            <div style={s.messageBubbleEmptyPreview}>
+              <div style={s.messageEmptyPreview}>Escreva uma mensagem ou anexe um arquivo para visualizar a prévia.</div>
+              <div style={s.messageTimePreview}>agora</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -682,6 +745,25 @@ const s = {
   statGood: { color: 'var(--success-text)' }, statWarn: { color: 'var(--warning-text)' },
   emptyPreview: { display: 'grid', justifyItems: 'center', textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 1rem', background: 'var(--bg-panel)', borderRadius: 'var(--radius-md)', fontSize: '0.8rem' },
   messagePreview: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.8rem', marginTop: '1rem' },
+  whatsappPreview: { background: 'var(--lead-preview-bg)', borderRadius: '16px', border: '1px solid var(--border-color)', overflow: 'hidden', minHeight: '420px', width: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', marginTop: '1rem' },
+  whatsappPreviewHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.85rem 0.9rem', borderBottom: '1px solid var(--border-color)', background: 'var(--lead-preview-header-bg)' },
+  whatsappIdentity: { display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 },
+  whatsappAvatar: { width: '38px', height: '38px', borderRadius: '12px', background: 'linear-gradient(135deg, #25D366, #1a8f56)', display: 'grid', placeItems: 'center', fontSize: '0.7rem', fontWeight: 900, color: '#07120d', letterSpacing: '0.02em', flexShrink: 0 },
+  whatsappTitle: { fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', lineHeight: 1.2 },
+  whatsappSubtitle: { fontSize: '0.68rem', color: 'var(--text-dim)', fontWeight: 600, marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '190px' },
+  whatsappMeta: { display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 },
+  whatsappMetaDot: { width: '7px', height: '7px', borderRadius: '999px', background: '#25D366', boxShadow: '0 0 0 3px rgba(37, 211, 102, 0.14)' },
+  phonePreviewStage: { padding: '0.9rem', background: 'var(--lead-preview-stage-bg)', backgroundSize: 'auto, 28px 28px, 28px 28px', display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', minHeight: '325px', flex: 1 },
+  chatStageWrap: { display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%', alignItems: 'flex-end' },
+  chatStageHint: { alignSelf: 'flex-start', color: 'var(--lead-preview-hint)', fontSize: '0.68rem', fontWeight: 600, paddingLeft: '0.15rem' },
+  messageBubbleTextPreview: { width: '100%', maxWidth: '360px', background: 'var(--lead-preview-bubble-bg)', color: 'var(--lead-preview-bubble-text)', borderRadius: '15px 15px 4px 15px', padding: '0.65rem', boxShadow: '0 12px 24px rgba(0,0,0,0.2)', border: '1px solid var(--lead-preview-bubble-border)', alignSelf: 'flex-end' },
+  messageBubbleMediaPreview: { width: '100%', maxWidth: '360px', background: 'var(--lead-preview-bubble-media-bg)', color: 'var(--lead-preview-bubble-text)', borderRadius: '15px 15px 4px 15px', padding: '0.65rem', boxShadow: '0 12px 24px rgba(0,0,0,0.18)', border: '1px solid var(--lead-preview-media-border)', alignSelf: 'flex-end' },
+  messageBubbleEmptyPreview: { width: '100%', maxWidth: '360px', background: 'var(--lead-preview-bubble-empty-bg)', color: 'var(--lead-preview-bubble-text)', borderRadius: '15px 15px 4px 15px', padding: '0.65rem', boxShadow: '0 12px 24px rgba(0,0,0,0.18)', border: '1px dashed var(--lead-preview-empty-border)', alignSelf: 'flex-end' },
+  messageImagePreview: { width: '100%', aspectRatio: '4 / 3', maxHeight: '230px', objectFit: 'contain', display: 'block', borderRadius: '11px', background: 'var(--lead-preview-image-bg)', marginBottom: '0.35rem' },
+  documentPreview: { display: 'flex', alignItems: 'center', gap: '0.55rem', minHeight: '64px', padding: '0.7rem', borderRadius: '10px', background: 'var(--lead-preview-image-bg)', color: 'var(--lead-preview-bubble-text)', fontSize: '0.75rem', fontWeight: 700, overflowWrap: 'anywhere' },
+  messageTextPreview: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', fontSize: '0.82rem', lineHeight: 1.45, padding: '0.1rem 0.15rem 0' },
+  messageEmptyPreview: { color: 'var(--lead-preview-hint)', fontSize: '0.78rem', lineHeight: 1.4, padding: '0.3rem 0.15rem', fontStyle: 'italic' },
+  messageTimePreview: { textAlign: 'right', color: 'var(--lead-preview-time)', fontSize: '0.64rem', marginTop: '0.2rem', paddingRight: '0.1rem' },
   reasonList: { display: 'grid', gap: '0.3rem', color: 'var(--text-muted)', fontSize: '0.73rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' },
   progressBar: { height: 9, overflow: 'hidden', borderRadius: 999, background: 'var(--border-color)' },
   progressFill: { height: '100%', borderRadius: 999, background: 'var(--accent)', transition: 'width 0.3s ease' },
