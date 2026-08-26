@@ -757,28 +757,33 @@ model CrmEquipment {
 }
 
 model Lead {
-  id        String    @id @default(cuid())
-  tenantId  String
-  placeId   String? // Google Place ID (para evitar duplicatas)
-  name      String
-  phone     String?
-  address   String?
-  city      String?
-  state     String?
-  website   String?
-  rating    Float?
-  category  String? // Ex: "Escritório de Advocacia"
-  query     String? // Busca que originou o lead
-  imported  Boolean   @default(false)
-  contactId String? // Se foi importado para Contact
-  sentAt    DateTime? // Data do último envio WhatsApp
-  sentCount Int       @default(0) // Quantas vezes foi enviado
-  createdAt DateTime  @default(now())
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                 String              @id @default(cuid())
+  tenantId           String
+  placeId            String? // Google Place ID (para evitar duplicatas)
+  name               String
+  phone              String?
+  address            String?
+  city               String?
+  state              String?
+  website            String?
+  rating             Float?
+  category           String? // Ex: "Escritório de Advocacia"
+  query              String? // Busca que originou o lead
+  imported           Boolean             @default(false)
+  contactId          String? // Se foi importado para Contact
+  marketingOptIn     Boolean             @default(false)
+  optedOutAt         DateTime?
+  sentAt             DateTime? // Data do último envio WhatsApp
+  sentCount          Int                 @default(0) // Quantas vezes foi enviado
+  createdAt          DateTime            @default(now())
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaignRecipients CampaignRecipient[]
 
   @@unique([tenantId, placeId])
   @@index([tenantId, imported])
   @@index([tenantId, query])
+  @@index([tenantId, city, state])
+  @@index([tenantId, marketingOptIn, optedOutAt])
   @@index([tenantId, sentAt])
 }
 
@@ -905,6 +910,9 @@ model PrivacyAcceptance {
 model Campaign {
   id              String              @id @default(cuid())
   tenantId        String
+  // Nulo mantém campanhas antigas compatíveis; novos disparos de prospecção
+  // sempre informam uma chave explícita antes de criar a campanha.
+  idempotencyKey  String?
   createdById     String?
   instanceId      String?
   name            String              @default("Nova campanha")
@@ -939,6 +947,7 @@ model Campaign {
   instance        WaInstance?         @relation(fields: [instanceId], references: [id], onDelete: SetNull)
   recipients      CampaignRecipient[]
 
+  @@unique([tenantId, idempotencyKey])
   @@index([tenantId, status, scheduledAt])
   @@index([tenantId, createdAt])
 }
@@ -947,6 +956,7 @@ model CampaignRecipient {
   id              String      @id @default(cuid())
   campaignId      String
   tenantId        String
+  leadId          String?
   contactId       String?
   instanceId      String?
   phone           String
@@ -967,12 +977,14 @@ model CampaignRecipient {
   campaign        Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contact         Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead            Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
   instance        WaInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
 
   @@unique([campaignId, phone])
   @@index([tenantId, status, updatedAt])
   @@index([campaignId, status])
   @@index([contactId])
+  @@index([leadId])
 }
 
 model CampaignTemplate {

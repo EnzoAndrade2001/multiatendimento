@@ -20,6 +20,63 @@ function detail(error) {
   return String(value || 'Erro desconhecido');
 }
 
+/**
+ * Prospecção usa o mesmo destinatário persistente de Campaign, mas não cria
+ * Contact/Ticket.  O vínculo com o registro Lead fica no metadata para que o
+ * worker possa atualizar o histórico do lead sem acoplar o modelo de CRM.
+ *
+ * O helper devolve null para campanhas antigas ou destinatários comuns, de
+ * modo que o caminho de campanhas existentes permaneça exatamente igual.
+ */
+function leadSource(recipient) {
+  const rawMetadata = recipient?.metadata;
+  const metadata = rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)
+    ? rawMetadata
+    : {};
+  // New recipients can use the relation field; metadata keeps compatibility
+  // with campaigns created before CampaignRecipient.leadId was introduced.
+  const sourceLeadId = recipient?.leadId || metadata.sourceLeadId || metadata.leadId;
+  const source = String(metadata.source || '').toUpperCase();
+  if (source !== 'LEAD' && !recipient?.leadId) return null;
+  if (!sourceLeadId) return null;
+  return { id: String(sourceLeadId), metadata };
+}
+
+function leadAttemptMetadata(recipient, { status, externalId = null, error = null, at = new Date() }) {
+  const source = leadSource(recipient);
+  if (!source) return null;
+  return {
+    ...source.metadata,
+    source: 'LEAD',
+    sourceLeadId: source.id,
+    // Mantém os campos de auditoria no recipient mesmo que o Lead seja
+    // removido enquanto uma campanha estiver em execução.
+    leadStatus: status,
+    leadExternalId: externalId || null,
+    leadError: error || null,
+    leadLastAttemptAt: at.toISOString(),
+  };
+}
+
+async function syncLeadSuccess(campaign, recipient, sentAt) {
+  const source = leadSource(recipient);
+  if (!source) return;
+  try {
+    // updateMany evita transformar a entrega em falha se o lead foi removido
+    // depois da criação da campanha. O tenant também impede cruzamento entre
+    // bases quando um id antigo for reutilizado em outra empresa.
+    await prisma.lead.updateMany({
+      where: { id: source.id, tenantId: campaign.tenantId },
+      data: { sentAt, sentCount: { increment: 1 } },
+    });
+  } catch (error) {
+    // A entrega já foi confirmada no CampaignRecipient. Não reenvie apenas
+    // porque a atualização auxiliar do lead falhou; a próxima consulta de
+    // auditoria ainda terá o externalId/status/erro no recipient.
+    console.warn(`[campaign] não foi possível atualizar o lead ${source.id}:`, detail(error));
+  }
+}
+
 function parseHour(value, fallback) {
   const [h, m] = String(value || fallback).split(':').map(Number);
   return Number.isFinite(h) ? h * 60 + (Number.isFinite(m) ? m : 0) : fallback * 60;
@@ -112,7 +169,7 @@ async function processCampaign(campaignId) {
         if (campaign.mediaUrl) {
           const filename = path.basename(String(campaign.mediaUrl).split('?')[0]);
           const filePath = path.join(uploadsPath, filename);
-          if (!fs.existsSync(filePath)) throw new Error('Anexo da campanha nÃ£o estÃ¡ disponÃ­vel no servidor.');
+          if (!fs.existsSync(filePath)) throw new Error('Anexo da campanha não está disponível no servidor.');
           result = await evolutionService.sendMedia(
             campaign.tenant.settings.evolutionUrl,
             campaign.tenant.settings.evolutionKey,
@@ -130,7 +187,13 @@ async function processCampaign(campaignId) {
           result = await evolutionService.sendText(campaign.tenant.settings.evolutionUrl, campaign.tenant.settings.evolutionKey, campaign.instance.instanceName, recipient.phone, recipient.renderedMessage);
         }
         const externalId = messageId(result);
-        await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: { status: 'SENT', externalId, sentAt: new Date(), errorMessage: null, reason: null } });
+        const sentAt = new Date();
+        const successMetadata = leadAttemptMetadata(recipient, { status: 'SENT', externalId, at: sentAt });
+        await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: {
+          status: 'SENT', externalId, sentAt, errorMessage: null, reason: null,
+          ...(successMetadata ? { metadata: successMetadata } : {}),
+        } });
+        await syncLeadSuccess(campaign, recipient, sentAt);
         const ticket = recipient.contactId ? await prisma.ticket.findFirst({ where: { tenantId: campaign.tenantId, contactId: recipient.contactId, status: { in: ['pending', 'open', 'bot'] } }, orderBy: { updatedAt: 'desc' } }) : null;
         if (ticket) {
           await prisma.message.create({ data: {
@@ -149,7 +212,12 @@ async function processCampaign(campaignId) {
           if (io) io.to(campaign.tenantId).emit('new_message', { ticketId: ticket.id });
         }
       } catch (error) {
-        await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: { status: 'FAILED', reason: 'send_error', errorMessage: detail(error) } });
+        const errorMessage = detail(error);
+        const failureMetadata = leadAttemptMetadata(recipient, { status: 'FAILED', error: errorMessage });
+        await prisma.campaignRecipient.update({ where: { id: recipient.id }, data: {
+          status: 'FAILED', reason: 'send_error', errorMessage,
+          ...(failureMetadata ? { metadata: failureMetadata } : {}),
+        } });
       }
       const updated = await recompute(campaign.id);
       await emitProgress(campaign.id, campaign.tenantId);

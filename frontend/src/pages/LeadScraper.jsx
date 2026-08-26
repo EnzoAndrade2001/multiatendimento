@@ -3,7 +3,7 @@ import {
   Search, Radar, Trash2, Send, CheckSquare, Square, Star,
   Phone, MapPin, Globe, Loader, XCircle, Image, CheckCircle, RotateCcw, UserPlus, Smartphone, Clock, Save,
 } from 'lucide-react';
-import { searchLeads, getLeads, getLeadInstances, createManualLeads, deleteLead, deleteAllLeads, sendToLeads, uploadFile } from '../services/api';
+import { searchLeads, getLeads, getLeadInstances, getLeadCampaigns, getQuickResponses, getCampaignTemplates, createCampaignTemplate, createManualLeads, deleteLead, deleteAllLeads, sendToLeads, uploadLeadFile, convertLead } from '../services/api';
 import { toast } from '../utils/toast';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -39,6 +39,11 @@ async function dataUrlToFile(dataUrl, fileName = 'template.png') {
   return new File([blob], fileName, { type: blob.type || 'image/png' });
 }
 
+function isInstanceConnected(instance) {
+  const status = String(instance?.status || '').trim().toLowerCase();
+  return ['connected', 'open', 'online'].includes(status);
+}
+
 export default function LeadScraper() {
   const [leads, setLeads] = useState([]);
   const [instances, setInstances] = useState([]);
@@ -64,28 +69,49 @@ export default function LeadScraper() {
   const [savingManual, setSavingManual] = useState(false);
   const [sending, setSending] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'sent' | 'unsent'
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [skipAlreadySent, setSkipAlreadySent] = useState(true);
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
+  const [sendSummary, setSendSummary] = useState(null);
+  const [campaignHistory, setCampaignHistory] = useState([]);
+  const [leadStats, setLeadStats] = useState({ total: 0, withPhone: 0, sent: 0, pending: 0 });
+  const leadsRequestRef = useRef(0);
+  const leadCacheRef = useRef(new Map());
+  const sendIdempotencyRef = useRef(null);
 
   const loadLeads = useCallback(async () => {
+    const requestId = ++leadsRequestRef.current;
     setLoading(true);
     try {
-      const { data } = await getLeads(search ? { q: search } : {});
-      setLeads(Array.isArray(data) ? data : []);
+      const { data } = await getLeads({ ...(search ? { q: search } : {}), page, limit: pageSize });
+      if (requestId !== leadsRequestRef.current) return;
+      const rows = Array.isArray(data) ? data : data?.leads || data?.rows || data?.data || [];
+      const safeRows = Array.isArray(rows) ? rows : [];
+      safeRows.forEach((lead) => lead?.id && leadCacheRef.current.set(lead.id, lead));
+      setLeads(safeRows);
+      const pagination = data?.pagination || {};
+      setTotalLeads(Number(pagination.total ?? data?.total ?? data?.count ?? safeRows.length) || 0);
+      setLeadStats({
+        total: Number(pagination.stats?.total ?? pagination.total ?? data?.total ?? safeRows.length) || 0,
+        withPhone: Number(pagination.stats?.withPhone ?? safeRows.filter((lead) => lead.phone).length) || 0,
+        sent: Number(pagination.stats?.sent ?? safeRows.filter((lead) => lead.sentAt).length) || 0,
+        pending: Number(pagination.stats?.pending ?? safeRows.filter((lead) => !lead.sentAt && lead.phone && !lead.optedOutAt).length) || 0,
+      });
     } catch (err) {
       console.error('[leads] erro:', err);
     } finally {
-      setLoading(false);
+      if (requestId === leadsRequestRef.current) setLoading(false);
     }
-  }, [search]);
+  }, [search, page, pageSize]);
 
   const isFirstLoadRef = useRef(true);
   useEffect(() => {
-    if (isFirstLoadRef.current) {
-      isFirstLoadRef.current = false;
-      loadLeads();
-      return undefined;
-    }
+    const firstLoad = isFirstLoadRef.current;
+    isFirstLoadRef.current = false;
     // Evita disparar uma busca a cada tecla digitada no filtro
-    const timer = setTimeout(() => loadLeads(), 350);
+    const timer = setTimeout(() => loadLeads(), firstLoad ? 0 : 350);
     return () => clearTimeout(timer);
   }, [loadLeads]);
 
@@ -95,7 +121,7 @@ export default function LeadScraper() {
         const { data } = await getLeadInstances();
         const list = Array.isArray(data) ? data : [];
         setInstances(list);
-        const connected = list.find((item) => item.status === 'connected') || list[0];
+        const connected = list.find(isInstanceConnected) || list[0];
         if (connected) setSelectedInstanceId((current) => current || connected.id);
       } catch (err) {
         console.error('[leads] erro ao carregar instâncias:', err);
@@ -104,13 +130,62 @@ export default function LeadScraper() {
     loadInstances();
   }, []);
 
+  const loadCampaignHistory = useCallback(async () => {
+    try {
+      const { data } = await getLeadCampaigns({ limit: 30 });
+      setCampaignHistory(Array.isArray(data) ? data : data?.campaigns || []);
+    } catch (err) {
+      // Usuários sem a permissão de prospecção histórica continuam usando a
+      // tela normalmente; o histórico é apenas um complemento visual.
+      console.debug('[leads] histórico indisponível:', err?.response?.status || err?.message);
+    }
+  }, []);
+
+  useEffect(() => { loadCampaignHistory(); }, [loadCampaignHistory]);
+
   useEffect(() => {
-    setTemplates(readStoredTemplates());
+    if (!campaignHistory.some((campaign) => ['queued', 'running'].includes(String(campaign.status || '').toLowerCase()))) return undefined;
+    const timer = setInterval(() => {
+      loadCampaignHistory();
+      loadLeads();
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [campaignHistory, loadCampaignHistory, loadLeads]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const local = readStoredTemplates();
+    Promise.allSettled([getQuickResponses(), getCampaignTemplates()]).then((results) => {
+      if (cancelled) return;
+      const shared = [];
+      if (results[0].status === 'fulfilled') {
+        const rows = Array.isArray(results[0].value.data) ? results[0].value.data : results[0].value.data?.responses || [];
+        rows.forEach((row) => shared.push({ id: `quick-${row.id}`, name: row.shortcut || row.name, message: row.message || row.body || '', source: 'Atendimento' }));
+      }
+      if (results[1].status === 'fulfilled') {
+        const rows = Array.isArray(results[1].value.data) ? results[1].value.data : results[1].value.data?.templates || [];
+        rows.forEach((row) => shared.push({ id: `campaign-${row.id}`, name: row.name || row.shortcut, message: row.body || row.message || '', source: 'Campanha' }));
+      }
+      const byMessage = new Map();
+      [...shared, ...local].filter((item) => item?.message || item?.imageDataUrl).forEach((item) => byMessage.set(`${item.name || ''}|${item.message || ''}`, item));
+      setTemplates(Array.from(byMessage.values()).slice(0, 40));
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+    try {
+      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+    } catch (error) {
+      // Imagens em modelos locais podem exceder a cota do navegador. Preserve
+      // os modelos de texto, que são suficientes para o próximo disparo.
+      try {
+        localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates.map((item) => ({ ...item, imageDataUrl: '' }))));
+      } catch (storageError) {
+        console.debug('[leads] não foi possível persistir modelos locais:', storageError?.message || error?.message);
+      }
+    }
   }, [templates]);
 
   async function handleSearch() {
@@ -123,7 +198,8 @@ export default function LeadScraper() {
       const query = `${niche.trim()} em ${city.trim()}`;
       const { data } = await searchLeads({ query, maxResults });
       toast.success(data.message);
-      loadLeads();
+      if (page === 1) loadLeads();
+      else setPage(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Não foi possível concluir a busca. Verifique sua conexão e tente novamente.');
     } finally {
@@ -135,11 +211,34 @@ export default function LeadScraper() {
     try {
       await deleteLead(id);
       setLeads((prev) => prev.filter((l) => l.id !== id));
-      selected.delete(id);
-      setSelected(new Set(selected));
+      setSelected((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
       toast.success('Lead removido');
     } catch (err) {
       toast.error('Não foi possível remover o lead. Tente novamente.');
+    }
+  }
+
+  async function handleConvert(id) {
+    const lead = leadCacheRef.current.get(id) || leads.find((item) => item.id === id);
+    if (!lead) return;
+    if (lead.contactId) return toast.info('Este lead já está vinculado ao CRM.');
+    const instance = selectedInstance || instances.find(isInstanceConnected);
+    if (!instance) return toast.error('Conecte uma instância WhatsApp antes de vincular o lead.');
+
+    try {
+      const { data } = await convertLead(id, { instanceId: instance.id });
+      const updated = data?.lead;
+      if (updated?.id) {
+        leadCacheRef.current.set(updated.id, updated);
+        setLeads((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      }
+      toast.success(data?.alreadyLinked ? 'Lead já estava vinculado ao CRM.' : 'Lead vinculado ao CRM com sucesso.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível vincular o lead ao CRM.');
     }
   }
 
@@ -164,23 +263,29 @@ export default function LeadScraper() {
   }
 
   function toggleSelectAll() {
-    const selectable = filteredLeads.filter((l) => l.phone);
-    if (selected.size === selectable.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(selectable.map((l) => l.id)));
-    }
+    const selectable = filteredLeads.filter((l) => l.phone && !l.optedOutAt);
+    const ids = selectable.map((lead) => lead.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+    setSelected((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
   }
 
   function handleImageChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!String(file.type || '').startsWith('image/')) return toast.error('Selecione uma imagem válida.');
+    if (file.size > 25 * 1024 * 1024) return toast.error('A imagem deve ter no máximo 25 MB.');
+    if (sendImagePreview?.startsWith('blob:')) URL.revokeObjectURL(sendImagePreview);
     setSendImage(file);
     setSendImagePreview(URL.createObjectURL(file));
     setSelectedTemplateId('');
   }
 
   function clearComposer() {
+    if (sendImagePreview?.startsWith('blob:')) URL.revokeObjectURL(sendImagePreview);
     setSendMessage('');
     setSendImage(null);
     setSendImagePreview('');
@@ -204,7 +309,18 @@ export default function LeadScraper() {
         imageType = sendImage.type || '';
       }
 
-      const nextTemplate = {
+      let sharedTemplate = null;
+      try {
+        const { data } = await createCampaignTemplate({ name, body: sendMessage.trim(), category: 'MARKETING' });
+        if (data?.id) sharedTemplate = { id: `campaign-${data.id}`, name: data.name || name, message: data.body || sendMessage, source: 'Campanha' };
+      } catch (error) {
+        // A página pode ser usada por um perfil que possui leads.manage, mas
+        // não campaigns.manage. Nesse caso, mantém o modelo local como
+        // fallback, sem bloquear o disparo.
+        console.debug('[leads] modelo compartilhado indisponível:', error?.response?.status || error?.message);
+      }
+
+      const nextTemplate = sharedTemplate || {
         id: selectedTemplateId || `${Date.now()}`,
         name,
         message: sendMessage,
@@ -219,7 +335,7 @@ export default function LeadScraper() {
         return [nextTemplate, ...filtered].slice(0, 20);
       });
       setSelectedTemplateId(nextTemplate.id);
-      toast.success('Template salvo');
+      toast.success(sharedTemplate ? 'Template salvo para a equipe' : 'Template salvo neste navegador');
     } catch (err) {
       toast.error(err.message || 'Erro ao salvar o template. Tente novamente.');
     }
@@ -290,33 +406,45 @@ export default function LeadScraper() {
   async function handleSend() {
     if (sending) return; // evita disparo duplicado enquanto um envio já está em andamento
     if (selected.size === 0) return toast.error('Selecione pelo menos um lead');
+    const selectedLeads = Array.from(selected).map((id) => leadCacheRef.current.get(id) || leads.find((lead) => lead.id === id)).filter(Boolean);
+    const optedOutCount = selectedLeads.filter((lead) => lead.optedOutAt).length;
+    const leadsWithoutOptOut = selectedLeads.filter((lead) => !lead.optedOutAt);
+    const leadsToSend = (skipAlreadySent ? leadsWithoutOptOut.filter((lead) => !lead.sentAt) : leadsWithoutOptOut).filter((lead) => lead.phone);
+    if (optedOutCount > 0 && leadsToSend.length === 0) return toast.info('Os leads selecionados estão sem telefone ou optaram por não receber mensagens.');
+    if (optedOutCount > 0) toast.info(`${optedOutCount} lead(s) com opt-out foram ignorados.`);
+    if (skipAlreadySent && leadsToSend.length === 0) return toast.info('Todos os leads selecionados já receberam uma mensagem. Desative “não reenviar” para enviar novamente.');
     if (!sendMessage.trim() && !sendImage) return toast.error('Escreva uma mensagem ou selecione uma imagem');
     if (!selectedInstanceId) return toast.error('Escolha uma instância conectada para o envio');
+    if (!isInstanceConnected(selectedInstance)) return toast.error('A instância escolhida não está conectada. Atualize a lista e tente novamente.');
     if (Number(delayMaxSeconds) < Number(delayMinSeconds)) return toast.error('O intervalo máximo precisa ser maior ou igual ao mínimo');
 
     const payload = {
-      leadIds: Array.from(selected),
+      leadIds: leadsToSend.map((lead) => lead.id),
       message: sendMessage.trim(),
       mediaUrl: null,
       mediaType: null,
       instanceId: selectedInstanceId,
       delayMinSeconds: Number(delayMinSeconds),
       delayMaxSeconds: Number(delayMaxSeconds),
+      skipAlreadySent,
+      consentConfirmed,
     };
 
     let previewImage = sendImage;
 
     setSending(true);
-    setShowSendModal(false);
-    setSendMessage('');
-    setSendImage(null);
-    setSendImagePreview('');
-    setTemplateName('');
-    setSelectedTemplateId('');
+    // A mesma chave é reutilizada se a resposta da API for perdida. Assim o
+    // operador pode tentar novamente sem criar uma segunda campanha.
+    if (!sendIdempotencyRef.current) {
+      sendIdempotencyRef.current = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+    if (sendIdempotencyRef.current) payload.idempotencyKey = sendIdempotencyRef.current;
 
     try {
       if (previewImage) {
-        const uploadRes = await uploadFile(previewImage);
+        const uploadRes = await uploadLeadFile(previewImage);
         payload.mediaUrl = uploadRes.data.url;
         payload.mediaType = 'image';
       }
@@ -324,7 +452,17 @@ export default function LeadScraper() {
       const { data } = await sendToLeads(payload);
 
       toast.success(data.message);
+      setSendSummary({ ...data, sentAt: new Date().toISOString(), selected: leadsToSend.length });
       setSelected(new Set());
+      loadCampaignHistory();
+      setShowSendModal(false);
+      setSendMessage('');
+      setSendImage(null);
+      if (sendImagePreview?.startsWith('blob:')) URL.revokeObjectURL(sendImagePreview);
+      setSendImagePreview('');
+      setTemplateName('');
+      setSelectedTemplateId('');
+      sendIdempotencyRef.current = null;
       loadLeads(); // Recarrega para mostrar status atualizado
     } catch (err) {
       toast.error(err.response?.data?.error || 'Não foi possível enviar as mensagens. Tente novamente.');
@@ -333,25 +471,38 @@ export default function LeadScraper() {
     }
   }
 
-  // Filtragem (memorizado para não recalcular a cada renderização, ex: ao digitar no composer)
-  const filteredLeads = useMemo(() => leads.filter((l) => {
-    if (statusFilter === 'sent') return !!l.sentAt;
-    if (statusFilter === 'unsent') return !l.sentAt;
-    return true;
-  }), [leads, statusFilter]);
+  function closeSendModal() {
+    if (sending) return;
+    sendIdempotencyRef.current = null;
+    setShowSendModal(false);
+  }
 
-  const leadsWithPhone = useMemo(() => filteredLeads.filter((l) => l.phone), [filteredLeads]);
+  // Filtragem (memorizado para não recalcular a cada renderização, ex: ao digitar no composer)
+  const filteredLeads = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return leads.filter((l) => {
+      if (statusFilter === 'sent' && !l.sentAt) return false;
+      if (statusFilter === 'unsent' && l.sentAt) return false;
+      if (!query) return true;
+      return [l.name, l.phone, l.category, l.address, l.query]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [leads, search, statusFilter]);
+
+  const leadsWithPhone = useMemo(() => filteredLeads.filter((l) => l.phone && !l.optedOutAt), [filteredLeads]);
+  const allCurrentSelected = useMemo(() => leadsWithPhone.length > 0 && leadsWithPhone.every((lead) => selected.has(lead.id)), [leadsWithPhone, selected]);
   const totalSent = useMemo(() => leads.filter((l) => l.sentAt).length, [leads]);
   const totalUnsent = useMemo(() => leads.filter((l) => !l.sentAt && l.phone).length, [leads]);
 
   // Contagem de selecionados que já foram enviados (para label de reenvio)
   const selectedAlreadySent = useMemo(() => Array.from(selected).filter((id) => {
-    const lead = leads.find((l) => l.id === id);
+    const lead = leadCacheRef.current.get(id) || leads.find((l) => l.id === id);
     return lead?.sentAt;
   }).length, [selected, leads]);
   const selectedInstance = instances.find((inst) => inst.id === selectedInstanceId);
   const selectedInstanceLabel = selectedInstance?.instanceName?.split('_').pop()?.toUpperCase() || selectedInstance?.instanceName || 'INSTANCIA';
-  const selectedInstanceStatus = selectedInstance?.status === 'connected' ? 'conectada' : 'desconectada';
+  const selectedInstanceStatus = isInstanceConnected(selectedInstance) ? 'conectada' : 'desconectada';
 
   function formatDate(dateStr) {
     if (!dateStr) return '';
@@ -366,7 +517,7 @@ export default function LeadScraper() {
         title="Buscar Leads"
         subtitle={
           leads.length > 0
-            ? `${leads.length} leads • ${leadsWithPhone.length} com telefone • ${totalSent} enviados • ${totalUnsent} pendentes`
+            ? `${leadStats.total ?? leads.length} leads • ${leadStats.withPhone ?? leadsWithPhone.length} com telefone • ${leadStats.sent ?? totalSent} enviados • ${leadStats.pending ?? totalUnsent} pendentes`
             : 'Encontre novos clientes buscando empresas no Google Maps.'
         }
       />
@@ -427,6 +578,15 @@ export default function LeadScraper() {
         ) : null}
       </SurfaceCard>
 
+      {leads.length > 0 ? (
+        <div className="lead-pipeline" style={s.pipeline} aria-label="Resumo do funil de prospecção">
+          <div style={s.pipelineCard}><span style={s.pipelineLabel}>Captados</span><strong>{leadStats.total ?? totalLeads ?? leads.length}</strong><small>base disponível</small></div>
+          <div style={s.pipelineCard}><span style={s.pipelineLabel}>Com telefone</span><strong>{leadStats.withPhone ?? leadsWithPhone.length}</strong><small>prontos para contato</small></div>
+          <div style={s.pipelineCard}><span style={s.pipelineLabel}>Enviados</span><strong>{leadStats.sent ?? totalSent}</strong><small>com registro de envio</small></div>
+          <div style={s.pipelineCard}><span style={s.pipelineLabel}>Pendentes</span><strong>{leadStats.pending ?? totalUnsent}</strong><small>aguardando campanha</small></div>
+        </div>
+      ) : null}
+
       {/* TOOLBAR */}
       {leads.length > 0 ? (
         <div style={s.toolbar}>
@@ -437,16 +597,17 @@ export default function LeadScraper() {
                 style={s.filterInput}
                 placeholder="Filtrar leads..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                aria-label="Filtrar leads por nome, telefone ou categoria"
               />
             </div>
 
             {/* STATUS FILTER PILLS */}
             <div style={s.filterPills}>
               {[
-                { key: 'all', label: `Todos (${leads.length})` },
-                { key: 'unsent', label: `Pendentes (${totalUnsent})` },
-                { key: 'sent', label: `Enviados (${totalSent})` },
+                { key: 'all', label: `Todos (${leadStats.total ?? leads.length})` },
+                { key: 'unsent', label: `Pendentes (${leadStats.pending ?? totalUnsent})` },
+                { key: 'sent', label: `Enviados (${leadStats.sent ?? totalSent})` },
               ].map((f) => (
                 <button
                   key={f.key}
@@ -472,12 +633,12 @@ export default function LeadScraper() {
             </ActionButton>
             {leadsWithPhone.length > 0 ? (
               <ActionButton variant="secondary" onClick={toggleSelectAll} style={s.toolBtn}>
-                {selected.size === leadsWithPhone.length ? <CheckSquare size={16} /> : <Square size={16} />}
-                {selected.size === leadsWithPhone.length ? 'Desmarcar' : 'Selecionar todos'}
+                {allCurrentSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                {allCurrentSelected ? 'Desmarcar página' : 'Selecionar página'}
               </ActionButton>
             ) : null}
             {selected.size > 0 ? (
-              <ActionButton onClick={() => setShowSendModal(true)} disabled={sending} style={s.toolBtn}>
+              <ActionButton onClick={() => { setConsentConfirmed(false); setShowSendModal(true); }} disabled={sending} style={s.toolBtn}>
                 {sending ? <Loader size={16} className="spin" /> : selectedAlreadySent > 0 ? <RotateCcw size={16} /> : <Send size={16} />}
                 {sending
                   ? 'Enviando...'
@@ -494,10 +655,51 @@ export default function LeadScraper() {
         </div>
       ) : null}
 
+      {sendSummary ? (
+        <div style={s.sendSummary} role="status">
+          <div><CheckCircle size={16} /> <strong>Último disparo</strong> · {sendSummary.instance || 'instância'} · {formatDate(sendSummary.sentAt)}</div>
+          <div style={s.summaryCounts}><span style={{ color: 'var(--success)' }}>{sendSummary.sent || 0} enviados</span><span style={{ color: 'var(--danger-text)' }}>{sendSummary.failed || 0} falhas</span></div>
+          {sendSummary.errors?.length ? <details><summary>Ver falhas recentes</summary><ul>{sendSummary.errors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul></details> : null}
+        </div>
+      ) : null}
+
+      {campaignHistory.length > 0 ? (
+        <SurfaceCard style={s.historyCard}>
+          <div style={s.historyHeader}>
+            <div>
+              <div style={s.fieldLabel}>Acompanhamento</div>
+              <h3 style={s.historyTitle}>Histórico de disparos</h3>
+            </div>
+            <ActionButton variant="secondary" size="sm" onClick={loadCampaignHistory}>Atualizar</ActionButton>
+          </div>
+          <div style={s.historyList}>
+            {campaignHistory.slice(0, 8).map((campaign) => {
+              const status = String(campaign.status || '').toLowerCase();
+              const statusLabel = ({ queued: 'na fila', running: 'enviando', completed: 'concluída', failed: 'falhou', paused: 'pausada', cancelled: 'cancelada' })[status] || status || 'na fila';
+              const sent = Number(campaign.sent || 0) + Number(campaign.delivered || 0);
+              return (
+                <div key={campaign.id} style={s.historyItem}>
+                  <div style={s.historyMain}>
+                    <strong>{campaign.name || 'Prospecção'}</strong>
+                    <span>{campaign.instance?.instanceName || 'Instância'} · {formatDate(campaign.createdAt)}</span>
+                  </div>
+                  <div style={s.historyStats}>
+                    <span style={status === 'completed' ? s.historySuccess : s.historyStatus}>{statusLabel}</span>
+                    <span>{sent}/{campaign.total || 0} enviados</span>
+                    {campaign.failed > 0 ? <span style={s.historyFailure}>{campaign.failed} falhas</span> : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SurfaceCard>
+      ) : null}
+
       {/* TABLE */}
       {loading ? (
         <div style={s.loadingWrap}>Carregando leads...</div>
       ) : filteredLeads.length > 0 ? (
+        <>
         <div style={s.tableWrap}>
           <table style={s.table}>
             <thead>
@@ -517,19 +719,21 @@ export default function LeadScraper() {
               {filteredLeads.map((lead) => {
                 const isSelected = selected.has(lead.id);
                 const hasPhone = !!lead.phone;
+                const hasOptedOut = !!lead.optedOutAt;
                 const isSent = !!lead.sentAt;
                 return (
                   <tr key={lead.id} style={{ ...s.tr, ...(isSelected ? s.trSelected : {}) }}>
                     <td style={s.td}>
-                      {hasPhone ? (
+                      {hasPhone && !hasOptedOut ? (
                         <button
                           style={s.checkBtn}
                           onClick={() => toggleSelect(lead.id)}
+                          aria-label={`${isSelected ? 'Desmarcar' : 'Selecionar'} ${lead.name}`}
                         >
                           {isSelected ? <CheckSquare size={18} color="var(--accent)" /> : <Square size={18} />}
                         </button>
                       ) : (
-                        <span style={{ opacity: 0.3 }}><Square size={18} /></span>
+                        <span style={{ opacity: 0.3 }} title={hasOptedOut ? 'Este lead optou por não receber mensagens' : 'Lead sem telefone'}><Square size={18} /></span>
                       )}
                     </td>
                     <td style={s.td}>
@@ -555,6 +759,8 @@ export default function LeadScraper() {
                             <div style={{ fontSize: '0.68rem', opacity: 0.8 }}>{formatDate(lead.sentAt)}</div>
                           </div>
                         </div>
+                      ) : hasOptedOut ? (
+                        <span style={s.optedOutBadge}>Opt-out</span>
                       ) : hasPhone ? (
                         <span style={s.pendingBadge}>Pendente</span>
                       ) : (
@@ -594,9 +800,20 @@ export default function LeadScraper() {
                       )}
                     </td>
                     <td style={s.td}>
-                      <button style={s.deleteBtn} onClick={() => handleDelete(lead.id)}>
-                        <Trash2 size={15} />
-                      </button>
+                      <div style={s.actionButtons}>
+                        <button
+                          style={{ ...s.convertBtn, ...(lead.contactId ? s.convertBtnDisabled : {}) }}
+                          onClick={() => handleConvert(lead.id)}
+                          disabled={Boolean(lead.contactId)}
+                          title={lead.contactId ? 'Já vinculado ao CRM' : 'Vincular ao CRM'}
+                          aria-label={lead.contactId ? `${lead.name} já vinculado ao CRM` : `Vincular ${lead.name} ao CRM`}
+                        >
+                          <UserPlus size={15} />
+                        </button>
+                        <button style={s.deleteBtn} onClick={() => handleDelete(lead.id)} title="Remover lead">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -604,6 +821,16 @@ export default function LeadScraper() {
             </tbody>
           </table>
         </div>
+        <div style={s.pagination} aria-label="Paginação dos leads">
+          <span>{totalLeads || leads.length} lead(s) encontrados</span>
+          <div style={s.paginationControls}>
+            <button type="button" style={s.pageButton} disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button>
+            <span>Página {page}</span>
+            <button type="button" style={s.pageButton} disabled={loading || leads.length < pageSize || (totalLeads > 0 && page * pageSize >= totalLeads)} onClick={() => setPage((value) => value + 1)}>Próxima</button>
+            <select aria-label="Leads por página" style={s.pageSizeSelect} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
+          </div>
+        </div>
+        </>
       ) : leads.length > 0 ? (
         <EmptyState
           icon={<Search size={24} />}
@@ -632,7 +859,7 @@ export default function LeadScraper() {
         <ModalShell
           kicker={selectedAlreadySent > 0 ? 'Reenvio' : 'Envio em massa'}
           title={`${selectedAlreadySent > 0 ? 'Reenviar' : 'Enviar'} WhatsApp para ${selected.size} lead(s)`}
-          onClose={() => setShowSendModal(false)}
+          onClose={closeSendModal}
           maxWidth="76rem"
           contentStyle={s.sendModalContent}
         >
@@ -642,7 +869,7 @@ export default function LeadScraper() {
                 <RotateCcw size={16} />
                 <span>
                   <strong>{selectedAlreadySent}</strong> dos {selected.size} leads selecionados já receberam mensagem anteriormente.
-                  O envio será feito novamente para todos os selecionados.
+                  {skipAlreadySent ? 'Eles serão ignorados para evitar duplicidade.' : 'Eles também receberão a nova mensagem.'}
                 </span>
               </div>
             ) : null}
@@ -656,7 +883,7 @@ export default function LeadScraper() {
               </div>
               <div style={s.previewList}>
                 {Array.from(selected).slice(0, 8).map((id) => {
-                  const lead = leads.find((l) => l.id === id);
+                  const lead = leadCacheRef.current.get(id) || leads.find((l) => l.id === id);
                   if (!lead) return null;
                   return (
                     <div key={id} style={s.previewItem}>
@@ -693,8 +920,8 @@ export default function LeadScraper() {
                       {instances.map((inst) => {
                         const label = inst.instanceName?.split('_').pop()?.toUpperCase() || inst.instanceName;
                         return (
-                          <option key={inst.id} value={inst.id} disabled={inst.status !== 'connected'}>
-                            {label} {inst.status === 'connected' ? 'conectada' : 'desconectada'}
+                          <option key={inst.id} value={inst.id} disabled={!isInstanceConnected(inst)}>
+                            {label} {isInstanceConnected(inst) ? 'conectada' : 'desconectada'}
                           </option>
                         );
                       })}
@@ -785,11 +1012,24 @@ export default function LeadScraper() {
                 </div>
               </div>
 
+              <div style={s.safetyOptions}>
+                <label style={s.checkRow}>
+                  <input type="checkbox" checked={skipAlreadySent} onChange={(e) => setSkipAlreadySent(e.target.checked)} />
+                  <span>Não reenviar para leads já enviados</span>
+                </label>
+                <label style={s.checkRow}>
+                  <input type="checkbox" checked={consentConfirmed} onChange={(e) => setConsentConfirmed(e.target.checked)} />
+                  <span>Registrar que possuo autorização para contatar estes leads (opcional)</span>
+                </label>
+                <small style={s.helpText}>Leads selecionados manualmente ou por busca podem ser enviados. O sistema bloqueia opt-outs, telefones inválidos e duplicidades; esta confirmação fica registrada para auditoria.</small>
+              </div>
+
               <div style={s.field}>
                 <label style={s.fieldLabel}>Mensagem</label>
                 <textarea
                   style={s.textarea}
                   rows={6}
+                  maxLength={2000}
                   value={sendMessage}
                   onChange={(e) => {
                     setSelectedTemplateId('');
@@ -810,6 +1050,7 @@ export default function LeadScraper() {
                         style={s.removeImageBtn}
                         onClick={() => {
                           setSendImage(null);
+                          if (sendImagePreview?.startsWith('blob:')) URL.revokeObjectURL(sendImagePreview);
                           setSendImagePreview('');
                           setSelectedTemplateId('');
                         }}
@@ -840,7 +1081,7 @@ export default function LeadScraper() {
               </div>
 
               <div style={s.modalFooter}>
-                <ActionButton variant="secondary" onClick={() => setShowSendModal(false)} style={{ flex: 1 }}>
+                <ActionButton variant="secondary" onClick={closeSendModal} disabled={sending} style={{ flex: 1 }}>
                   Cancelar
                 </ActionButton>
                 <ActionButton onClick={handleSend} disabled={sending} style={{ flex: 2 }}>
@@ -890,7 +1131,7 @@ export default function LeadScraper() {
                     ) : null}
                     {!sendMessage.trim() && !sendImagePreview ? (
                       <div style={s.messageBubbleEmptyPreview}>
-                        <div style={s.messageEmptyPreview}>Digite uma mensagem ou anexe uma imagem para visualizar a previa.</div>
+                        <div style={s.messageEmptyPreview}>Digite uma mensagem ou anexe uma imagem para visualizar a prévia.</div>
                         <div style={s.messageTimePreview}>agora</div>
                       </div>
                     ) : null}
@@ -905,7 +1146,7 @@ export default function LeadScraper() {
       {showManualModal ? (
         <ModalShell
           kicker="Contatos manuais"
-          title="Adicionar contatos para prospeccao"
+          title="Adicionar contatos para prospecção"
           onClose={() => setShowManualModal(false)}
           maxWidth="34rem"
         >
@@ -939,6 +1180,7 @@ export default function LeadScraper() {
         .spin { animation: spin 1s linear infinite; }
         .lead-send-grid { min-width: 0; }
         @media (max-width: 760px) {
+          .lead-pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .lead-send-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
@@ -1011,8 +1253,41 @@ const s = {
     marginBottom: '1rem',
     flexWrap: 'wrap',
   },
+  pipeline: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '0.75rem',
+    marginBottom: '1rem',
+  },
+  pipelineCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.2rem',
+    padding: '0.85rem 1rem',
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '12px',
+    minWidth: 0,
+  },
+  pipelineLabel: { fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' },
   toolbarLeft: { display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' },
   toolbarRight: { display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' },
+  sendSummary: { display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap', marginBottom: '1rem', padding: '0.8rem 1rem', background: 'var(--success-light)', border: '1px solid var(--success-border)', borderRadius: '12px', color: 'var(--text-main)', fontSize: '0.8rem' },
+  summaryCounts: { display: 'flex', gap: '0.7rem', fontWeight: 800 },
+  historyCard: { marginBottom: '1rem', padding: '1rem 1.15rem' },
+  historyHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.8rem' },
+  historyTitle: { margin: '0.2rem 0 0', fontSize: '1rem', color: 'var(--text-main)' },
+  historyList: { display: 'grid', gap: '0.5rem' },
+  historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.7rem 0.8rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-panel)', flexWrap: 'wrap' },
+  historyMain: { display: 'grid', gap: '0.2rem', minWidth: 0 },
+  historyStats: { display: 'flex', alignItems: 'center', gap: '0.65rem', color: 'var(--text-muted)', fontSize: '0.75rem', flexWrap: 'wrap' },
+  historyStatus: { color: 'var(--accent)', fontWeight: 800, textTransform: 'uppercase' },
+  historySuccess: { color: 'var(--success)', fontWeight: 800, textTransform: 'uppercase' },
+  historyFailure: { color: 'var(--danger-text)', fontWeight: 800 },
+  pagination: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.75rem 0.2rem', color: 'var(--text-muted)', fontSize: '0.78rem', flexWrap: 'wrap' },
+  paginationControls: { display: 'flex', alignItems: 'center', gap: '0.55rem' },
+  pageButton: { border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-panel)', color: 'var(--text-main)', padding: '0.45rem 0.65rem', cursor: 'pointer', fontSize: '0.75rem' },
+  pageSizeSelect: { border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-panel)', color: 'var(--text-main)', padding: '0.45rem' },
   searchWrap: { position: 'relative' },
   searchIcon: {
     position: 'absolute',
@@ -1134,6 +1409,16 @@ const s = {
     color: 'var(--text-dim)',
     border: '1px solid var(--border-color)',
   },
+  optedOutBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: '6px',
+    fontSize: '0.72rem',
+    fontWeight: 700,
+    background: 'var(--danger-light, rgba(220, 68, 68, 0.1))',
+    color: 'var(--danger-text, #e56b6f)',
+    border: '1px solid var(--danger-border, rgba(220, 68, 68, 0.25))',
+  },
   addressText: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -1163,6 +1448,18 @@ const s = {
   },
   websiteLink: { color: 'var(--accent)', display: 'flex', alignItems: 'center' },
   noData: { color: 'var(--text-dim)', fontSize: '0.82rem' },
+  actionButtons: { display: 'flex', alignItems: 'center', gap: '0.35rem' },
+  convertBtn: {
+    background: 'var(--accent-light)',
+    border: '1px solid var(--accent-border)',
+    color: 'var(--accent)',
+    cursor: 'pointer',
+    padding: '5px',
+    borderRadius: '8px',
+    display: 'flex',
+    transition: 'all 0.2s',
+  },
+  convertBtnDisabled: { opacity: 0.45, cursor: 'not-allowed' },
   deleteBtn: {
     background: 'none',
     border: 'none',
@@ -1555,4 +1852,6 @@ const s = {
     padding: '0.35rem 0',
     lineHeight: 1.5,
   },
+  safetyOptions: { display: 'grid', gap: '0.6rem', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '0.8rem' },
+  checkRow: { display: 'flex', alignItems: 'flex-start', gap: '0.55rem', color: 'var(--text-main)', fontSize: '0.8rem', lineHeight: 1.4, cursor: 'pointer' },
 };
