@@ -8,29 +8,37 @@ async function list(req, res) {
   const withoutCrm = ['1', 'true', 'yes'].includes(String(req.query.withoutCrm || '').toLowerCase());
   console.log(`[Contacts] Busca executada | tenant=${req.user.tenantId} | comFiltro=${Boolean(q)} | semCrm=${withoutCrm}`);
   const where = { tenantId: req.user.tenantId };
+
+  // A tela de contatos WhatsApp deve exibir somente contatos operacionais
+  // cadastrados/importados pelo atendimento. Os registros criados pelo
+  // espelho do Firebird servem para relacionar O.S./equipamentos e podem ter
+  // um telefone técnico (ex.: FB-1524), que nunca é um WhatsApp discável.
   if (withoutCrm) where.crmCustomerId = null;
-  if (withoutDocument) {
-    where.OR = [
-      { cpfCnpj: null },
-      { cpfCnpj: '' },
-    ];
-  }
-  if (q) where.OR = [
-    {
-      AND: [
-        ...(withoutDocument ? [{ OR: [{ cpfCnpj: null }, { cpfCnpj: '' }] }] : []),
-        {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { fantasyName: { contains: q, mode: 'insensitive' } },
-            ...(withoutDocument ? [] : [{ cpfCnpj: { contains: q, mode: 'insensitive' } }]),
-            { phone: { contains: q } },
-            { whatsapp: { contains: q } },
-          ],
-        },
+
+  const filters = [];
+  if (withoutCrm) {
+    filters.push({
+      OR: [
+        { externalSource: null },
+        { externalSource: { not: 'firebird' } },
       ],
-    },
-  ];
+    });
+  }
+  if (withoutDocument) {
+    filters.push({ OR: [{ cpfCnpj: null }, { cpfCnpj: '' }] });
+  }
+  if (q) {
+    filters.push({
+      OR: [
+        { name: { contains: q, mode: 'insensitive' } },
+        { fantasyName: { contains: q, mode: 'insensitive' } },
+        ...(withoutDocument ? [] : [{ cpfCnpj: { contains: q, mode: 'insensitive' } }]),
+        { phone: { contains: q } },
+        { whatsapp: { contains: q } },
+      ],
+    });
+  }
+  if (filters.length) where.AND = filters;
 
   const contacts = await prisma.contact.findMany({
     where,

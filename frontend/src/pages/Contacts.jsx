@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
-import { getContacts, createContact, createTicket, importContacts, linkContactToCrm } from '../services/api';
+import { getContacts, createContact, createTicket, importContacts, updateContact, linkContactToCrm } from '../services/api';
 import { Edit2, Link2, MessageSquare, Plus, Search, BookUser, Upload } from 'lucide-react';
-import ContactProfileModal from '../components/ContactProfileModal';
 import LinkContactModal from '../components/LinkContactModal';
 import { toast } from '../utils/toast';
 import PageHeader from '../components/ui/PageHeader';
@@ -18,12 +17,13 @@ export default function Contacts() {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', phone: '' });
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [selectedContact, setSelectedContact] = useState(null);
+  const [editingContact, setEditingContact] = useState(null);
+  const [editContactForm, setEditContactForm] = useState({ name: '', phone: '' });
   const [linkingContact, setLinkingContact] = useState(null);
   const [pendingChatContact, setPendingChatContact] = useState(null);
   const [openingChat, setOpeningChat] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const navigate = useNavigate();
   const { instances } = useOutletContext() || { instances: [] };
 
@@ -67,9 +67,43 @@ export default function Contacts() {
     }
   }
 
-  function openProfileModal(contact) {
-    setSelectedContact(contact);
-    setShowProfileModal(true);
+  function getContactPhone(contact) {
+    const values = [contact?.whatsapp, contact?.phone];
+    for (const value of values) {
+      const raw = String(value || '').trim();
+      if (!raw) continue;
+      if (/@g\.us$|@s\.whatsapp\.net$/i.test(raw)) return raw;
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length >= 10 && digits.length <= 15) return raw;
+    }
+    return '';
+  }
+
+  function openEditModal(contact) {
+    setEditingContact(contact);
+    setEditContactForm({
+      name: contact?.name || contact?.fantasyName || '',
+      phone: getContactPhone(contact),
+    });
+  }
+
+  async function handleUpdateContact() {
+    if (!editingContact) return;
+    const name = editContactForm.name.trim();
+    const phone = editContactForm.phone.trim();
+    if (!name || !phone) return toast.error('Preencha o nome e o número do WhatsApp');
+    if (savingEdit) return;
+    setSavingEdit(true);
+    try {
+      await updateContact(editingContact.id, { name, phone });
+      setEditingContact(null);
+      await loadContacts();
+      toast.success('Contato atualizado com sucesso');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao atualizar contato');
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   async function handleLinkCrm(crmCustomerId) {
@@ -104,6 +138,10 @@ export default function Contacts() {
 
   async function startChat(contact) {
     if (!contact) return;
+    if (!getContactPhone(contact)) {
+      toast.error('Este contato não possui um número de WhatsApp válido. Edite o contato antes de abrir a conversa.');
+      return;
+    }
     if (contact.tickets && contact.tickets.length > 0 && contact.tickets[0].status !== 'resolved') {
       navigate(`/inbox?ticketId=${contact.tickets[0].id}`);
     } else {
@@ -157,9 +195,9 @@ export default function Contacts() {
               <div style={{ ...s.avatar, background: `hsl(${hue}, 45%, 35%)` }}>{initials}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={s.cardName}>{contact.name || contact.fantasyName || 'Sem nome'}</div>
-                <div style={s.cardPhone}>{contact.phone || contact.whatsapp || 'Sem número'}</div>
+                <div style={s.cardPhone}>{getContactPhone(contact) || 'Telefone não informado'}</div>
               </div>
-              <button onClick={() => openProfileModal(contact)} style={s.editBtn} title="Editar contato" aria-label="Editar contato">
+              <button onClick={() => openEditModal(contact)} style={s.editBtn} title="Editar nome e WhatsApp" aria-label="Editar nome e WhatsApp">
                 <Edit2 size={16} />
               </button>
             </div>
@@ -282,8 +320,28 @@ export default function Contacts() {
         </ModalShell>
       ) : null}
 
-      {showProfileModal && selectedContact ? (
-        <ContactProfileModal contact={selectedContact} onClose={() => setShowProfileModal(false)} onUpdated={loadContacts} />
+      {editingContact ? (
+        <ModalShell kicker="Contato WhatsApp" title="Editar contato" onClose={() => setEditingContact(null)} maxWidth="32rem">
+          <div style={s.modalBody}>
+            <div style={s.modalScrollArea}>
+              <p style={s.modalHint}>Nesta tela, informe apenas os dados usados para iniciar a conversa. Dados do cliente, equipamentos e histórico ficam disponíveis depois da vinculação ao CRM.</p>
+              <div style={s.formGrid}>
+                <div style={s.field}>
+                  <label style={s.label}>Nome</label>
+                  <input autoFocus style={s.input} value={editContactForm.name} onChange={(e) => setEditContactForm({ ...editContactForm, name: e.target.value })} placeholder="Ex.: João da Silva" />
+                </div>
+                <div style={s.field}>
+                  <label style={s.label}>Número do WhatsApp</label>
+                  <input type="tel" inputMode="tel" style={s.input} value={editContactForm.phone} onChange={(e) => setEditContactForm({ ...editContactForm, phone: e.target.value })} placeholder="Ex.: (51) 99999-9999" />
+                </div>
+              </div>
+            </div>
+            <div style={s.modalFooter}>
+              <ActionButton variant="secondary" style={s.modalFooterBtn} onClick={() => setEditingContact(null)}>Cancelar</ActionButton>
+              <ActionButton style={s.modalFooterBtn} loading={savingEdit} onClick={handleUpdateContact}>Salvar alterações</ActionButton>
+            </div>
+          </div>
+        </ModalShell>
       ) : null}
 
       {linkingContact ? <LinkContactModal onClose={() => setLinkingContact(null)} onLink={handleLinkCrm} /> : null}
