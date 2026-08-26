@@ -533,7 +533,7 @@ export default function Campaigns() {
       </div>
 
       {tab === 'compose' ? (
-        <div style={s.layout}>
+        <div style={s.layout} className="campaign-layout">
           <SurfaceCard style={s.card}>
             <div style={s.sectionHeading}><div><span style={s.eyebrow}>1. Configuração</span><h2 style={s.sectionTitle}>Defina o disparo</h2></div><Zap size={20} color="var(--accent)" /></div>
 
@@ -656,7 +656,7 @@ function CampaignWhatsAppPreview({ instance, message, attachment, sampleName = '
         </div>
         <div style={s.whatsappMeta}>
           <span style={{ ...s.whatsappMetaDot, background: isConnected ? '#25D366' : 'var(--text-dim)' }} />
-          <span>{isConnected ? 'Pronta para envio' : 'Aguardando conexão'}</span>
+          <span style={s.whatsappMetaText}>{isConnected ? 'Pronta para envio' : 'Aguardando conexão'}</span>
         </div>
       </div>
       <div style={s.phonePreviewStage}>
@@ -699,15 +699,15 @@ function statusStyle(status) {
 }
 
 const s = {
-  container: { padding: 'var(--space-10)', maxWidth: '1280px', margin: '0 auto', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' },
+  container: { padding: 'var(--space-10)', maxWidth: '1440px', margin: '0 auto', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' },
   headerActions: { display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' },
   tabs: { display: 'flex', gap: '0.35rem', borderBottom: '1px solid var(--border-color)', marginBottom: 'var(--space-6)', overflowX: 'auto' },
   tab: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem', border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: 'var(--text-muted)', padding: '0.85rem 1rem', cursor: 'pointer', fontWeight: 750, whiteSpace: 'nowrap' },
   tabActive: { color: 'var(--accent)', borderBottomColor: 'var(--accent)' },
   countBadge: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '0.1rem 0.4rem', fontSize: '0.7rem' },
-  layout: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(280px, 0.8fr)', gap: 'var(--space-6)', alignItems: 'start' },
+  layout: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(280px, 0.8fr)', gap: 'var(--space-6)', alignItems: 'start', width: '100%', minWidth: 0 },
   sideColumn: { display: 'grid', gap: 'var(--space-6)', minWidth: 0 },
-  card: { padding: 'var(--space-6)' },
+  card: { padding: 'var(--space-6)', minWidth: 0, width: '100%', boxSizing: 'border-box' },
   sectionHeading: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' },
   templateHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' },
   eyebrow: { display: 'block', color: 'var(--accent)', fontSize: '0.68rem', fontWeight: 850, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' },
@@ -746,12 +746,13 @@ const s = {
   emptyPreview: { display: 'grid', justifyItems: 'center', textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 1rem', background: 'var(--bg-panel)', borderRadius: 'var(--radius-md)', fontSize: '0.8rem' },
   messagePreview: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.8rem', marginTop: '1rem' },
   whatsappPreview: { background: 'var(--lead-preview-bg)', borderRadius: '16px', border: '1px solid var(--border-color)', overflow: 'hidden', minHeight: '420px', width: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', marginTop: '1rem' },
-  whatsappPreviewHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.85rem 0.9rem', borderBottom: '1px solid var(--border-color)', background: 'var(--lead-preview-header-bg)' },
+  whatsappPreviewHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.85rem 0.9rem', borderBottom: '1px solid var(--border-color)', background: 'var(--lead-preview-header-bg)', minWidth: 0 },
   whatsappIdentity: { display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 },
   whatsappAvatar: { width: '38px', height: '38px', borderRadius: '12px', background: 'linear-gradient(135deg, #25D366, #1a8f56)', display: 'grid', placeItems: 'center', fontSize: '0.7rem', fontWeight: 900, color: '#07120d', letterSpacing: '0.02em', flexShrink: 0 },
   whatsappTitle: { fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', lineHeight: 1.2 },
   whatsappSubtitle: { fontSize: '0.68rem', color: 'var(--text-dim)', fontWeight: 600, marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '190px' },
-  whatsappMeta: { display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 },
+  whatsappMeta: { display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
+  whatsappMetaText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   whatsappMetaDot: { width: '7px', height: '7px', borderRadius: '999px', background: '#25D366', boxShadow: '0 0 0 3px rgba(37, 211, 102, 0.14)' },
   phonePreviewStage: { padding: '0.9rem', background: 'var(--lead-preview-stage-bg)', backgroundSize: 'auto, 28px 28px, 28px 28px', display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', minHeight: '325px', flex: 1 },
   chatStageWrap: { display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%', alignItems: 'flex-end' },

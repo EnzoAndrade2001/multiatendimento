@@ -404,6 +404,16 @@ body.auth-spec-page {
   }
 }
 
+@media (max-width: 1080px) {
+  .campaign-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+.campaign-layout > * {
+  min-width: 0;
+}
+
 @media (max-width: 768px) {
   body.auth-spec-page::-webkit-scrollbar,
   .auth-spec-page ::-webkit-scrollbar {
