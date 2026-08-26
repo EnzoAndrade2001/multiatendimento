@@ -509,7 +509,7 @@ function statusStyle(status) {
 }
 
 const s = {
-  container: { padding: 'var(--space-10)', maxWidth: '1280px', margin: '0 auto', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box' },
+  container: { padding: 'var(--space-10)', maxWidth: '1280px', margin: '0 auto', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' },
   headerActions: { display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' },
   tabs: { display: 'flex', gap: '0.35rem', borderBottom: '1px solid var(--border-color)', marginBottom: 'var(--space-6)', overflowX: 'auto' },
   tab: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem', border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: 'var(--text-muted)', padding: '0.85rem 1rem', cursor: 'pointer', fontWeight: 750, whiteSpace: 'nowrap' },
