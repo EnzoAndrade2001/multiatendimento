@@ -433,7 +433,7 @@ export default function Campaigns() {
             <select id="campaign-type" style={s.input} value={campaignType} onChange={(e) => setCampaignType(e.target.value)} disabled={!canEdit}>
               {TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
             </select>
-            <p style={s.hint}>{typeInfo.description} <strong>Consentimento exigido: {{ marketing: 'marketing', alerts: 'alertas', counters: 'contadores', billing: 'cobrança' }[typeInfo.consent] || typeInfo.consent}.</strong></p>
+            <p style={s.hint}>{typeInfo.description} <strong>Selecione uma tag ou contatos para autorizar o disparo; o opt-out sempre bloqueia.</strong></p>
 
             <label style={s.label} htmlFor="campaign-instance">Número/instância de saída <span style={s.required}>Obrigatório</span></label>
             <select id="campaign-instance" style={s.input} value={instanceId} onChange={(e) => setInstanceId(e.target.value)} disabled={!canEdit}>
