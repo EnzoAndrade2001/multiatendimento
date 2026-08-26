@@ -45,6 +45,7 @@ import {
   exportCampaign,
   sendCampaignTest,
   getCampaignTemplates,
+  createCampaignTemplate,
   uploadFile,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
@@ -93,20 +94,53 @@ function formatDate(value) {
 }
 
 function normalizeCampaign(item) {
-  const progress = item.progress || {};
+  const source = item || {};
+  const progress = source.progress || {};
   return {
-    ...item,
+    ...source,
+    status: source.status ? String(source.status).toUpperCase() : 'DRAFT',
     progress: {
       ...EMPTY_PROGRESS,
-      total: item.total ?? progress.total ?? 0,
-      sent: item.sent ?? progress.sent ?? 0,
-      delivered: item.delivered ?? progress.delivered ?? 0,
-      failed: item.failed ?? progress.failed ?? 0,
-      skipped: item.skipped ?? progress.skipped ?? 0,
-      pending: item.pending ?? progress.pending ?? 0,
       ...progress,
+      total: source.total ?? progress.total ?? 0,
+      sent: source.sent ?? progress.sent ?? 0,
+      delivered: source.delivered ?? progress.delivered ?? 0,
+      failed: source.failed ?? source.errors ?? progress.failed ?? 0,
+      skipped: source.skipped ?? progress.skipped ?? 0,
+      pending: source.pending ?? progress.pending ?? 0,
     },
   };
+}
+
+function mergeCampaignEvent(campaign, event) {
+  const currentProgress = campaign?.progress || EMPTY_PROGRESS;
+  const incomingProgress = event?.progress || {};
+  // O evento legado bulk_progress chama o total de SENT de "sent" (inclui
+  // DELIVERED) e só informa falhas como "errors". Preserve a separação usada
+  // na tela para não contar entregas duas vezes.
+  const isLegacyProgress = event?.errors !== undefined && event?.failed === undefined && event?.delivered === undefined;
+  const combinedSent = Number(event?.sent);
+  const knownDelivered = Number(currentProgress.delivered) || 0;
+  const eventSent = isLegacyProgress && Number.isFinite(combinedSent)
+    ? Math.max(0, combinedSent - knownDelivered)
+    : event?.sent;
+  return normalizeCampaign({
+    ...campaign,
+    ...event,
+    ...(isLegacyProgress ? { sent: eventSent } : {}),
+    status: event?.status ? String(event.status).toUpperCase() : campaign?.status,
+    failed: event?.failed ?? event?.errors ?? campaign?.failed,
+    progress: {
+      ...currentProgress,
+      ...incomingProgress,
+      total: event?.total ?? currentProgress.total,
+      sent: eventSent ?? incomingProgress.sent ?? currentProgress.sent,
+      delivered: event?.delivered ?? currentProgress.delivered,
+      failed: event?.failed ?? event?.errors ?? currentProgress.failed,
+      skipped: event?.skipped ?? currentProgress.skipped,
+      pending: event?.pending ?? currentProgress.pending,
+    },
+  });
 }
 
 export default function Campaigns() {
@@ -141,6 +175,9 @@ export default function Campaigns() {
   const [historyFilter, setHistoryFilter] = useState('all');
   const [campaignDetails, setCampaignDetails] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState({ name: '', body: '' });
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   const typeInfo = TYPES.find((item) => item.value === campaignType) || TYPES[0];
   const selectedInstance = instances.find((item) => item.id === instanceId);
@@ -160,13 +197,35 @@ export default function Campaigns() {
     const socket = io(SOCKET_URL, { auth: { token } });
     const onProgress = (data) => {
       if (data?.campaignId) {
-        setCampaigns((items) => items.map((item) => item.id === data.campaignId ? normalizeCampaign({ ...item, ...data, progress: data.progress || item.progress }) : item));
-        setActiveCampaign((item) => item?.id === data.campaignId ? normalizeCampaign({ ...item, ...data, progress: data.progress || item.progress }) : item);
+        setCampaigns((items) => {
+          const index = items.findIndex((item) => item.id === data.campaignId);
+          if (index === -1) return [normalizeCampaign(data), ...items];
+          return items.map((item) => item.id === data.campaignId ? mergeCampaignEvent(item, data) : item);
+        });
+        setActiveCampaign((item) => item?.id === data.campaignId ? mergeCampaignEvent(item, data) : item);
       }
     };
     socket.on('campaign_progress', onProgress);
     socket.on('bulk_progress', onProgress);
-    return () => socket.disconnect();
+    socket.on('connect_error', (error) => console.warn('[campaign] websocket indisponível; atualização periódica será usada.', error.message));
+
+    // O socket atualiza imediatamente, mas a consulta periódica cobre
+    // campanhas iniciadas em outra aba, reconexões e proxies sem WebSocket.
+    const refreshTimer = window.setInterval(async () => {
+      try {
+        const { data } = await getCampaigns();
+        const next = (Array.isArray(data) ? data : data?.campaigns || []).map(normalizeCampaign);
+        setCampaigns(next);
+        setActiveCampaign((current) => current ? next.find((item) => item.id === current.id) || current : current);
+      } catch {
+        // A próxima rodada ou o socket mantém a tela atualizada.
+      }
+    }, 10000);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+      socket.disconnect();
+    };
   }, []);
 
   async function loadInitial() {
@@ -285,6 +344,35 @@ export default function Campaigns() {
       loadInitial();
     } catch (error) {
       toast.error(error.response?.data?.error || 'Não foi possível salvar o grupo.');
+    }
+  }
+
+  function openSaveTemplate() {
+    setTemplateDraft({ name: '', body: message });
+    setShowSaveTemplate(true);
+  }
+
+  async function handleSaveTemplate() {
+    const name = templateDraft.name.trim();
+    const body = templateDraft.body.trim();
+    if (!name) return toast.info('Dê um nome para o modelo.');
+    if (!body) return toast.info('Escreva o conteúdo do modelo.');
+    if (savingTemplate) return;
+    setSavingTemplate(true);
+    try {
+      const { data } = await createCampaignTemplate({
+        name,
+        body,
+        category: campaignType === 'PROMOTION' ? 'MARKETING' : campaignType,
+      });
+      setTemplates((items) => [data, ...items.filter((item) => item.id !== data.id)].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR')));
+      setMessage(body);
+      setShowSaveTemplate(false);
+      toast.success('Modelo salvo com sucesso.');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível salvar o modelo.');
+    } finally {
+      setSavingTemplate(false);
     }
   }
 
@@ -465,7 +553,10 @@ export default function Campaigns() {
 
             <div style={s.divider} />
             <div style={s.sectionHeading}><div><span style={s.eyebrow}>3. Mensagem</span><h2 style={s.sectionTitle}>Escreva e revise</h2></div><FileText size={20} color="var(--accent)" /></div>
-            <label style={s.label} htmlFor="campaign-template">Modelo pronto</label>
+            <div style={s.templateHeader}>
+              <label style={s.label} htmlFor="campaign-template">Modelo pronto</label>
+              <ActionButton variant="secondary" size="sm" onClick={openSaveTemplate} disabled={!canEdit}><FileText size={14} /> Salvar como modelo</ActionButton>
+            </div>
             <select id="campaign-template" style={s.input} value="" onChange={(e) => { if (e.target.value) setMessage(e.target.value); }} disabled={!canEdit}>
               <option value="">Selecione um modelo...</option>
               {templates.map((template) => <option key={template.id} value={template.body || template.message}>{template.shortcut || template.name} — {(template.body || template.message || '').slice(0, 55)}</option>)}
@@ -509,6 +600,7 @@ export default function Campaigns() {
 
       {showSaveTag ? <ModalShell kicker="Salvar grupo" title="Criar grupo de contatos" onClose={() => setShowSaveTag(false)} maxWidth="28rem"><div style={s.modalBody}><p style={s.modalText}>Dê um nome para este grupo de {selectedContacts.length} contatos.</p><input autoFocus style={s.input} placeholder="Ex.: CLIENTES_MANUTENCAO" value={newTagName} onChange={(e) => setNewTagName(e.target.value)} /><div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowSaveTag(false)}>Cancelar</ActionButton><ActionButton onClick={handleSaveTag}>Salvar grupo</ActionButton></div></div></ModalShell> : null}
       {showTest ? <ModalShell kicker="Mensagem de teste" title="Enviar para um número de teste" onClose={() => setShowTest(false)} maxWidth="28rem"><div style={s.modalBody}><p style={s.modalText}>A mensagem será enviada somente para este número usando a instância selecionada.</p><input autoFocus style={s.input} placeholder="5551999999999" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} /><div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowTest(false)}>Cancelar</ActionButton><ActionButton onClick={handleTest}>Enviar teste</ActionButton></div></div></ModalShell> : null}
+      {showSaveTemplate ? <ModalShell kicker="Modelos de mensagem" title="Salvar modelo" onClose={() => setShowSaveTemplate(false)} maxWidth="34rem"><div style={s.modalBody}><p style={s.modalText}>Salve uma mensagem reutilizável para as próximas campanhas de <strong>{typeInfo.label}</strong>. As variáveis como [nome] serão preenchidas no envio.</p><label style={s.label} htmlFor="template-name">Nome do modelo</label><input id="template-name" autoFocus style={s.input} placeholder="Ex.: Aviso de manutenção" value={templateDraft.name} onChange={(e) => setTemplateDraft((draft) => ({ ...draft, name: e.target.value }))} /><label style={s.label} htmlFor="template-body">Mensagem do modelo</label><textarea id="template-body" style={{ ...s.textarea, minHeight: '130px' }} placeholder="Escreva a mensagem que será reutilizada..." value={templateDraft.body} onChange={(e) => setTemplateDraft((draft) => ({ ...draft, body: e.target.value }))} /><div style={s.modalFooter}><ActionButton variant="secondary" onClick={() => setShowSaveTemplate(false)}>Cancelar</ActionButton><ActionButton onClick={handleSaveTemplate} loading={savingTemplate}>Salvar modelo</ActionButton></div></div></ModalShell> : null}
     </div>
   );
 }
@@ -531,6 +623,7 @@ const s = {
   sideColumn: { display: 'grid', gap: 'var(--space-6)', minWidth: 0 },
   card: { padding: 'var(--space-6)' },
   sectionHeading: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' },
+  templateHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' },
   eyebrow: { display: 'block', color: 'var(--accent)', fontSize: '0.68rem', fontWeight: 850, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' },
   sectionTitle: { margin: 0, fontSize: '1.15rem', fontWeight: 850 },
   label: { display: 'block', marginBottom: '0.45rem', fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' },

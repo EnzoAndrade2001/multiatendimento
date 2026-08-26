@@ -211,6 +211,7 @@ export const retryCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(i
 export const exportCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}/export`, { responseType: 'blob' });
 export const sendCampaignTest = (data) => api.post('/campaigns/test', data);
 export const getCampaignTemplates = () => api.get('/campaigns/templates');
+export const createCampaignTemplate = (data) => api.post('/campaigns/templates', data);
 // Lista restrita às instâncias do tenant para seleção segura no disparo em massa.
 export const getCampaignInstances = () => api.get('/campaigns/instances');
 
