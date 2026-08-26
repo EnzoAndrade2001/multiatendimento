@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, BookOpen, CheckCircle2, Download, FileText, Plus, RefreshCw, Search, Upload } from 'lucide-react';
+import { Activity, AlertTriangle, BookOpen, CheckCircle2, ChevronDown, Download, FileText, Plus, RefreshCw, Search, Upload } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   createKnowledge,
@@ -41,6 +41,7 @@ export default function KnowledgeBase() {
   const [testQuery, setTestQuery] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [showTestSources, setShowTestSources] = useState(false);
   const [tab, setTab] = useState('answers');
   const [documents, setDocuments] = useState([]);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
@@ -162,6 +163,7 @@ export default function KnowledgeBase() {
     try {
       const response = await testKnowledgeSearch(testQuery.trim());
       setTestResult(response.data);
+      setShowTestSources(false);
     } catch (error) {
       toast.error(error.response?.data?.error || 'Não foi possível testar a consulta.');
     } finally {
@@ -240,7 +242,7 @@ export default function KnowledgeBase() {
         <SurfaceCard style={s.testPanel}>
           <div>
             <h3 style={s.panelTitle}>Simular pergunta do cliente</h3>
-            <p style={s.panelText}>O teste não envia mensagem. Ele mostra quais conteúdos seriam entregues à IA e a relevância encontrada.</p>
+            <p style={s.panelText}>O teste não envia mensagem. Ele mostra primeiro a resposta que o cliente receberia e, separadamente, as fontes técnicas usadas.</p>
           </div>
           <form onSubmit={handleTest} style={s.testForm}>
             <input style={s.input} value={testQuery} onChange={(event) => setTestQuery(event.target.value)} placeholder="Ex: Minha máquina apresentou o erro SC 542" />
@@ -248,15 +250,18 @@ export default function KnowledgeBase() {
           </form>
           {testResult ? (
             <div style={s.testResults}>
-              {testResult.matches.length ? testResult.matches.map((match) => (
-                <div key={match.id} style={s.testMatch}>
-                  <div style={s.matchHeader}>
-                    <strong>{match.question}</strong>
-                    <span style={s.score}>{Math.round(match.score * 100)}% · {match.method}</span>
+              {testResult.simulatedAnswer ? <div style={s.simulatedAnswer}><span style={s.answerLabel}>Resposta simulada ao cliente</span><p style={s.answerText}>{testResult.simulatedAnswer}</p><small style={s.answerHint}>Prévia gerada somente com os conteúdos encontrados. Nenhuma mensagem foi enviada.</small></div> : null}
+              {testResult.simulationError ? <div style={s.noMatch}><AlertTriangle size={18} /> {testResult.simulationError}</div> : null}
+              {testResult.matches.length ? <>
+                <button type="button" style={s.sourcesToggle} onClick={() => setShowTestSources((value) => !value)}><span>{testResult.matches.length} fonte(s) técnica(s) consultada(s)</span><ChevronDown size={17} style={{ transform: showTestSources ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} /></button>
+                {showTestSources ? testResult.matches.map((match) => (
+                  <div key={match.id} style={s.testMatch}>
+                    <div style={s.matchHeader}><strong>{match.question}</strong><span style={s.score}>{Math.round(match.score * 100)}% · {match.method}</span></div>
+                    <p style={s.sourceMeta}>{match.sourceTitle ? `${match.sourceTitle}${match.pageStart ? ` · página ${match.pageStart}` : ''}` : 'Resposta oficial cadastrada'}</p>
+                    <p style={s.matchAnswer}>{match.answer}</p>
                   </div>
-                  <p style={s.matchAnswer}>{match.answer}</p>
-                </div>
-              )) : <div style={s.noMatch}><AlertTriangle size={18} /> Nenhum conteúdo relevante foi encontrado. Cadastre ou ajuste um conhecimento para essa pergunta.</div>}
+                )) : null}
+              </> : <div style={s.noMatch}><AlertTriangle size={18} /> Nenhum conteúdo relevante foi encontrado. Cadastre ou ajuste um conhecimento para essa pergunta.</div>}
             </div>
           ) : null}
         </SurfaceCard>
@@ -358,10 +363,16 @@ const s = {
   panelText: { margin: 'var(--space-1) 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' },
   testForm: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) auto', gap: 'var(--space-3)' },
   testResults: { display: 'grid', gap: 'var(--space-3)' },
+  simulatedAnswer: { display: 'grid', gap: 'var(--space-3)', padding: 'var(--space-5)', border: '1px solid var(--success)', borderRadius: 'var(--radius-md)', background: 'var(--success-light)' },
+  answerLabel: { color: 'var(--success-text)', fontSize: 'var(--text-xs)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.05em' },
+  answerText: { margin: 0, color: 'var(--text-main)', fontSize: 'var(--text-md)', lineHeight: 1.65, whiteSpace: 'pre-wrap' },
+  answerHint: { color: 'var(--text-muted)' },
+  sourcesToggle: { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-panel)', color: 'var(--text-main)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 800 },
   testMatch: { border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 'var(--space-4)', background: 'var(--bg-base)' },
   matchHeader: { display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)' },
   score: { color: 'var(--success)', whiteSpace: 'nowrap', fontSize: 'var(--text-xs)', fontWeight: 800 },
   matchAnswer: { margin: 'var(--space-2) 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.6 },
+  sourceMeta: { margin: 'var(--space-2) 0 0', color: 'var(--accent)', fontSize: 'var(--text-xs)', fontWeight: 800 },
   noMatch: { display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--warning-text)', padding: 'var(--space-4)', background: 'var(--warning-light)', borderRadius: 'var(--radius-md)' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 'var(--space-6)' },
   documentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 'var(--space-6)' },

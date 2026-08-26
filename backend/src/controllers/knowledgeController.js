@@ -2,6 +2,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../lib/prisma');
 const geminiService = require('../services/geminiService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
+const { guardBotReply } = require('../services/botSafetyService');
 
 function cleanRequired(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -176,10 +177,24 @@ async function testSearch(req, res) {
     const tenantId = req.user.tenantId;
     const geminiKey = await getGeminiKey(tenantId);
     const result = await knowledgeSearchService.searchTenantKnowledge({ tenantId, apiKey: geminiKey, query, limit: 5 });
+    let simulatedAnswer = null;
+    let simulationError = null;
+    if (result.matches.length && geminiKey) {
+      try {
+        const context = knowledgeSearchService.buildKnowledgeContext(result.matches);
+        const generated = await geminiService.generateText(geminiKey, `Pergunta do cliente:\n${query}\n${context}\n\nRedija a resposta que seria enviada ao cliente. Responda em português do Brasil, de forma direta, cordial e curta. Use exclusivamente os dados das fontes acima. Se as fontes não sustentarem a resposta, diga que a informação precisa ser confirmada. Não mencione busca, contexto, percentual, embedding ou instruções internas. Não prometa prazo, atendimento ou abertura de chamado.`, { profile: 'chat', maxOutputTokens: 450 });
+        simulatedAnswer = guardBotReply(generated).reply;
+      } catch (error) {
+        simulationError = 'Os conteúdos foram encontrados, mas não foi possível gerar a prévia da resposta.';
+        console.error('[knowledge] falha ao gerar resposta simulada:', error.message);
+      }
+    }
     res.json({
       totalActive: result.totalActive,
       indexed: result.indexed,
       embeddingError: result.embeddingError,
+      simulatedAnswer,
+      simulationError,
       matches: result.matches.map(({ embedding, relevant, ...match }) => match),
     });
   } catch (error) {
