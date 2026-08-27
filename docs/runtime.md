@@ -253,5 +253,14 @@ font/image caches never accumulate across the whole manual. Smaller windows are
 safer for image-heavy PDFs (few pages, large XObjects); larger windows are much
 faster for long text manuals — e.g. a 54 MB / 1487-page service manual extracts
 in ~34 s at `12` vs ~20 s at `200`, with a similar ~400 MB peak either way.
-Reindexing all chunks happens in one Prisma transaction bounded by
-`KNOWLEDGE_TRANSACTION_TIMEOUT_MS` (default `60000`).
+
+Embeddings use `gemini-embedding-001` at `GEMINI_EMBED_DIMENSIONS` dimensions
+(default `768`). The Google default of `3072` made the chunk write for a big
+manual (thousands of rows, each carrying the vector) spike ~650 MB and trip the
+RSS guard — the real bottleneck, not the PDF extraction. `768` is Google's
+recommended size for most use, cuts stored/compared vector size 4×, and the
+chunks are written in `KNOWLEDGE_CHUNK_BATCH_SIZE` (default `100`) `createMany`
+batches with `global.gc()` between them, no wrapping transaction. **Existing
+bases embedded at 3072 must be reindexed after this change** — `cosineSimilarity`
+returns 0 on a dimension mismatch, so old vectors silently fall back to lexical
+search until their document is reprocessed / the answer base is reindexed.

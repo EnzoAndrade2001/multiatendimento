@@ -252,6 +252,13 @@ async function generateTransferSummary(apiKey, history) {
   return null;
 }
 
+// gemini-embedding-001 devolve 3072 dimensoes por padrao. Gravar milhares de
+// vetores de 3072 floats de uma vez (createMany na indexacao de manuais)
+// estourava a memoria do worker. 768 e o valor recomendado pelo Google para a
+// maioria dos casos e reduz 4x o tamanho gravado/comparado. Existe env para
+// quem ja tem base indexada em 3072 e ainda nao pode reindexar.
+const EMBED_DIMENSIONS = Math.max(1, Number.parseInt(process.env.GEMINI_EMBED_DIMENSIONS, 10) || 768);
+
 async function getEmbedding(apiKey, text) {
   const ai = createClient(apiKey);
   // text-embedding-004/embedding-001 foram descontinuados pelo Google - a base
@@ -261,7 +268,11 @@ async function getEmbedding(apiKey, text) {
 
   for (const modelName of embedModels) {
     try {
-      const result = await ai.models.embedContent({ model: modelName, contents: text });
+      const result = await ai.models.embedContent({
+        model: modelName,
+        contents: text,
+        config: { outputDimensionality: EMBED_DIMENSIONS },
+      });
       return result.embeddings?.[0]?.values || null;
     } catch (err) {
       console.warn(`[gemini] falha embedding com ${modelName}:`, err.message);

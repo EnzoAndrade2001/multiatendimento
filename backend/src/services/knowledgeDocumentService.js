@@ -12,19 +12,6 @@ const prisma = require('../lib/prisma');
 const geminiService = require('./geminiService');
 const { knowledgePath } = require('../utils/uploads');
 
-// A indexação de manuais pode gravar muitos vetores/chunks em uma única
-// transação. O timeout padrão do Prisma (5s) é insuficiente em documentos
-// maiores e fazia o arquivo terminar como FAILED mesmo após a extração bem-
-// sucedida. Mantemos a gravação atômica, mas com limite configurável.
-const KNOWLEDGE_TRANSACTION_TIMEOUT_MS = Math.max(
-  10_000,
-  Number(process.env.KNOWLEDGE_TRANSACTION_TIMEOUT_MS) || 60_000,
-);
-const KNOWLEDGE_TRANSACTION_MAX_WAIT_MS = Math.max(
-  2_000,
-  Number(process.env.KNOWLEDGE_TRANSACTION_MAX_WAIT_MS) || 10_000,
-);
-
 function integerSetting(name, fallback, minimum) {
   const parsed = Number.parseInt(process.env[name], 10);
   return Number.isFinite(parsed) ? Math.max(minimum, parsed) : fallback;
@@ -289,19 +276,20 @@ async function processDocument(documentId) {
       group.forEach((chunk, offset) => { chunk.embedding = embeddings[offset] || Prisma.DbNull; });
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.knowledgeChunk.deleteMany({ where: { documentId } });
-      for (let index = 0; index < chunks.length; index += KNOWLEDGE_CHUNK_BATCH_SIZE) {
-        const batch = chunks.slice(index, index + KNOWLEDGE_CHUNK_BATCH_SIZE);
-        await tx.knowledgeChunk.createMany({ data: batch.map((chunk) => ({ ...chunk, tenantId: document.tenantId, documentId })) });
-      }
-      await tx.knowledgeDocument.update({
-        where: { id: documentId },
-        data: { status: 'DRAFT', pageCount: pages.filter((item) => item.page !== null).length || null, chunkCount: chunks.length, processedAt: new Date(), processingError: null },
-      });
-    }, {
-      maxWait: KNOWLEDGE_TRANSACTION_MAX_WAIT_MS,
-      timeout: KNOWLEDGE_TRANSACTION_TIMEOUT_MS,
+    // Sem $transaction interativa: com manuais grandes (milhares de chunks com
+    // vetor de embedding) a transacao segurava o lote inteiro e o worker
+    // estourava o teto de RSS. Gravamos em lotes soltos, liberando memoria
+    // entre eles; um crash no meio deixa o doc em PROCESSING (recuperado como
+    // FAILED no boot) e o proximo reprocesso limpa os chunks parciais.
+    await prisma.knowledgeChunk.deleteMany({ where: { documentId } });
+    for (let index = 0; index < chunks.length; index += KNOWLEDGE_CHUNK_BATCH_SIZE) {
+      const batch = chunks.slice(index, index + KNOWLEDGE_CHUNK_BATCH_SIZE);
+      await prisma.knowledgeChunk.createMany({ data: batch.map((chunk) => ({ ...chunk, tenantId: document.tenantId, documentId })) });
+      if (typeof global.gc === 'function') global.gc();
+    }
+    await prisma.knowledgeDocument.update({
+      where: { id: documentId },
+      data: { status: 'DRAFT', pageCount: pages.filter((item) => item.page !== null).length || null, chunkCount: chunks.length, processedAt: new Date(), processingError: null },
     });
   } catch (error) {
     console.error('[knowledge-document] falha interna:', documentId, error?.stack || error);
