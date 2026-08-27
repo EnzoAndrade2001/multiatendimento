@@ -77,6 +77,7 @@ Volume Docker: multiatendimento_backend_agent-releases
 Pasta no host: /etc/easypanel/projects/multiatendimento/backend/volumes/agent-releases
 Pasta no app:  /data/agent-releases
 Arquivo:       /data/agent-releases/FirebirdCRMClient.exe
+Manifesto:     /data/agent-releases/release.json
 \`\`\`
 
 Variáveis do backend:
@@ -94,6 +95,7 @@ Sempre que uma nova versão do agente for compilada:
 
 1. Copie o novo `FirebirdCRMClient.exe` para a pasta persistente do host acima, substituindo o arquivo anterior.
 2. Confirme o hash com `sha256sum` e atualize `FIREBIRD_AGENT_SHA256`.
+   Grave tambÃ©m `version`, `fileName`, `sha256` e `releasedAt` no `release.json`.
 3. Atualize `FIREBIRD_AGENT_VERSION` no serviço `multiatendimento_backend`.
 4. Reinicie/reimplante o backend e clique em **Atualizar** na Central do Agente Local.
 5. Confirme que a tela mostra **Baixar agente**, a versão correta e o SHA-256 esperado.
