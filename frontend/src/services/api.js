@@ -203,7 +203,7 @@ export const deleteQuickResponse = (id) => api.delete(`/quick-responses/${id}`);
 export const getKnowledge = () => api.get('/knowledge');
 export const getKnowledgeStats = () => api.get('/knowledge/stats');
 export const getKnowledgeAudit = (params = {}) => api.get('/knowledge/audit', { params });
-export const testKnowledgeSearch = (query) => api.post('/knowledge/test', { query });
+export const testKnowledgeSearch = (query, audience = 'CUSTOMER') => api.post('/knowledge/test', { query, audience });
 export const reindexKnowledge = () => api.post('/knowledge/reindex');
 export const createKnowledge = (data) => api.post('/knowledge', data);
 export const updateKnowledge = (id, data) => api.put(`/knowledge/${id}`, data);

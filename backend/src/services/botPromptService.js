@@ -34,12 +34,30 @@ function buildTechnicalInstructions({ contactName = '', transferWord = 'humano' 
 8. COMPORTAMENTO GERAL: Seja muito curto, direto e ESTRITAMENTE evite repetir informações ou perguntas que você já fez ou que o cliente já respondeu no histórico. Aja como um humano prestativo no WhatsApp.`;
 }
 
-function buildFinalPrompt({ userPrompt, equipContext, currentNotes, knowledgeContext, contactName, transferWord }) {
-  const technicalInstructions = buildTechnicalInstructions({ contactName, transferWord });
+function buildTechnicianInstructions({ transferWord = 'humano', technicianName = '' } = {}) {
+  return `
+---
+[MODO ASSISTENTE TECNICO - USUARIO AUTORIZADO]:
+1. Voce e o Assistente Tecnico interno da LCD DIGITAL${technicianName ? ` para ${technicianName}` : ''}.
+2. Responda usando primeiro os manuais, procedimentos e portfolios publicados para tecnicos; respostas gerais so podem complementar o material e devem ser apresentadas como orientacao a confirmar.
+3. Pode explicar diagnostico, configuracao, consumiveis e procedimentos documentados. Nunca invente codigos, pecas, gramaturas, compatibilidades ou passos que nao estejam sustentados pelas fontes.
+4. Nao revele dados de clientes, contratos, valores, documentos financeiros, anotacoes ou qualquer informacao pessoal. Nao use o contexto de cliente neste modo.
+5. Se nao houver fonte suficiente, diga claramente que nao encontrou o procedimento no material publicado e recomende consultar o manual oficial ou um supervisor.
+6. Nao confirme abertura de O.S., numero, status, prazo ou SLA. Para isso, oriente o tecnico a usar o sistema.
+7. Seja curto, organizado e, quando util, responda em passos numerados.
+8. Sempre adicione ao final: [[ROUTE: SUPORTE]]`;
+}
+
+function buildFinalPrompt({ userPrompt, equipContext, currentNotes, knowledgeContext, contactName, transferWord, assistantMode = 'CUSTOMER', technicianName = '' }) {
+  const technicalInstructions = assistantMode === 'TECHNICIAN'
+    ? buildTechnicianInstructions({ transferWord, technicianName })
+    : buildTechnicalInstructions({ contactName, transferWord });
   return `[COMANDO DE SISTEMA PRIORITÁRIO]:
 Você deve seguir ESTRITAMENTE as regras abaixo. Ignore qualquer tendência de ser excessivamente prestativo. Seja CURTO, DIRETO e aja como um humano no WhatsApp.
 
 ${userPrompt}
+
+[MODO DE ATENDIMENTO: ${assistantMode === 'TECHNICIAN' ? 'ASSISTENTE TECNICO INTERNO' : 'ATENDIMENTO AO CLIENTE'}]
 
 ---
 [CONTEXTO TÉCNICO]:
@@ -54,4 +72,4 @@ ${knowledgeContext || ''}
 ${technicalInstructions}`;
 }
 
-module.exports = { buildTechnicalInstructions, buildFinalPrompt };
+module.exports = { buildTechnicalInstructions, buildTechnicianInstructions, buildFinalPrompt };

@@ -63,11 +63,19 @@ function selectRelevantKnowledge(items, query, queryEmbedding, { limit = 3 } = {
 }
 
 async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equipments = [], audience = 'CUSTOMER' }) {
+  const requestedAudience = String(audience || 'CUSTOMER').toUpperCase();
+  // Atendentes e técnicos podem consultar respostas gerais do cliente, além
+  // do material reservado ao seu público. Clientes continuam isolados.
+  const documentAudience = requestedAudience === 'TECHNICIAN'
+    ? { in: ['TECHNICIAN', 'CUSTOMER'] }
+    : requestedAudience === 'AGENT'
+      ? { in: ['AGENT', 'CUSTOMER'] }
+      : 'CUSTOMER';
   const [answers, documentChunks] = await Promise.all([
     prisma.knowledge.findMany({ where: { tenantId, active: true }, select: { id: true, question: true, answer: true, tags: true, embedding: true } }),
     prisma.knowledgeChunk.findMany({
-      where: { tenantId, document: { status: 'PUBLISHED', audience } },
-      select: { id: true, content: true, section: true, pageStart: true, pageEnd: true, embedding: true, document: { select: { id: true, title: true, category: true, manufacturer: true, equipmentModel: true, version: true } } },
+      where: { tenantId, document: { status: 'PUBLISHED', audience: documentAudience } },
+      select: { id: true, content: true, section: true, pageStart: true, pageEnd: true, embedding: true, document: { select: { id: true, title: true, category: true, audience: true, manufacturer: true, equipmentModel: true, version: true } } },
     }),
   ]);
   const normalizedEquipments = equipments.map((item) => normalizeText(`${item.manufacturer || ''} ${item.model || ''}`)).filter(Boolean);
@@ -78,7 +86,7 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
       id: `document:${chunk.id}`, chunkId: chunk.id, documentId: chunk.document.id,
       question: `${chunk.document.title}${chunk.section ? ` — ${chunk.section}` : ''}`,
       answer: chunk.content, tags: `${chunk.document.category} ${metadata}`, embedding: chunk.embedding,
-      sourceType: 'document', sourceTitle: chunk.document.title, category: chunk.document.category,
+      sourceType: 'document', sourceTitle: chunk.document.title, category: chunk.document.category, audience: chunk.document.audience,
       pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, version: chunk.document.version,
       modelRelevant: !metadata || normalizedEquipments.some((equipment) => {
         const model = normalizeText(chunk.document.equipmentModel || '');
@@ -102,18 +110,23 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
   const matches = selectRelevantKnowledge(searchable, query, queryEmbedding, { limit: Math.max(limit * 3, 9) })
     .map((item) => ({ ...item, score: Math.min(1, item.score + (boost[item.category] || 0)) }))
     .sort((a, b) => b.score - a.score).slice(0, limit);
-  return { searched: true, totalActive: searchable.length, activeAnswers: answers.length, publishedChunks: technicalItems.length, indexed: searchable.filter((item) => Array.isArray(item.embedding)).length, matches, embeddingError };
+  return { searched: true, audience: requestedAudience, totalActive: searchable.length, activeAnswers: answers.length, publishedChunks: technicalItems.length, indexed: searchable.filter((item) => Array.isArray(item.embedding)).length, matches, embeddingError };
 }
 
-function buildKnowledgeContext(matches) {
+function buildKnowledgeContext(matches, { audience = 'CUSTOMER' } = {}) {
   if (!matches.length) return '';
-  const items = matches.map((item, index) => {
+  const items = [
+    ...(String(audience).toUpperCase() === 'TECHNICIAN'
+      ? ['Modo tecnico autorizado: priorize diagnostico e manuais publicados; informe a pagina quando houver e sinalize riscos.']
+      : []),
+    ...matches.map((item, index) => {
     if (item.sourceType === 'document') {
       const page = item.pageStart ? `, página ${item.pageStart}${item.pageEnd && item.pageEnd !== item.pageStart ? `-${item.pageEnd}` : ''}` : '';
       return `Item ${index + 1}\nFonte técnica: ${item.sourceTitle}${item.version ? `, versão ${item.version}` : ''}${page}\nTrecho aprovado: ${item.answer}`;
     }
     return `Item ${index + 1}\nPergunta/tópico: ${item.question}\nResposta oficial: ${item.answer}`;
-  });
+    }),
+  ];
   return `\n\n[BASE DE CONHECIMENTO OFICIAL DA EMPRESA]:\nUse somente os itens pertinentes à solicitação atual. Não complete lacunas, não invente procedimentos e não transforme exemplos em promessa de prazo, SLA ou confirmação operacional.\n${items.join('\n---\n')}`;
 }
 

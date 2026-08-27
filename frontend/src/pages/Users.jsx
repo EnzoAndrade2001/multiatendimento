@@ -7,7 +7,7 @@ import ActionButton from '../components/ui/ActionButton';
 import { ACCESS_PROFILES, PERMISSION_GROUPS, PERMISSION_LABELS } from '../auth/permissions';
 import UserAvatar from '../components/ui/UserAvatar';
 
-const EMPTY_FORM = { name: '', email: '', password: '', role: 'agent', active: true, firebirdSupportName: '', accessProfile: 'agent', permissions: ACCESS_PROFILES.agent.permissions, homePage: '/inbox' };
+const EMPTY_FORM = { name: '', email: '', password: '', phone: '', role: 'agent', active: true, firebirdSupportName: '', accessProfile: 'agent', permissions: ACCESS_PROFILES.agent.permissions, homePage: '/inbox' };
 const HOME_PAGES = [
   { value: '/dashboard', label: 'Dashboard', permission: 'dashboard.view' },
   { value: '/inbox', label: 'Atendimento', permission: 'inbox.view' },
@@ -55,7 +55,7 @@ export default function Users() {
     if (user) {
       setModal(user);
       const accessProfile = user.accessProfile || (user.role === 'admin' ? 'admin' : 'agent');
-      setForm({ name: user.name, email: user.email, password: '', avatarUrl: user.avatarUrl || '', role: user.role, active: user.active, firebirdSupportName: user.firebirdSupportName || '', accessProfile, permissions: Array.isArray(user.permissions) ? user.permissions : ACCESS_PROFILES[accessProfile]?.permissions || [], homePage: user.homePage || ACCESS_PROFILES[accessProfile]?.homePage || '/inbox' });
+      setForm({ name: user.name, email: user.email, password: '', phone: user.phone || '', avatarUrl: user.avatarUrl || '', role: user.role, active: user.active, firebirdSupportName: user.firebirdSupportName || '', accessProfile, permissions: Array.isArray(user.permissions) ? user.permissions : ACCESS_PROFILES[accessProfile]?.permissions || [], homePage: user.homePage || ACCESS_PROFILES[accessProfile]?.homePage || '/inbox' });
       return;
     }
 
@@ -356,6 +356,19 @@ export default function Users() {
                     required
                     placeholder="email@empresa.com"
                   />
+                </div>
+
+                <div style={s.field}>
+                  <label style={s.label}>WhatsApp do técnico (opcional)</label>
+                  <input
+                    style={s.input}
+                    type="tel"
+                    inputMode="tel"
+                    value={form.phone || ''}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    placeholder="Ex: 5551999999999"
+                  />
+                  <span style={s.fieldHint}>Usado somente para reconhecer este usuário como técnico autorizado no Assistente Técnico. Informe DDI + DDD + número.</span>
                 </div>
 
                 <div style={s.field}>
@@ -757,6 +770,11 @@ const s = {
     color: 'var(--text-dim)',
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
+  },
+  fieldHint: {
+    color: 'var(--text-dim)',
+    fontSize: '0.72rem',
+    lineHeight: 1.45,
   },
   input: {
     background: 'var(--bg-base)',

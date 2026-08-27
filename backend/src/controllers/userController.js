@@ -1,11 +1,12 @@
 const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
+const evolutionService = require('../services/evolutionService');
 const { normalizeProfile, normalizePermissionList, resolveUserAccess, resolveHomePage, hasPermission } = require('../auth/permissions');
 
 const publicUserSelect = {
   id: true, name: true, email: true, role: true, active: true, createdAt: true,
   firebirdSupportName: true, accessProfile: true, permissions: true, homePage: true,
-  avatarUrl: true,
+  avatarUrl: true, phone: true,
 };
 
 function serializeUser(user) {
@@ -50,7 +51,7 @@ async function list(req, res) {
 }
 
 async function create(req, res) {
-  const { name, email, password, role, accessProfile, permissions, homePage, firebirdSupportName } = req.body;
+  const { name, email, password, role, accessProfile, permissions, homePage, firebirdSupportName, phone } = req.body;
 
   const tenant = await prisma.tenant.findUnique({ where: { id: req.user.tenantId } });
   const count = await prisma.user.count({ where: { tenantId: req.user.tenantId } });
@@ -78,6 +79,7 @@ async function create(req, res) {
       ...requestedAccess,
       homePage: resolveHomePage(homePage, resolveUserAccess(requestedAccess)),
       firebirdSupportName,
+      ...(phone !== undefined ? { phone: evolutionService.normalizePhoneNumber(phone) || null } : {}),
     },
     select: publicUserSelect,
   });
@@ -86,13 +88,14 @@ async function create(req, res) {
 
 async function update(req, res) {
   const { id } = req.params;
-  const { name, email, password, role, accessProfile, permissions, homePage, active, firebirdSupportName } = req.body;
+  const { name, email, password, role, accessProfile, permissions, homePage, active, firebirdSupportName, phone } = req.body;
 
   const data = {
     ...(name && { name }),
     ...(email && { email }),
     ...(active !== undefined && { active }),
     ...(firebirdSupportName !== undefined && { firebirdSupportName }),
+    ...(phone !== undefined ? { phone: evolutionService.normalizePhoneNumber(phone) || null } : {}),
   };
 
   if (password) {

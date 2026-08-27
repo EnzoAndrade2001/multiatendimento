@@ -45,6 +45,7 @@ export default function KnowledgeBase() {
   const [deletingId, setDeletingId] = useState(null);
   const [reindexing, setReindexing] = useState(false);
   const [testQuery, setTestQuery] = useState('');
+  const [testAudience, setTestAudience] = useState('CUSTOMER');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [showTestSources, setShowTestSources] = useState(false);
@@ -191,7 +192,7 @@ export default function KnowledgeBase() {
     if (!testQuery.trim() || testing) return;
     setTesting(true);
     try {
-      const response = await testKnowledgeSearch(testQuery.trim());
+      const response = await testKnowledgeSearch(testQuery.trim(), testAudience);
       setTestResult(response.data);
       setShowTestSources(false);
     } catch (error) {
@@ -299,6 +300,7 @@ export default function KnowledgeBase() {
                     </div>
                     <p style={s.auditQuery}>{item.query || 'Pergunta não informada'}</p>
                     <div style={s.auditSources}>
+                      {sourceSnapshot.assistantMode === 'TECHNICIAN' ? <span>Assistente tecnico interno{sourceSnapshot.actorUserId ? ' autorizado' : ''}</span> : null}
                       <span>{item.found ? 'Correspondência encontrada na consulta' : 'Nenhuma correspondência oficial encontrada'}</span>
                       {sourceSnapshot.equipmentCount ? <span>{sourceSnapshot.equipmentCount} equipamento(s) do iLux no contexto</span> : null}
                       {sourceSnapshot.hasNotes ? <span>Observações do cliente no contexto</span> : null}
@@ -329,6 +331,11 @@ export default function KnowledgeBase() {
             <p style={s.panelText}>O teste não envia mensagem. Ele mostra primeiro a resposta que o cliente receberia e, separadamente, as fontes técnicas usadas.</p>
           </div>
           <form onSubmit={handleTest} style={s.testForm}>
+            <select style={s.input} value={testAudience} onChange={(event) => setTestAudience(event.target.value)} aria-label="Publico da simulacao">
+              <option value="CUSTOMER">Simular cliente</option>
+              <option value="TECHNICIAN">Simular tecnico autorizado</option>
+              <option value="AGENT">Simular atendente</option>
+            </select>
             <input style={s.input} value={testQuery} onChange={(event) => setTestQuery(event.target.value)} placeholder="Ex: Minha máquina apresentou o erro SC 542" />
             <ActionButton type="submit" loading={testing}><Search size={17} /> Consultar</ActionButton>
           </form>

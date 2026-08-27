@@ -6,6 +6,7 @@ const geminiService = require('../services/geminiService');
 const businessHourService = require('../services/businessHourService');
 const botPromptService = require('../services/botPromptService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
+const technicalAssistantService = require('../services/technicalAssistantService');
 const { classifyResponseOrigin } = require('../services/aiResponseAuditService');
 const {
   guardBotReply,
@@ -826,8 +827,20 @@ async function handleAutoTagging(tenant, ticket, contact) {
 async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, incomingMessage) {
   const settings = tenant.settings;
   const transferWord = settings.botTransferWord || 'humano';
-  const currentNotes = contact.notes || '';
+  let actorContext = null;
+  try {
+    actorContext = await technicalAssistantService.resolveWhatsAppActor({ tenantId: tenant.id, phone: contact.phone });
+  } catch (error) {
+    // Falha na identificação nunca interrompe o atendimento ao cliente.
+    console.warn('[technical-assistant] nao foi possivel identificar o remetente:', error.message);
+  }
+  const assistantMode = actorContext?.type === 'TECHNICIAN' ? 'TECHNICIAN' : 'CUSTOMER';
+  const knowledgeAudience = actorContext?.audience || 'CUSTOMER';
+  // No modo técnico, o contato não pode carregar dados de cliente para o LLM.
+  const currentNotes = actorContext ? '' : (contact.notes || '');
   const currentUserTurn = describeMessageForAi(incomingMessage, userMessage);
+
+  console.log(`[technical-assistant] Ticket ${ticket.id} | modo=${assistantMode}${actorContext?.name ? ` | usuario=${actorContext.name}` : ''}`);
 
   if (currentUserTurn.toLowerCase().includes(transferWord.toLowerCase())) {
     await prisma.ticket.update({ where: { id: ticket.id }, data: { status: 'pending' } });
@@ -881,10 +894,10 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
 
   // Sincroniza os equipamentos do CRM para o contato antes de buscar
   const { syncCrmEquipmentsToEquipment } = require('../services/crmSyncService');
-  await syncCrmEquipmentsToEquipment(tenant.id, contact.id);
+  if (!actorContext) await syncCrmEquipmentsToEquipment(tenant.id, contact.id);
 
   // 4. CONTEXTO TÉCNICO (Equipamentos e Notas)
-  const equipments = await prisma.equipment.findMany({
+  const equipments = actorContext ? [] : await prisma.equipment.findMany({
     where: {
       tenantId: tenant.id,
       isActive: true,
@@ -918,9 +931,10 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
       apiKey: settings.geminiKey,
       query: currentUserTurn,
       equipments,
+      audience: knowledgeAudience,
     });
     const relevant = knowledgeResult.matches;
-    knowledgeContext = knowledgeSearchService.buildKnowledgeContext(relevant);
+    knowledgeContext = knowledgeSearchService.buildKnowledgeContext(relevant, { audience: knowledgeAudience });
     found = relevant.length > 0;
     matchedSources = relevant.map((item) => ({
       sourceType: item.sourceType || 'unknown',
@@ -956,6 +970,8 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     knowledgeContext,
     contactName: contact.name || '',
     transferWord,
+    assistantMode,
+    technicianName: actorContext?.name || '',
   });
 
   console.log(`[bot] Ticket ${ticket.id} | Turno atual normalizado:\n${currentUserTurn}`);
@@ -976,11 +992,14 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     equipmentCount: equipments.length,
     hasNotes: Boolean(String(currentNotes || '').trim()),
     matches: matchedSources,
+    assistantMode,
+    audience: knowledgeAudience,
+    actorUserId: actorContext?.userId || null,
   };
   console.log(`[bot-audit] Ticket ${ticket.id} | origem=${responseAudit.origin} | fontes=${responseAudit.sources.join(',') || 'nenhuma'} | modelo=${responseModel || 'desconhecido'}`);
 
   // EXTRAÇÃO DE MEMÓRIA DE LONGO PRAZO (Background Task)
-  if (shouldExtractClientMemory(currentUserTurn)) {
+  if (!actorContext && shouldExtractClientMemory(currentUserTurn)) {
     const extractionHistory = [...reversedHistory, { fromMe: false, body: currentUserTurn }];
     geminiService.extractClientInfo(settings.geminiKey, extractionHistory, contact.notes)
       .then(async (result) => {

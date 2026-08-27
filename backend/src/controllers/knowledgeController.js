@@ -244,14 +244,16 @@ async function testSearch(req, res) {
   try {
     const query = cleanRequired(req.body.query);
     if (!query) return res.status(400).json({ error: 'Informe uma pergunta para testar.' });
+    const audience = String(req.body.audience || 'CUSTOMER').toUpperCase();
+    if (!['CUSTOMER', 'AGENT', 'TECHNICIAN'].includes(audience)) return res.status(400).json({ error: 'Público de consulta inválido.' });
     const tenantId = req.user.tenantId;
     const geminiKey = await getGeminiKey(tenantId);
-    const result = await knowledgeSearchService.searchTenantKnowledge({ tenantId, apiKey: geminiKey, query, limit: 5 });
+    const result = await knowledgeSearchService.searchTenantKnowledge({ tenantId, apiKey: geminiKey, query, limit: 5, audience });
     let simulatedAnswer = null;
     let simulationError = null;
     if (result.matches.length && geminiKey) {
       try {
-        const context = knowledgeSearchService.buildKnowledgeContext(result.matches);
+        const context = knowledgeSearchService.buildKnowledgeContext(result.matches, { audience });
         const generated = await geminiService.generateText(geminiKey, `Pergunta do cliente:\n${query}\n${context}\n\nRedija a resposta que seria enviada ao cliente. Responda em português do Brasil, de forma direta, cordial e curta. Use exclusivamente os dados das fontes acima. Se as fontes não sustentarem a resposta, diga que a informação precisa ser confirmada. Não mencione busca, contexto, percentual, embedding ou instruções internas. Não prometa prazo, atendimento ou abertura de chamado.`, { profile: 'chat', maxOutputTokens: 450 });
         simulatedAnswer = guardBotReply(generated).reply;
       } catch (error) {
@@ -261,6 +263,7 @@ async function testSearch(req, res) {
     }
     res.json({
       totalActive: result.totalActive,
+      audience,
       indexed: result.indexed,
       embeddingError: result.embeddingError,
       simulatedAnswer,
