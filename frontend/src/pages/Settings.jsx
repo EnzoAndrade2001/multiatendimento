@@ -41,11 +41,15 @@ const TAB_PERMISSIONS = [
   null, 'settings.agent.manage',
 ];
 const TAB_GROUPS = [
-  { label: 'Automação', indexes: [0, 1, 5, 6] },
+  { label: 'Automação', indexes: [0, 1, 6] },
   { label: 'Equipe', indexes: [2, 3] },
   { label: 'Negócio', indexes: [4, 7] },
   { label: 'Sistema', indexes: [8, 9] },
 ];
+// Respostas rápidas possui uma área própria em Operação. Mantemos o índice
+// interno 5 para compatibilidade com links antigos, mas não o exibimos no
+// menu de Configurações para evitar duas entradas para a mesma função.
+const HIDDEN_TAB_INDEXES = new Set([5]);
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const MASKED_SECRET_PATTERN = /^\*{4,}$/;
 
@@ -83,7 +87,7 @@ export default function Settings() {
   const [tab, setTab] = useState(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
     if (requestedTab === 'account') return 8;
-    const firstAllowed = TAB_PERMISSIONS.findIndex((permission) => !permission || can(permission));
+    const firstAllowed = TAB_PERMISSIONS.findIndex((permission, index) => !HIDDEN_TAB_INDEXES.has(index) && (!permission || can(permission)));
     return firstAllowed >= 0 ? firstAllowed : 8;
   });
   const [form, setForm] = useState({
@@ -161,7 +165,7 @@ export default function Settings() {
   const [syncingIntegration, setSyncingIntegration] = useState(false);
   const [syncingCompany, setSyncingCompany] = useState(false);
   const [showToken, setShowToken] = useState(false);
-  const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => !TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index]));
+  const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => !HIDDEN_TAB_INDEXES.has(index) && (!TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index])));
 
   useEffect(() => {
     if (!visibleTabIndexes.includes(tab)) setTab(visibleTabIndexes[0] ?? 8);
