@@ -5,7 +5,10 @@ const {
   summarizeDurations,
   durationMinutes,
   summarizeSessionRetention,
+  summarizeSessionOutcomes,
+  isMeaningfulBotMessage,
 } = require('../src/controllers/dashboardController');
+const { calculateBusinessMinutesBetween } = require('../src/services/businessHourService');
 
 test('TMA usa sessionStartedAt quando presente', () => {
   const row = {
@@ -77,4 +80,53 @@ test('denominador engajado ignora conversas onde o bot nao atuou nesta sessao', 
   assert.equal(result.retainedByIA, 2); // nenhum humano -> ambos retidos no recorte amplo
   assert.equal(result.engagedSampleSize, 1); // so 'b' teve bot nesta sessao
   assert.equal(result.retainedByIAEngaged, 1);
+});
+
+test('retencao por sessao ignora avisos automaticos e exige resposta util da IA', () => {
+  const session = {
+    ticketId: 'ticket-1',
+    startedAt: new Date('2026-08-26T10:00:00Z'),
+    endedAt: new Date('2026-08-26T11:00:00Z'),
+  };
+  const messages = [
+    { ticketId: 'ticket-1', createdAt: new Date('2026-08-26T10:01:00Z'), fromMe: true, fromBot: true, automationType: 'TRANSFER_CONFIRMATION' },
+    { ticketId: 'ticket-1', createdAt: new Date('2026-08-26T10:02:00Z'), fromMe: true, fromBot: true, automationType: 'AI' },
+  ];
+  assert.equal(isMeaningfulBotMessage(messages[0]), false);
+  assert.equal(isMeaningfulBotMessage(messages[1]), true);
+  assert.equal(isMeaningfulBotMessage({
+    fromBot: true,
+    body: 'Combinado! Já te encaminhei para um de nossos atendentes.',
+  }), false);
+  assert.deepEqual(summarizeSessionOutcomes([session], messages), {
+    engagedSampleSize: 1,
+    retainedByIAEngaged: 1,
+  });
+});
+
+test('retencao por sessao cai quando um humano participa da mesma sessao', () => {
+  const session = { ticketId: 'ticket-1', startedAt: new Date('2026-08-26T10:00:00Z'), endedAt: new Date('2026-08-26T11:00:00Z') };
+  const messages = [
+    { ticketId: 'ticket-1', createdAt: new Date('2026-08-26T10:02:00Z'), fromMe: true, fromBot: true, automationType: 'AI' },
+    { ticketId: 'ticket-1', createdAt: new Date('2026-08-26T10:30:00Z'), fromMe: true, fromBot: false },
+  ];
+  assert.deepEqual(summarizeSessionOutcomes([session], messages), {
+    engagedSampleSize: 1,
+    retainedByIAEngaged: 0,
+  });
+});
+
+test('tempo util considera somente a faixa de atendimento configurada', () => {
+  const hours = [
+    { dayOfWeek: 1, start: '08:00', end: '18:00', active: true },
+    { dayOfWeek: 2, start: '08:00', end: '18:00', active: true },
+  ];
+  // Segunda 17h ate terca 09h em Sao Paulo: 1h na segunda + 1h na terca.
+  const minutes = calculateBusinessMinutesBetween(
+    new Date('2026-08-24T20:00:00Z'),
+    new Date('2026-08-25T12:00:00Z'),
+    hours,
+    'America/Sao_Paulo',
+  );
+  assert.equal(minutes, 120);
 });

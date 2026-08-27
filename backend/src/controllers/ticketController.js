@@ -2,6 +2,7 @@ const prisma = require('../lib/prisma');
 const historyService = require('../services/historyService');
 const geminiService = require('../services/geminiService');
 const evolutionService = require('../services/evolutionService');
+const ticketSessionService = require('../services/ticketSessionService');
 const path = require('path');
 const fs = require('fs');
 const { hasPermission } = require('../auth/permissions');
@@ -562,6 +563,8 @@ async function assign(req, res) {
   const existing = await prisma.ticket.findFirst({ where: { id, tenantId: req.user.tenantId } });
   if (!existing) return res.status(404).json({ error: 'Ticket não encontrado' });
 
+  if (existing.status === 'resolved') await ticketSessionService.ensureSessionForActivity(existing);
+
   const ticket = await prisma.ticket.update({
     where: { id },
     data: {
@@ -569,7 +572,6 @@ async function assign(req, res) {
       teamId: teamId || null,
       status: agentId ? 'open' : (teamId ? 'pending' : 'open'),
       // Reabrir um ticket resolvido inicia uma nova conversa (mesma linha reaproveitada).
-      ...(existing.status === 'resolved' ? { sessionStartedAt: new Date() } : {}),
     },
     include: { contact: true, agent: { select: { id: true, name: true } }, team: true },
   });
@@ -652,6 +654,9 @@ async function update(req, res) {
   if (!existing) return res.status(404).json({ error: 'Ticket não encontrado' });
 
   const reopeningFromResolved = existing.status === 'resolved' && status && status !== 'resolved';
+  if (reopeningFromResolved) await ticketSessionService.ensureSessionForActivity(existing);
+  const resolvingNow = status === 'resolved' && existing.status !== 'resolved';
+  const resolvedAt = resolvingNow ? new Date() : null;
 
   const ticket = await prisma.ticket.update({
     where: { id },
@@ -659,9 +664,11 @@ async function update(req, res) {
       ...(priority && { priority }),
       ...(status && { status }),
       // Reabrir manualmente um ticket resolvido inicia uma nova conversa.
-      ...(reopeningFromResolved ? { sessionStartedAt: new Date() } : {}),
+      ...(resolvedAt && { resolvedAt }),
     }
   });
+
+  if (resolvedAt) await ticketSessionService.resolveTicketSession(existing, resolvedAt);
 
   res.json(ticket);
 }
@@ -670,12 +677,15 @@ async function resolve(req, res) {
   const { id } = req.params;
   const existing = await prisma.ticket.findFirst({ where: { id, tenantId: req.user.tenantId } });
   if (!existing) return res.status(404).json({ error: 'Ticket não encontrado' });
+  if (existing.status === 'resolved') return res.json(existing);
 
+  const resolvedAt = new Date();
   const ticket = await prisma.ticket.update({
     where: { id },
-    data: { status: 'resolved', resolvedAt: new Date() },
+    data: { status: 'resolved', resolvedAt },
     include: { contact: true }
   });
+  await ticketSessionService.resolveTicketSession(existing, resolvedAt);
 
   // Auditoria
   await historyService.logEvent({
@@ -723,6 +733,7 @@ async function resolve(req, res) {
               body: ratingText,
               fromMe: true,
               fromBot: true,
+              automationType: 'CSAT',
               externalId: result?.key?.id || result?.message?.key?.id
             }
           });
@@ -844,6 +855,7 @@ async function sendMessage(req, res) {
     }
 
     // Auto-atribuição se o ticket não estiver aberto ou estiver sem agente
+    await ticketSessionService.ensureSessionForActivity(ticket);
     if (ticket.status !== 'open' || !ticket.agentId) {
       await prisma.ticket.update({
         where: { id },
@@ -852,7 +864,6 @@ async function sendMessage(req, res) {
           agentId: req.user.userId,
           lastMessageAt: new Date(),
           // Responder um ticket resolvido reabre a mesma linha: inicia uma nova conversa.
-          ...(ticket.status === 'resolved' ? { sessionStartedAt: new Date() } : {}),
         }
       });
       if (io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
@@ -1053,6 +1064,7 @@ async function sendMediaMessage(req, res) {
 
     const externalId = result?.key?.id || result?.message?.key?.id;
 
+    await ticketSessionService.ensureSessionForActivity(ticket);
     if (ticket.status !== 'open' || !ticket.agentId) {
       await prisma.ticket.update({
         where: { id },
@@ -1061,7 +1073,6 @@ async function sendMediaMessage(req, res) {
           agentId: req.user.userId,
           lastMessageAt: new Date(),
           // Responder um ticket resolvido reabre a mesma linha: inicia uma nova conversa.
-          ...(ticket.status === 'resolved' ? { sessionStartedAt: new Date() } : {}),
         }
       });
       if (io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
@@ -1171,6 +1182,11 @@ async function reopen(req, res) {
       sessionStartedAt: new Date(),
     },
     include: { contact: true, instance: true }
+  });
+  await ticketSessionService.startTicketSession({
+    tenantId: ticket.tenantId,
+    ticketId: ticket.id,
+    startedAt: ticket.sessionStartedAt || ticket.createdAt,
   });
 
   // Auditoria
@@ -1434,6 +1450,7 @@ async function forwardMessage(req, res) {
         data: { contactId: contact.id, instanceId, status: 'open', tenantId, agentId: req.user.userId, sessionStartedAt: new Date() },
         include: { instance: true }
       });
+      await ticketSessionService.startTicketSession({ tenantId, ticketId: ticket.id, startedAt: ticket.sessionStartedAt || ticket.createdAt });
     }
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });

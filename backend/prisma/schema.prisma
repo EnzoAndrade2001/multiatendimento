@@ -33,6 +33,7 @@ model Tenant {
   knowledges                 Knowledge[]
   knowledgeDocuments         KnowledgeDocument[]
   knowledgeChunks            KnowledgeChunk[]
+  ticketSessions             TicketSession[]
   businessHours              BusinessHour[]
   knowledgeLogs              KnowledgeLog[]
   tags                       Tag[]
@@ -318,6 +319,7 @@ model Ticket {
   serviceOrders ServiceOrder[]
   userStates    UserTicketState[]
   knowledgeLogs KnowledgeLog[]
+  sessions      TicketSession[]
 
   @@index([tenantId])
   @@index([tenantId, status, updatedAt])
@@ -328,6 +330,27 @@ model Ticket {
   @@index([status])
   @@index([createdAt])
   @@index([sessionStartedAt])
+}
+
+model TicketSession {
+  id            String    @id @default(cuid())
+  tenantId      String
+  ticketId      String
+  agentId       String?
+  startedAt     DateTime
+  endedAt       DateTime?
+  status        String    @default("OPEN") // OPEN, RESOLVED, INACTIVE
+  trigger       String    @default("CREATED") // CREATED, REOPENED, INACTIVITY, HISTORICAL
+  reconstructed Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, endedAt])
+  @@index([tenantId, agentId, endedAt])
+  @@index([ticketId, startedAt])
+  @@index([tenantId, reconstructed])
 }
 
 model UserTicketState {
@@ -450,36 +473,37 @@ model BusinessHour {
 }
 
 model Tag {
-  id       String @id @default(cuid())
-  tenantId String
-  name     String
-  color    String @default("#D4AF37")
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  color      String    @default("#D4AF37")
   archivedAt DateTime?
-  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, archivedAt])
 }
 
 model Message {
-  id            String   @id @default(cuid())
-  ticketId      String
-  agentId       String?
-  fromBot       Boolean  @default(false)
-  fromMe        Boolean  @default(false)
-  body          String
-  transcription String?
-  mediaUrl      String?
-  mediaType     String?
-  mediaStatus   String?  @default("pending") // pending, ok, failed
-  externalId    String?
-  quotedMsgId   String?
-  quotedMsgBody String?
-  fileName      String?
-  isDeleted     Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  agent         User?    @relation(fields: [agentId], references: [id])
-  ticket        Ticket   @relation(fields: [ticketId], references: [id])
-  knowledgeLogs KnowledgeLog[]
+  id             String         @id @default(cuid())
+  ticketId       String
+  agentId        String?
+  fromBot        Boolean        @default(false)
+  automationType String? // AI, TRANSFER_CONFIRMATION, CSAT, SYSTEM
+  fromMe         Boolean        @default(false)
+  body           String
+  transcription  String?
+  mediaUrl       String?
+  mediaType      String?
+  mediaStatus    String?        @default("pending") // pending, ok, failed
+  externalId     String?
+  quotedMsgId    String?
+  quotedMsgBody  String?
+  fileName       String?
+  isDeleted      Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  agent          User?          @relation(fields: [agentId], references: [id])
+  ticket         Ticket         @relation(fields: [ticketId], references: [id])
+  knowledgeLogs  KnowledgeLog[]
 
   @@index([ticketId])
   @@index([ticketId, createdAt])
@@ -488,23 +512,23 @@ model Message {
 }
 
 model QuickResponse {
-  id          String    @id @default(cuid())
+  id          String               @id @default(cuid())
   tenantId    String
   shortcut    String
-  message     String    @db.Text
-  category    String    @default("GENERAL")
-  scope       String    @default("GLOBAL") // GLOBAL, TEAM, PERSONAL
+  message     String               @db.Text
+  category    String               @default("GENERAL")
+  scope       String               @default("GLOBAL") // GLOBAL, TEAM, PERSONAL
   ownerUserId String?
   teamId      String?
-  usageCount  Int       @default(0)
+  usageCount  Int                  @default(0)
   lastUsedAt  DateTime?
-  isFavorite  Boolean   @default(false)
+  isFavorite  Boolean              @default(false)
   archivedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @default(now()) @updatedAt
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner       User?     @relation("QuickResponseOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  team        Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @default(now()) @updatedAt
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner       User?                @relation("QuickResponseOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  team        Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
   audits      QuickResponseAudit[]
 
   @@unique([tenantId, shortcut])
@@ -515,17 +539,17 @@ model QuickResponse {
 }
 
 model QuickResponseAudit {
-  id              String        @id @default(cuid())
+  id              String   @id @default(cuid())
   tenantId        String
   quickResponseId String?
   actorUserId     String?
   action          String
   metadata        Json?
-  createdAt       DateTime      @default(now())
+  createdAt       DateTime @default(now())
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  quickResponse QuickResponse?  @relation(fields: [quickResponseId], references: [id], onDelete: SetNull)
-  actor         User?           @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  quickResponse QuickResponse? @relation(fields: [quickResponseId], references: [id], onDelete: SetNull)
+  actor         User?          @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([tenantId, quickResponseId, createdAt])
@@ -623,30 +647,30 @@ model InternalConversationState {
 }
 
 model KnowledgeLog {
-  id          String             @id @default(cuid())
-  tenantId    String
-  ticketId    String?
-  messageId   String?
-  knowledgeId String?
-  documentId  String?
-  chunkId     String?
-  tenant      Tenant             @relation(fields: [tenantId], references: [id])
-  ticket      Ticket?            @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-  message     Message?           @relation(fields: [messageId], references: [id], onDelete: SetNull)
-  knowledge   Knowledge?         @relation(fields: [knowledgeId], references: [id], onDelete: SetNull)
-  document    KnowledgeDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  chunk       KnowledgeChunk?    @relation(fields: [chunkId], references: [id], onDelete: SetNull)
-  query       String
-  content     String?
-  similarity  Float?
-  found       Boolean            @default(false)
-  searched    Boolean            @default(false)
-  method      String?
-  error       String?
+  id              String             @id @default(cuid())
+  tenantId        String
+  ticketId        String?
+  messageId       String?
+  knowledgeId     String?
+  documentId      String?
+  chunkId         String?
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  ticket          Ticket?            @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  message         Message?           @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  knowledge       Knowledge?         @relation(fields: [knowledgeId], references: [id], onDelete: SetNull)
+  document        KnowledgeDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  chunk           KnowledgeChunk?    @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+  query           String
+  content         String?
+  similarity      Float?
+  found           Boolean            @default(false)
+  searched        Boolean            @default(false)
+  method          String?
+  error           String?
   responseOrigin  String? // RAG, ILUX_DATA, LLM_GENERAL ou MIXED
-  responseSources Json?   // Fontes disponibilizadas ao modelo, sem expor ao cliente
+  responseSources Json? // Fontes disponibilizadas ao modelo, sem expor ao cliente
   responseModel   String?
-  createdAt   DateTime           @default(now())
+  createdAt       DateTime           @default(now())
 
   @@index([tenantId, createdAt])
   @@index([tenantId, responseOrigin, createdAt])

@@ -8,7 +8,8 @@
     "build": "prisma generate",
     "test": "node --test test/*.test.js",
     "dedupe:contacts": "node scripts/dedupeContacts.js",
-    "reconcile:os-mirrors": "node scripts/reconcileServiceOrderMirrors.js"
+    "reconcile:os-mirrors": "node scripts/reconcileServiceOrderMirrors.js",
+    "sessions:rebuild": "node scripts/rebuildTicketSessions.js"
   },
   "dependencies": {
     "@google/genai": "2.19.0",

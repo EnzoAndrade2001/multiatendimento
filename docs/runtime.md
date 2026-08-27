@@ -302,3 +302,31 @@ batches with `global.gc()` between them, no wrapping transaction. **Existing
 bases embedded at 3072 must be reindexed after this change** — `cosineSimilarity`
 returns 0 on a dimension mismatch, so old vectors silently fall back to lexical
 search until their document is reprocessed / the answer base is reindexed.
+
+### Atendimento: sessões e KPIs do dashboard
+
+O mesmo `Ticket` continua sendo reutilizado para manter o histórico do contato,
+mas os indicadores operacionais usam `TicketSession`. Uma sessão nova é aberta
+quando um ticket resolvido recebe atividade ou após
+`TICKET_SESSION_INACTIVITY_HOURS` horas sem mensagens (padrão: `24`). O
+encerramento do ticket também encerra a sessão corrente.
+
+O tempo de resolução corrido usa `startedAt`/`endedAt` da sessão. O tempo útil
+considera somente os dias e horários ativos em `BusinessHour`, no fuso
+`BUSINESS_HOURS_TZ` (padrão: `America/Sao_Paulo`). Sem grade ativa, o dashboard
+não inventa tempo útil e retorna esse indicador sem amostra.
+
+A retenção da IA exige ao menos uma resposta `automationType=AI` (mensagens
+antigas sem tipo continuam compatíveis) e nenhuma mensagem humana na mesma
+sessão. Confirmação de transferência, CSAT, avisos de sistema e fora do horário
+não contam como atuação útil do bot.
+
+Após criar a tabela em uma base existente, reconstruir o histórico sem apagar
+tickets ou mensagens:
+
+```powershell
+npm run sessions:rebuild -- --apply
+```
+
+Sem `--apply`, o comando é somente uma simulação. Ele processa apenas tickets
+que ainda não possuem sessão e marca os registros reconstruídos para auditoria.

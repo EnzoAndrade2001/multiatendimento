@@ -1,4 +1,8 @@
 const prisma = require('../lib/prisma');
+const {
+  BUSINESS_HOURS_TIMEZONE,
+  calculateBusinessMinutesBetween,
+} = require('../services/businessHourService');
 
 const ALLOWED_PERIOD_DAYS = [7, 30, 90];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -30,15 +34,69 @@ function toTime(value) {
 // preenchido) marca o começo da conversa vigente. Fallback para createdAt em
 // tickets anteriores ao backfill.
 function sessionStartTime(row) {
-  const started = toTime(row?.sessionStartedAt);
+  const started = toTime(row?.startedAt || row?.sessionStartedAt);
   return Number.isFinite(started) ? started : toTime(row?.createdAt);
 }
 
 function durationMinutes(row) {
   const startedAt = sessionStartTime(row);
-  const finishedAt = toTime(row?.resolvedAt);
+  const finishedAt = toTime(row?.endedAt || row?.resolvedAt);
   if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) return null;
   return (finishedAt - startedAt) / 60000;
+}
+
+const NON_MEANINGFUL_AUTOMATIONS = new Set(['TRANSFER_CONFIRMATION', 'CSAT', 'SYSTEM', 'OUT_OF_HOURS']);
+const LEGACY_NON_MEANINGFUL_PATTERNS = [
+  /encaminhei para (um de )?nossos atendentes/i,
+  /aval(?:ia|ie) nosso atendimento de 1 a 5/i,
+  /aviso de fora de hor[aá]rio/i,
+];
+
+function isMeaningfulBotMessage(message) {
+  if (!message?.fromBot) return false;
+  if (NON_MEANINGFUL_AUTOMATIONS.has(String(message?.automationType || '').toUpperCase())) return false;
+  return !LEGACY_NON_MEANINGFUL_PATTERNS.some((pattern) => pattern.test(String(message?.body || '')));
+}
+
+function messagesWithinSession(session, messages = []) {
+  const startedAt = sessionStartTime(session);
+  const endedAt = toTime(session?.endedAt || session?.resolvedAt);
+  return messages.filter((message) => {
+    if (message.ticketId !== session.ticketId) return false;
+    const createdAt = toTime(message.createdAt);
+    return Number.isFinite(createdAt) && createdAt >= startedAt && (!Number.isFinite(endedAt) || createdAt <= endedAt);
+  });
+}
+
+function summarizeSessionOutcomes(sessions = [], messages = []) {
+  let engagedSampleSize = 0;
+  let retainedByIAEngaged = 0;
+  sessions.forEach((session) => {
+    const scoped = messagesWithinSession(session, messages);
+    const engaged = scoped.some(isMeaningfulBotMessage);
+    if (!engaged) return;
+    engagedSampleSize += 1;
+    const humanParticipated = scoped.some((message) => message.fromMe && !message.fromBot);
+    if (!humanParticipated) retainedByIAEngaged += 1;
+  });
+  return { engagedSampleSize, retainedByIAEngaged };
+}
+
+function summarizeBusinessDurations(sessions = [], hours = [], timezone = BUSINESS_HOURS_TIMEZONE) {
+  if (!hours.some((row) => row.active)) return { average: null, median: null, p90: null, sampleSize: 0 };
+  const values = sessions.map((session) => {
+    const start = session.startedAt || session.sessionStartedAt || session.createdAt;
+    const end = session.endedAt || session.resolvedAt;
+    return start && end ? calculateBusinessMinutesBetween(start, end, hours, timezone) : null;
+  }).filter((value) => value !== null && Number.isFinite(value));
+  const sorted = values.slice().sort((a, b) => a - b);
+  if (!sorted.length) return { average: null, median: null, p90: null, sampleSize: 0 };
+  return {
+    average: Math.round(sorted.reduce((sum, value) => sum + value, 0) / sorted.length),
+    median: Math.round(percentile(sorted, 0.5)),
+    p90: Math.round(percentile(sorted, 0.9)),
+    sampleSize: sorted.length,
+  };
 }
 
 function percentile(sortedValues, percentileValue) {
@@ -179,10 +237,10 @@ async function getOperationalHealth(tenantId) {
 async function buildAgentBreakdown(tenantId, periodStart, activeAgents) {
   if (!activeAgents.length) return [];
   const agentIds = activeAgents.map((agent) => agent.id);
-  const [resolvedTickets, messageGroups, ratedTickets] = await Promise.all([
-    prisma.ticket.findMany({
-      where: { tenantId, agentId: { in: agentIds }, status: 'resolved', resolvedAt: { gte: periodStart } },
-      select: { agentId: true, createdAt: true, sessionStartedAt: true, resolvedAt: true },
+  const [resolvedSessions, messageGroups, ratedTickets] = await Promise.all([
+    prisma.ticketSession.findMany({
+      where: { tenantId, agentId: { in: agentIds }, status: 'RESOLVED', endedAt: { gte: periodStart } },
+      select: { agentId: true, startedAt: true, endedAt: true },
     }),
     prisma.message.groupBy({
       by: ['agentId'],
@@ -196,10 +254,10 @@ async function buildAgentBreakdown(tenantId, periodStart, activeAgents) {
   ]);
 
   const ticketsByAgent = new Map();
-  resolvedTickets.forEach((ticket) => {
-    const rows = ticketsByAgent.get(ticket.agentId) || [];
-    rows.push(ticket);
-    ticketsByAgent.set(ticket.agentId, rows);
+  resolvedSessions.forEach((session) => {
+    const rows = ticketsByAgent.get(session.agentId) || [];
+    rows.push(session);
+    ticketsByAgent.set(session.agentId, rows);
   });
   const messagesByAgent = new Map(messageGroups.map((group) => [group.agentId, Number(group._count?.id || 0)]));
   const ratingsByAgent = new Map();
@@ -236,7 +294,7 @@ async function getStats(req, res) {
   const generatedAt = new Date();
   const periodStart = new Date(generatedAt.getTime() - periodDays * DAY_MS);
 
-  const [messages, messagesAllTime, tickets, iaCandidateTickets, resolvedTickets, totalContacts, newContacts, activeAgents, ratings, ratingsDist, dailyMessageRows, health] = await Promise.all([
+  const [messages, messagesAllTime, tickets, resolvedSessions, totalContacts, newContacts, activeAgents, ratings, ratingsDist, dailyMessageRows, health, businessHours] = await Promise.all([
     prisma.message.groupBy({
       by: ['fromBot', 'fromMe'],
       where: { ticket: { tenantId }, createdAt: { gte: periodStart } },
@@ -248,21 +306,10 @@ async function getStats(req, res) {
       _count: { id: true },
     }),
     prisma.ticket.groupBy({ by: ['status'], where: { tenantId }, _count: { id: true } }),
-    // Candidatas à retenção IA: encerradas no período que tiveram alguma mensagem
-    // do bot (em qualquer momento). O recorte por sessão é feito em JS abaixo,
-    // pois o Prisma não referencia o campo da linha externa dentro de `none`.
-    prisma.ticket.findMany({
-      where: {
-        tenantId,
-        status: 'resolved',
-        resolvedAt: { gte: periodStart },
-        messages: { some: { fromBot: true } },
-      },
-      select: { id: true, sessionStartedAt: true, createdAt: true },
-    }),
-    prisma.ticket.findMany({
-      where: { tenantId, status: 'resolved', resolvedAt: { gte: periodStart } },
-      select: { createdAt: true, sessionStartedAt: true, resolvedAt: true },
+    // Sessões encerradas no período: cada reabertura/inatividade é uma conversa independente.
+    prisma.ticketSession.findMany({
+      where: { tenantId, status: 'RESOLVED', endedAt: { gte: periodStart } },
+      select: { id: true, ticketId: true, startedAt: true, endedAt: true, reconstructed: true },
     }),
     prisma.contact.count({ where: { tenantId } }),
     prisma.contact.count({ where: { tenantId, createdAt: { gte: periodStart } } }),
@@ -289,31 +336,35 @@ async function getStats(req, res) {
       ORDER BY DATE("createdAt") ASC
     `,
     getOperationalHealth(tenantId),
+    prisma.businessHour.findMany({
+      where: { tenantId },
+      select: { dayOfWeek: true, start: true, end: true, active: true },
+    }),
   ]);
 
   const periodMessages = classifyMessageGroups(messages);
   const allTimeMessages = classifyMessageGroups(messagesAllTime);
-  const tma = summarizeDurations(resolvedTickets);
-
-  // Retenção IA no escopo da conversa atual: verifica, para cada candidata, se há
-  // mensagem humana / do bot a partir do início da sessão (sessionStartedAt).
-  const iaCandidateIds = iaCandidateTickets.map((ticket) => ticket.id);
-  const [humanReplyGroups, botMessageGroups] = iaCandidateIds.length
-    ? await Promise.all([
-        prisma.message.groupBy({
-          by: ['ticketId'],
-          where: { ticketId: { in: iaCandidateIds }, fromMe: true, fromBot: false },
-          _max: { createdAt: true },
-        }),
-        prisma.message.groupBy({
-          by: ['ticketId'],
-          where: { ticketId: { in: iaCandidateIds }, fromBot: true },
-          _max: { createdAt: true },
-        }),
-      ])
-    : [[], []];
-  const retention = summarizeSessionRetention(iaCandidateTickets, humanReplyGroups, botMessageGroups);
-  const resolvedByIA = retention.retainedByIA;
+  const tma = summarizeDurations(resolvedSessions);
+  const businessTma = summarizeBusinessDurations(resolvedSessions, businessHours);
+  const sessionTicketIds = [...new Set(resolvedSessions.map((session) => session.ticketId))];
+  const earliestSessionStart = resolvedSessions.reduce((earliest, session) => (
+    !earliest || session.startedAt < earliest ? session.startedAt : earliest
+  ), null);
+  const latestSessionEnd = resolvedSessions.reduce((latest, session) => (
+    !latest || session.endedAt > latest ? session.endedAt : latest
+  ), null);
+  const sessionMessages = sessionTicketIds.length
+    ? await prisma.message.findMany({
+        where: {
+          ticketId: { in: sessionTicketIds },
+          createdAt: { gte: earliestSessionStart, lte: latestSessionEnd },
+          OR: [{ fromBot: true }, { fromMe: true, fromBot: false }],
+        },
+        select: { ticketId: true, createdAt: true, fromMe: true, fromBot: true, automationType: true, body: true },
+        orderBy: { createdAt: 'asc' },
+      })
+    : [];
+  const retention = summarizeSessionOutcomes(resolvedSessions, sessionMessages);
 
   const agentBreakdown = await buildAgentBreakdown(tenantId, periodStart, activeAgents);
   const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -321,7 +372,8 @@ async function getStats(req, res) {
     if (Object.prototype.hasOwnProperty.call(dist, item.rating)) dist[item.rating] = Number(item._count?.id || 0);
   });
   const avgRating = ratings._avg.rating == null ? null : Math.round(ratings._avg.rating * 10) / 10;
-  const totalResolved = resolvedTickets.length;
+  const totalResolved = resolvedSessions.length;
+  const reconstructedSessions = resolvedSessions.filter((session) => session.reconstructed).length;
 
   res.json({
     periodDays,
@@ -345,8 +397,10 @@ async function getStats(req, res) {
       p90TMA: tma.p90,
       tmaSampleSize: tma.sampleSize,
       tmaInvalidCount: tma.invalidCount,
-      retentionRate: totalResolved > 0 ? Math.round((resolvedByIA / totalResolved) * 100) : null,
-      retainedByIA: resolvedByIA,
+      retentionRate: retention.engagedSampleSize > 0
+        ? Math.round((retention.retainedByIAEngaged / retention.engagedSampleSize) * 100)
+        : null,
+      retainedByIA: retention.retainedByIAEngaged,
       retentionSampleSize: totalResolved,
       // Denominador mais justo: só conversas em que o bot atuou nesta sessão.
       retentionRateEngaged: retention.engagedSampleSize > 0
@@ -354,6 +408,13 @@ async function getStats(req, res) {
         : null,
       retainedByIAEngaged: retention.retainedByIAEngaged,
       retentionEngagedSampleSize: retention.engagedSampleSize,
+      avgBusinessTMA: businessTma.average,
+      medianBusinessTMA: businessTma.median,
+      p90BusinessTMA: businessTma.p90,
+      businessTmaSampleSize: businessTma.sampleSize,
+      reconstructedSessions,
+      liveSessions: totalResolved - reconstructedSessions,
+      sessionInactivityHours: Number.parseInt(process.env.TICKET_SESSION_INACTIVITY_HOURS, 10) || 24,
       totalResolved,
       totalContacts,
       newContacts,
@@ -378,4 +439,7 @@ module.exports = {
   durationMinutes,
   sessionStartTime,
   summarizeSessionRetention,
+  summarizeSessionOutcomes,
+  summarizeBusinessDurations,
+  isMeaningfulBotMessage,
 };

@@ -7,6 +7,7 @@ const businessHourService = require('../services/businessHourService');
 const botPromptService = require('../services/botPromptService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
 const technicalAssistantService = require('../services/technicalAssistantService');
+const ticketSessionService = require('../services/ticketSessionService');
 const { classifyResponseOrigin } = require('../services/aiResponseAuditService');
 const {
   guardBotReply,
@@ -498,13 +499,18 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
     });
   }
 
+  if (!isHistorical) {
+    const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket, new Date());
+    if (sessionResult.startedNew) ticket.sessionStartedAt = sessionResult.session.startedAt;
+  }
+
   if (ticket.status === 'resolved') {
     // Se o ticket já existia mas estava resolvido, REABRE ele para evitar duplicação na lista.
     // Reinicia sessionStartedAt: começa uma nova conversa reaproveitando a mesma linha.
     const useBotForInstance = shouldUseBotForInstance(instance, tenant.settings);
     ticket = await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: new Date(), lastMessageAt: new Date(), unreadCount: { increment: 1 }, sessionStartedAt: new Date() }
+      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: new Date(), lastMessageAt: new Date(), unreadCount: { increment: 1 } }
     });
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
     console.log(`[webhook] Ticket ${ticket.id} reaberto para evitar duplicação.`);
@@ -855,7 +861,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
       const confirmation = 'Combinado! Já te encaminhei para um de nossos atendentes, só um instante. 👍';
       const sent = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, waInstance.instanceName, contact.phone, confirmation);
       const botMessage = await prisma.message.create({
-        data: { ticketId: ticket.id, body: confirmation, fromMe: true, fromBot: true, externalId: sent?.key?.id || sent?.id },
+        data: { ticketId: ticket.id, body: confirmation, fromMe: true, fromBot: true, automationType: 'TRANSFER_CONFIRMATION', externalId: sent?.key?.id || sent?.id },
       });
       if (io) io.to(tenant.id).emit('new_message', { ticket, message: botMessage, contact });
     } catch (err) {
@@ -1125,6 +1131,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
       body: botReply, 
       fromMe: true, 
       fromBot: true,
+      automationType: 'AI',
       externalId // Guardamos o ID para saber que FOI O ROBÔ que mandou
     },
   });

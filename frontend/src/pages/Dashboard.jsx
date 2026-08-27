@@ -133,6 +133,13 @@ export default function Dashboard() {
         <span style={s.queueHint}>Fila: {kpis.activeTickets || 0} abertas · {kpis.pendingTickets || 0} aguardando</span>
       </div>
 
+      {kpis.tmaSampleSize > 0 && (
+        <div style={s.metricNote}>
+          Indicadores de atendimento calculados por sessão. Uma nova sessão começa após {kpis.sessionInactivityHours || 24}h sem atividade
+          {kpis.reconstructedSessions > 0 ? ` · ${kpis.reconstructedSessions} sessão(ões) histórica(s) reconstruída(s)` : ''}.
+        </div>
+      )}
+
       <div style={s.kpiGrid}>
         <KpiCard
           icon={<MessageSquare color="#8b5cf6" />}
@@ -150,7 +157,7 @@ export default function Dashboard() {
         />
         <KpiCard
           icon={<TrendingUp color="#10b981" />}
-          label="Taxa de Retenção IA"
+          label="Retenção IA por sessão"
           value={formatPercent(kpis.retentionRateEngaged)}
           hint={kpis.retentionEngagedSampleSize ? `${kpis.retainedByIAEngaged} de ${kpis.retentionEngagedSampleSize} conversas que o bot atendeu foram resolvidas sem humano` : 'Sem conversas encerradas no período'}
           accentColor="#10b981"
@@ -159,7 +166,9 @@ export default function Dashboard() {
           icon={<Clock color="#3b82f6" />}
           label="Tempo de resolução (mediana)"
           value={formatDuration(kpis.medianTMA)}
-          hint={kpis.tmaSampleSize ? `Média ${formatDuration(kpis.avgTMA)} · P90 ${formatDuration(kpis.p90TMA)} · ${kpis.tmaSampleSize} encerrados` : 'Sem chamados encerrados no período'}
+          hint={kpis.tmaSampleSize
+            ? `Tempo útil ${formatDuration(kpis.medianBusinessTMA)} · Média corrida ${formatDuration(kpis.avgTMA)} · P90 ${formatDuration(kpis.p90TMA)} · ${kpis.tmaSampleSize} sessões`
+            : 'Sem sessões encerradas no período'}
           accentColor="#3b82f6"
         />
         <KpiCard
@@ -370,6 +379,7 @@ const s = {
   periodBtnActive: { background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--text-inverse)' },
   allTimeHint: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)' },
   healthRow: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.45rem 0.8rem', margin: '-0.9rem 0 var(--space-6)', color: 'var(--text-dim)', fontSize: 'var(--text-xs)' },
+  metricNote: { margin: '-0.85rem 0 var(--space-5)', color: 'var(--text-dim)', fontSize: 'var(--text-xs)' },
   updatedAt: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem' },
   healthChip: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '0.22rem 0.5rem', fontWeight: 700 },
   queueHint: { marginLeft: 'auto' },
