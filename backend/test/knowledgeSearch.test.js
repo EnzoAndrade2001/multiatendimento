@@ -111,6 +111,17 @@ test('seletor pontua cada item pelo melhor dos vetores de consulta', () => {
   assert.equal(withTranslation[0].semantic, 1);
 });
 
+test('manual de modelo diferente nao e barrado: aparece com pontuacao penalizada', () => {
+  const q = { question: '303-403 Extended FAX Not Detected', answer: 'Reset the Main Controller or switch the power off then on.', tags: 'MANUAL XEROX 7830', embedding: [1, 0] };
+  const match = { ...q, id: 'certo', modelRelevant: true };
+  const mismatch = { ...q, id: 'penalizado', modelRelevant: false };
+  const queryVector = [1, 0]; // cosseno 1 nos dois itens
+  const matches = selectRelevantKnowledge([match, mismatch], '303-403', queryVector, { limit: 5 });
+  assert.deepEqual(matches.map((item) => item.id), ['certo', 'penalizado']);
+  assert.ok(matches[1].score < matches[0].score, 'o item sem match de modelo perde posicao');
+  assert.ok(matches[1].relevant, 'mas continua elegivel, nao e filtrado');
+});
+
 test('limiar cross-lingual menor vale só para itens em idioma diferente da pergunta', () => {
   const base = { question: 'Fuser unit maintenance', answer: 'Remove the rear cover and the two screws.', tags: 'fuser', embedding: [1, 0] };
   const items = [

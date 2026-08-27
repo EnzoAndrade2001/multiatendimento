@@ -91,6 +91,10 @@ function selectRelevantKnowledge(items, query, queryEmbedding, { limit = 3, extr
   // cair para 0,55-0,63. Para itens cujo idioma difere do da pergunta usamos um
   // corte semantico menor; nunca maior que o corte padrao.
   const crossLangMinimum = Math.min(semanticMinimum, thresholdFromEnv('KNOWLEDGE_SEMANTIC_MIN_SCORE_CROSSLANG', 0.55));
+  // Manual de outro fabricante/modelo nao e barrado: so perde posicao. Um manual
+  // que documenta o codigo de erro perguntado deve aparecer mesmo que o tecnico
+  // nao cite o modelo exato (ou a simulacao nao tenha equipamento no contexto).
+  const modelMismatchPenalty = thresholdFromEnv('KNOWLEDGE_MODEL_MISMATCH_PENALTY', 0.8);
   const queryVectors = [queryEmbedding, ...extraEmbeddings].filter((vector) => Array.isArray(vector) && vector.length);
   const queryTag = queryLanguage ? languageTag(queryLanguage) : null;
   return items.map((item) => {
@@ -101,7 +105,8 @@ function selectRelevantKnowledge(items, query, queryEmbedding, { limit = 3, extr
       : 0;
     const crossLang = Boolean(queryTag && item.language && languageTag(item.language) !== queryTag);
     const semanticCut = crossLang ? crossLangMinimum : semanticMinimum;
-    const score = semantic > 0 ? (semantic * 0.8) + (lexical * 0.2) : lexical;
+    const base = semantic > 0 ? (semantic * 0.8) + (lexical * 0.2) : lexical;
+    const score = item.modelRelevant === false ? base * modelMismatchPenalty : base;
     return { ...item, score, semantic, lexical, method: semantic > 0 && lexical > 0 ? 'hybrid' : semantic > 0 ? 'semantic' : 'keywords', relevant: semantic >= semanticCut || lexical >= lexicalMinimum };
   }).filter((item) => item.relevant).sort((a, b) => b.score - a.score).slice(0, limit);
 }
@@ -135,15 +140,18 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
       pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, version: chunk.document.version,
       modelRelevant: !metadata || normalizedEquipments.some((equipment) => {
         const model = normalizeText(chunk.document.equipmentModel || '');
-        if (model) return equipment.includes(model) || tokenize(model).filter((token) => token.length >= 3).every((token) => equipment.includes(token));
+        if (model && (equipment.includes(model) || tokenize(model).filter((token) => token.length >= 3).every((token) => equipment.includes(token)))) return true;
         return fuzzyTokenMatch(chunk.document.manufacturer || '', equipment);
       }) || (() => {
+        // Fabricante citado na pergunta ja torna o manual pertinente (ex.: "xerox
+        // 303-403"); o modelo exato e um reforco, nao um requisito.
+        if (fuzzyTokenMatch(chunk.document.manufacturer || '', normalizedQuery)) return true;
         const model = normalizeText(chunk.document.equipmentModel || '');
-        if (model) return normalizedQuery.includes(model) || tokenize(model).filter((token) => token.length >= 3).every((token) => normalizedQuery.includes(token));
-        return fuzzyTokenMatch(chunk.document.manufacturer || '', normalizedQuery);
+        if (model) return normalizedQuery.includes(model) || tokenize(model).filter((token) => token.length >= 3).some((token) => normalizedQuery.includes(token));
+        return false;
       })(),
     };
-  }).filter((item) => item.modelRelevant);
+  });
   const searchable = [...answers.map((item) => ({ ...item, sourceType: 'answer', category: 'ANSWER' })), ...technicalItems];
   // Se ha manual publicado em outro idioma, a pergunta (em portugues) tambem e
   // traduzida para ingles e cada item passa a ser pontuado pelo melhor dos dois

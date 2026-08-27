@@ -266,6 +266,15 @@ already benefit from query translation. Reprocessing a document / reindexing the
 answer base only adds the `RETRIEVAL_DOCUMENT` hint, a further recall
 improvement, not a correctness fix.
 
+The manufacturer/model gate is a ranking signal, not a hard filter. A chunk
+whose document `manufacturer`/`equipmentModel` is neither named in the query nor
+present in the ticket's linked equipment is not dropped — its score is
+multiplied by `KNOWLEDGE_MODEL_MISMATCH_PENALTY` (default `0.8`). This is what
+lets a manual that documents the exact error code the technician typed still
+surface when they don't spell out the model (and in the base's "Testar consulta"
+simulator, which has no equipment context at all). Naming the manufacturer in
+the query (`xerox 303-403`) already clears the gate with no penalty.
+
 ### Document indexing (large manuals)
 
 Uploaded documents are processed in a dedicated child process launched with
