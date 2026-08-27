@@ -271,7 +271,7 @@ async function processDocument(documentId) {
     for (let index = 0; index < chunks.length; index += 3) {
       const group = chunks.slice(index, index + 3);
       const embeddings = settings?.geminiKey
-        ? await Promise.all(group.map((chunk) => geminiService.getEmbedding(settings.geminiKey, chunk.content).catch(() => null)))
+        ? await Promise.all(group.map((chunk) => geminiService.getEmbedding(settings.geminiKey, chunk.content, { taskType: 'RETRIEVAL_DOCUMENT' }).catch(() => null)))
         : group.map(() => null);
       group.forEach((chunk, offset) => { chunk.embedding = embeddings[offset] || Prisma.DbNull; });
     }

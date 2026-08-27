@@ -237,6 +237,35 @@ and `KNOWLEDGE_LEXICAL_MIN_SCORE=0.34`. Each consultation is recorded in
 The admin screen provides index status, seven-day usage indicators, reindexing
 and a dry-run search that never sends a customer message.
 
+### Cross-language retrieval
+
+Manuals can be English-only while technicians ask in Portuguese. Two things keep
+that working:
+
+- Every embedding request now carries a `taskType`: `RETRIEVAL_QUERY` for the
+  user's question, `RETRIEVAL_DOCUMENT` for stored content (chunks and the
+  answer base). `gemini-embedding-001` uses the hint to place asymmetric
+  query/document pairs closer, which lifts PT↔EN similarity.
+- When the tenant has at least one published document whose `language` is not
+  Portuguese, `searchTenantKnowledge` also asks the light model for an English
+  translation of the query (~60 tokens), embeds it as a second
+  `RETRIEVAL_QUERY` vector, and scores every item against the best of the two
+  vectors. Translation failure falls back to the original query only; a base
+  that is entirely Portuguese never pays the extra call. The response returns
+  `crossLanguage: true` when the translated vector was used.
+
+Cross-lingual matches often land at ~0.55–0.63 semantic, just under the default
+cut. `KNOWLEDGE_SEMANTIC_MIN_SCORE_CROSSLANG` (default `0.55`, clamped to never
+exceed `KNOWLEDGE_SEMANTIC_MIN_SCORE`) is the semantic threshold applied only to
+items whose document `language` differs from the query language (`pt-BR`); the
+answer base and Portuguese manuals keep the strict `0.64`.
+
+Existing embeddings do **not** need reindexing for this change: dimensions are
+unchanged and `cosineSimilarity` stays valid, so old vectors keep working and
+already benefit from query translation. Reprocessing a document / reindexing the
+answer base only adds the `RETRIEVAL_DOCUMENT` hint, a further recall
+improvement, not a correctness fix.
+
 ### Document indexing (large manuals)
 
 Uploaded documents are processed in a dedicated child process launched with

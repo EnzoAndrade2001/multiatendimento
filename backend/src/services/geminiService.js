@@ -259,7 +259,12 @@ async function generateTransferSummary(apiKey, history) {
 // quem ja tem base indexada em 3072 e ainda nao pode reindexar.
 const EMBED_DIMENSIONS = Math.max(1, Number.parseInt(process.env.GEMINI_EMBED_DIMENSIONS, 10) || 768);
 
-async function getEmbedding(apiKey, text) {
+// taskType orienta o modelo multilingue: 'RETRIEVAL_QUERY' para a pergunta do
+// usuario e 'RETRIEVAL_DOCUMENT' para o conteudo armazenado. Isso melhora a
+// similaridade entre pergunta em portugues e manual em ingles. Quando omitido, o
+// comportamento e o mesmo de antes (embedding generico) - callers antigos seguem
+// funcionando sem alteracao.
+async function getEmbedding(apiKey, text, { taskType } = {}) {
   const ai = createClient(apiKey);
   // text-embedding-004/embedding-001 foram descontinuados pelo Google - a base
   // de conhecimento inteira ficava sem embedding (silenciosamente, sem erro
@@ -271,7 +276,7 @@ async function getEmbedding(apiKey, text) {
       const result = await ai.models.embedContent({
         model: modelName,
         contents: text,
-        config: { outputDimensionality: EMBED_DIMENSIONS },
+        config: { outputDimensionality: EMBED_DIMENSIONS, ...(taskType ? { taskType } : {}) },
       });
       return result.embeddings?.[0]?.values || null;
     } catch (err) {

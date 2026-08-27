@@ -51,14 +51,58 @@ function thresholdFromEnv(name, fallback) {
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
 }
 
-function selectRelevantKnowledge(items, query, queryEmbedding, { limit = 3 } = {}) {
+// Idioma da consulta do usuario. Tecnicos perguntam em portugues; a etapa de
+// resposta ja responde em pt-BR a partir de contexto em qualquer idioma.
+const QUERY_LANGUAGE = 'pt-BR';
+
+// pt / pt-BR / pt_br -> "pt" ; en / en-US -> "en". Comparamos so o idioma base.
+function languageTag(value) {
+  return String(value || '').trim().toLowerCase().replace(/[_\s]+/g, '-').split('-')[0];
+}
+function isPortuguese(value) {
+  return languageTag(value) === 'pt';
+}
+
+// Pergunta chega em portugues, mas ha manuais so em ingles. Traduzimos a
+// consulta apenas para a busca (nao afeta a resposta enviada ao usuario). Se a
+// traducao falhar ou nao mudar nada, seguimos so com a consulta original.
+async function translateForRetrieval(apiKey, query) {
+  const text = String(query || '').trim();
+  if (!text) return null;
+  try {
+    const translated = await geminiService.generateText(
+      apiKey,
+      `Translate the text below to English. Output only the translation, with no quotes and no extra words.\n\n${text}`,
+      { profile: 'light', maxOutputTokens: 60 },
+    );
+    const clean = String(translated || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+    if (!clean || normalizeText(clean) === normalizeText(text)) return null;
+    return clean;
+  } catch (error) {
+    console.warn('[knowledge] falha ao traduzir consulta para ingles:', error.message);
+    return null;
+  }
+}
+
+function selectRelevantKnowledge(items, query, queryEmbedding, { limit = 3, extraEmbeddings = [], queryLanguage } = {}) {
   const semanticMinimum = thresholdFromEnv('KNOWLEDGE_SEMANTIC_MIN_SCORE', 0.64);
   const lexicalMinimum = thresholdFromEnv('KNOWLEDGE_LEXICAL_MIN_SCORE', 0.34);
+  // Similaridade cross-lingual real (pergunta pt-BR x manual em ingles) costuma
+  // cair para 0,55-0,63. Para itens cujo idioma difere do da pergunta usamos um
+  // corte semantico menor; nunca maior que o corte padrao.
+  const crossLangMinimum = Math.min(semanticMinimum, thresholdFromEnv('KNOWLEDGE_SEMANTIC_MIN_SCORE_CROSSLANG', 0.55));
+  const queryVectors = [queryEmbedding, ...extraEmbeddings].filter((vector) => Array.isArray(vector) && vector.length);
+  const queryTag = queryLanguage ? languageTag(queryLanguage) : null;
   return items.map((item) => {
     const lexical = lexicalSimilarity(query, item);
-    const semantic = queryEmbedding && Array.isArray(item.embedding) ? geminiService.cosineSimilarity(queryEmbedding, item.embedding) : 0;
+    // Com traducao ativa cada item e pontuado pelo melhor dos vetores de consulta.
+    const semantic = queryVectors.length && Array.isArray(item.embedding)
+      ? Math.max(...queryVectors.map((vector) => geminiService.cosineSimilarity(vector, item.embedding)))
+      : 0;
+    const crossLang = Boolean(queryTag && item.language && languageTag(item.language) !== queryTag);
+    const semanticCut = crossLang ? crossLangMinimum : semanticMinimum;
     const score = semantic > 0 ? (semantic * 0.8) + (lexical * 0.2) : lexical;
-    return { ...item, score, semantic, lexical, method: semantic > 0 && lexical > 0 ? 'hybrid' : semantic > 0 ? 'semantic' : 'keywords', relevant: semantic >= semanticMinimum || lexical >= lexicalMinimum };
+    return { ...item, score, semantic, lexical, method: semantic > 0 && lexical > 0 ? 'hybrid' : semantic > 0 ? 'semantic' : 'keywords', relevant: semantic >= semanticCut || lexical >= lexicalMinimum };
   }).filter((item) => item.relevant).sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
@@ -75,7 +119,7 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
     prisma.knowledge.findMany({ where: { tenantId, active: true }, select: { id: true, question: true, answer: true, tags: true, embedding: true } }),
     prisma.knowledgeChunk.findMany({
       where: { tenantId, document: { status: 'PUBLISHED', audience: documentAudience } },
-      select: { id: true, content: true, section: true, pageStart: true, pageEnd: true, embedding: true, document: { select: { id: true, title: true, category: true, audience: true, manufacturer: true, equipmentModel: true, version: true } } },
+      select: { id: true, content: true, section: true, pageStart: true, pageEnd: true, embedding: true, document: { select: { id: true, title: true, category: true, audience: true, manufacturer: true, equipmentModel: true, version: true, language: true } } },
     }),
   ]);
   const normalizedEquipments = equipments.map((item) => normalizeText(`${item.manufacturer || ''} ${item.model || ''}`)).filter(Boolean);
@@ -86,6 +130,7 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
       id: `document:${chunk.id}`, chunkId: chunk.id, documentId: chunk.document.id,
       question: `${chunk.document.title}${chunk.section ? ` — ${chunk.section}` : ''}`,
       answer: chunk.content, tags: `${chunk.document.category} ${metadata}`, embedding: chunk.embedding,
+      language: chunk.document.language,
       sourceType: 'document', sourceTitle: chunk.document.title, category: chunk.document.category, audience: chunk.document.audience,
       pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, version: chunk.document.version,
       modelRelevant: !metadata || normalizedEquipments.some((equipment) => {
@@ -100,17 +145,31 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
     };
   }).filter((item) => item.modelRelevant);
   const searchable = [...answers.map((item) => ({ ...item, sourceType: 'answer', category: 'ANSWER' })), ...technicalItems];
+  // Se ha manual publicado em outro idioma, a pergunta (em portugues) tambem e
+  // traduzida para ingles e cada item passa a ser pontuado pelo melhor dos dois
+  // vetores. Base 100% em portugues nao paga a traducao.
+  const hasForeignDoc = technicalItems.some((item) => item.language && !isPortuguese(item.language));
   let queryEmbedding = null;
   let embeddingError = null;
+  const extraEmbeddings = [];
   if (apiKey && searchable.some((item) => Array.isArray(item.embedding))) {
-    try { queryEmbedding = await geminiService.getEmbedding(apiKey, query); if (!queryEmbedding) embeddingError = 'Embedding indisponível; busca por palavras aplicada.'; }
+    try { queryEmbedding = await geminiService.getEmbedding(apiKey, query, { taskType: 'RETRIEVAL_QUERY' }); if (!queryEmbedding) embeddingError = 'Embedding indisponível; busca por palavras aplicada.'; }
     catch (error) { embeddingError = error.message; }
+    if (queryEmbedding && hasForeignDoc) {
+      const englishQuery = await translateForRetrieval(apiKey, query);
+      if (englishQuery) {
+        try {
+          const englishEmbedding = await geminiService.getEmbedding(apiKey, englishQuery, { taskType: 'RETRIEVAL_QUERY' });
+          if (englishEmbedding) extraEmbeddings.push(englishEmbedding);
+        } catch (error) { console.warn('[knowledge] falha ao embutir traducao da consulta:', error.message); }
+      }
+    }
   }
   const boost = { ANSWER: 0.08, PROCEDURE: 0.05, MANUAL: 0.02, PORTFOLIO: 0 };
-  const matches = selectRelevantKnowledge(searchable, query, queryEmbedding, { limit: Math.max(limit * 3, 9) })
+  const matches = selectRelevantKnowledge(searchable, query, queryEmbedding, { limit: Math.max(limit * 3, 9), extraEmbeddings, queryLanguage: QUERY_LANGUAGE })
     .map((item) => ({ ...item, score: Math.min(1, item.score + (boost[item.category] || 0)) }))
     .sort((a, b) => b.score - a.score).slice(0, limit);
-  return { searched: true, audience: requestedAudience, totalActive: searchable.length, activeAnswers: answers.length, publishedChunks: technicalItems.length, indexed: searchable.filter((item) => Array.isArray(item.embedding)).length, matches, embeddingError };
+  return { searched: true, audience: requestedAudience, totalActive: searchable.length, activeAnswers: answers.length, publishedChunks: technicalItems.length, indexed: searchable.filter((item) => Array.isArray(item.embedding)).length, crossLanguage: extraEmbeddings.length > 0, matches, embeddingError };
 }
 
 function buildKnowledgeContext(matches, { audience = 'CUSTOMER' } = {}) {
@@ -130,4 +189,4 @@ function buildKnowledgeContext(matches, { audience = 'CUSTOMER' } = {}) {
   return `\n\n[BASE DE CONHECIMENTO OFICIAL DA EMPRESA]:\nUse somente os itens pertinentes à solicitação atual. Não complete lacunas, não invente procedimentos e não transforme exemplos em promessa de prazo, SLA ou confirmação operacional.\n${items.join('\n---\n')}`;
 }
 
-module.exports = { buildKnowledgeContext, editDistance, fuzzyTokenMatch, lexicalSimilarity, normalizeText, searchTenantKnowledge, selectRelevantKnowledge };
+module.exports = { buildKnowledgeContext, editDistance, fuzzyTokenMatch, isPortuguese, languageTag, lexicalSimilarity, normalizeText, searchTenantKnowledge, selectRelevantKnowledge, translateForRetrieval };

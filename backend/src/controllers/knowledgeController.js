@@ -171,7 +171,7 @@ async function create(req, res) {
     if (!question || !answer) return res.status(400).json({ error: 'Pergunta e resposta são obrigatórias.' });
 
     const geminiKey = await getGeminiKey(tenantId);
-    const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`) : null;
+    const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' }) : null;
     const knowledge = await prisma.knowledge.create({
       data: { tenantId, question, answer, tags, active, embedding: embedding || Prisma.DbNull },
     });
@@ -203,7 +203,7 @@ async function update(req, res) {
     };
     if (contentChanged) {
       const geminiKey = await getGeminiKey(tenantId);
-      const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`) : null;
+      const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' }) : null;
       data.embedding = embedding || Prisma.DbNull;
     }
 
@@ -225,7 +225,7 @@ async function reindex(req, res) {
     let indexed = 0;
     let failed = 0;
     for (const item of knowledges) {
-      const embedding = await geminiService.getEmbedding(geminiKey, `${item.question}\n${item.answer}\n${item.tags || ''}`);
+      const embedding = await geminiService.getEmbedding(geminiKey, `${item.question}\n${item.answer}\n${item.tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' });
       if (embedding) {
         await prisma.knowledge.update({ where: { id: item.id }, data: { embedding } });
         indexed += 1;
