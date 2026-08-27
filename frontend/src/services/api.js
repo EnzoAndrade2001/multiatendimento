@@ -25,6 +25,12 @@ export const getMediaUrl = (url) => {
     const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
     return `${BACKEND_URL}/api/media/${encodeURIComponent(filename)}${suffix}`;
   }
+  if (cleanUrl.startsWith('/uploads/user-avatars/')) {
+    const filename = cleanUrl.slice('/uploads/user-avatars/'.length).split('?')[0];
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : '';
+    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+    return `${BACKEND_URL}/api/user-avatars/${encodeURIComponent(filename)}${suffix}`;
+  }
   return `${BACKEND_URL}${cleanUrl}`;
 };
 
@@ -72,6 +78,12 @@ api.interceptors.request.use((config) => {
 export const login = (email, password, slug) => api.post('/auth/login', { email, password, slug });
 export const getMe = () => api.get('/auth/me');
 export const updateProfile = (data) => api.patch('/auth/profile', data);
+export const uploadProfileAvatar = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/auth/profile/avatar', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+};
+export const removeProfileAvatar = () => api.delete('/auth/profile/avatar');
 export const getTenantBySlug = (slug) => api.get(`/auth/tenant/${slug}`);
 export const uploadFile = (file) => {
   const formData = new FormData();
@@ -156,6 +168,12 @@ export const getUsers = () => api.get('/users');
 export const createUser = (data) => api.post('/users', data);
 export const updateUser = (id, data) => api.patch(`/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/users/${id}`);
+export const uploadUserAvatar = (id, file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/users/${id}/avatar`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+};
+export const removeUserAvatar = (id) => api.delete(`/users/${id}/avatar`);
 
 // Teams
 export const getTeams = () => api.get('/teams');

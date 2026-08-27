@@ -5,7 +5,7 @@ async function list(req, res) {
     where: { tenantId: req.user.tenantId },
     include: {
       members: {
-        include: { user: { select: { id: true, name: true, email: true } } }
+        include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } }
       }
     },
     orderBy: { name: 'asc' },
@@ -77,7 +77,7 @@ async function addMember(req, res) {
 
   const member = await prisma.teamMember.create({
     data: { teamId, userId },
-    include: { user: { select: { id: true, name: true } } }
+    include: { user: { select: { id: true, name: true, avatarUrl: true } } }
   });
   res.json(member);
 }

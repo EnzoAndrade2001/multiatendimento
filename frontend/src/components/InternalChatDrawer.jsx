@@ -16,6 +16,7 @@ import {
   updateInternalConversationPin,
   updateInternalConversationRead,
 } from '../services/api';
+import UserAvatar from './ui/UserAvatar';
 import ActionButton from './ui/ActionButton';
 
 const FILTERS = [
@@ -587,7 +588,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
             const lastMessageTime = conversationTime(conversation.lastMessage?.createdAt);
             return <div key={conversation.key} style={{ ...s.row, ...(conversation.unreadCount ? s.rowUnread : {}) }}>
               <button type="button" style={s.rowMain} onClick={() => selectConversation(conversation)} aria-label={`Abrir ${conversation.target.name}${conversation.unreadCount ? `, ${conversation.unreadCount} não lidas` : ''}`}>
-                <span style={s.avatar}>{conversation.kind === 'team' ? <Users size={16} /> : conversation.target.name?.[0]?.toUpperCase()}</span>
+                {conversation.kind === 'team' ? <span style={s.avatar}><Users size={16} /></span> : <UserAvatar user={conversation.target} size={34} style={s.avatar} />}
                 <span style={s.rowInfo}><span style={s.nameLine}><span style={s.nameText}>{conversation.target.name}</span><span style={{ ...s.presence, background: isOnline ? 'var(--success)' : 'var(--text-dim)' }} title={isOnline ? 'Online' : 'Offline'} />{lastMessageTime ? <time style={s.rowTime}>{lastMessageTime}</time> : null}</span><span style={{ ...s.preview, ...(conversation.unreadCount ? s.previewUnread : {}) }}>{messagePreview(conversation.lastMessage)}</span></span>
                 {conversation.mentionCount > 0 ? <span style={s.mention}>@{conversation.mentionCount}</span> : null}
                 {conversation.unreadCount > 0 ? <span style={s.unread}>{conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}</span> : null}
@@ -601,7 +602,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
       </div> : <div style={s.view}>
         <header style={s.header}>
           <button type="button" style={s.iconButton} onClick={() => { if (thread) setThread(null); else { clearAttachment(); setSelected(null); } }} aria-label={thread ? 'Voltar à conversa' : 'Voltar às conversas'}><ChevronLeft size={20} /></button>
-          <div style={s.selectedIdentity}><span style={s.avatar}>{selected.kind === 'team' ? <Users size={16} /> : selected.target.name?.[0]?.toUpperCase()}</span><span><strong style={s.selectedName}>{selected.target.name}</strong><small style={s.status}>{selected.kind === 'team' ? 'Conversa de equipe' : viewing ? 'Também está nesta conversa' : online ? 'Online agora' : 'Offline'}</small></span></div>
+          <div style={s.selectedIdentity}>{selected.kind === 'team' ? <span style={s.avatar}><Users size={16} /></span> : <UserAvatar user={selected.target} size={34} style={s.avatar} />}<span><strong style={s.selectedName}>{selected.target.name}</strong><small style={s.status}>{selected.kind === 'team' ? 'Conversa de equipe' : viewing ? 'Também está nesta conversa' : online ? 'Online agora' : 'Offline'}</small></span></div>
           {!isMobile ? <button type="button" style={s.iconButton} onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Restaurar tamanho do chat' : 'Expandir chat'} title={expanded ? 'Restaurar tamanho' : 'Expandir'}>{expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button> : null}
           <button type="button" style={s.iconButton} onClick={onClose} aria-label="Fechar chat interno"><X size={20} /></button>
         </header>
@@ -624,7 +625,7 @@ export default function InternalChatDrawer({ isOpen, onClose, socket, incomingMe
             <button type="button" role="tab" aria-selected={messageType === 'note'} disabled={advancedAvailable === false} style={{ ...s.typeTab, ...(messageType === 'note' ? s.noteTabActive : {}) }} onClick={() => setMessageType('note')}>Nota interna</button>
           </div>
           <form onSubmit={handleSend} style={s.composer}>
-            {mentionOptions.length ? <div style={s.mentionMenu} role="listbox" aria-label="Sugestões de menção">{mentionOptions.map((conversation) => <button key={conversation.key} type="button" style={s.mentionOption} onClick={() => selectMention(conversation)}><span style={s.mentionAvatar}>{conversation.kind === 'team' ? <Users size={13} /> : conversation.target.name?.[0]?.toUpperCase()}</span><span><strong>{conversation.target.name}</strong><small>{conversation.kind === 'team' ? 'Equipe' : 'Pessoa'}</small></span></button>)}</div> : null}
+            {mentionOptions.length ? <div style={s.mentionMenu} role="listbox" aria-label="Sugestões de menção">{mentionOptions.map((conversation) => <button key={conversation.key} type="button" style={s.mentionOption} onClick={() => selectMention(conversation)}>{conversation.kind === 'team' ? <span style={s.mentionAvatar}><Users size={13} /></span> : <UserAvatar user={conversation.target} size={26} style={s.mentionAvatar} />}<span><strong>{conversation.target.name}</strong><small>{conversation.kind === 'team' ? 'Equipe' : 'Pessoa'}</small></span></button>)}</div> : null}
             <input ref={fileInputRef} type="file" accept={ATTACHMENT_ACCEPT} style={s.hiddenInput} onChange={(event) => chooseAttachment(event.target.files?.[0])} />
             <button type="button" style={s.emojiButton} onClick={() => fileInputRef.current?.click()} disabled={sending || advancedAvailable === false} aria-label="Anexar arquivo" title="Anexar arquivo de até 20 MB"><Paperclip size={18} /></button>
             <div style={s.emojiWrap}>

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BadgeCheck, Pencil, Plus, Search, Shield, Trash2, UserRound, UserX, X } from 'lucide-react';
 import { toast } from '../utils/toast';
-import api, { getUsers, createUser, updateUser, deleteUser, getTeams } from '../services/api';
+import api, { getUsers, createUser, updateUser, deleteUser, getTeams, uploadUserAvatar, removeUserAvatar } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
 import { ACCESS_PROFILES, PERMISSION_GROUPS, PERMISSION_LABELS } from '../auth/permissions';
+import UserAvatar from '../components/ui/UserAvatar';
 
 const EMPTY_FORM = { name: '', email: '', password: '', role: 'agent', active: true, firebirdSupportName: '', accessProfile: 'agent', permissions: ACCESS_PROFILES.agent.permissions, homePage: '/inbox' };
 const HOME_PAGES = [
@@ -26,6 +27,7 @@ export default function Users() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useEffect(() => {
     load();
@@ -53,7 +55,7 @@ export default function Users() {
     if (user) {
       setModal(user);
       const accessProfile = user.accessProfile || (user.role === 'admin' ? 'admin' : 'agent');
-      setForm({ name: user.name, email: user.email, password: '', role: user.role, active: user.active, firebirdSupportName: user.firebirdSupportName || '', accessProfile, permissions: Array.isArray(user.permissions) ? user.permissions : ACCESS_PROFILES[accessProfile]?.permissions || [], homePage: user.homePage || ACCESS_PROFILES[accessProfile]?.homePage || '/inbox' });
+      setForm({ name: user.name, email: user.email, password: '', avatarUrl: user.avatarUrl || '', role: user.role, active: user.active, firebirdSupportName: user.firebirdSupportName || '', accessProfile, permissions: Array.isArray(user.permissions) ? user.permissions : ACCESS_PROFILES[accessProfile]?.permissions || [], homePage: user.homePage || ACCESS_PROFILES[accessProfile]?.homePage || '/inbox' });
       return;
     }
 
@@ -118,6 +120,43 @@ export default function Users() {
       toast.error('Não foi possível atualizar o status do usuário.');
     } finally {
       setPendingId(null);
+    }
+  }
+
+  async function handleUserAvatarUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || modal === 'new') {
+      if (file && modal === 'new') toast.info('Salve o usuário antes de adicionar uma foto.');
+      return;
+    }
+    setAvatarUploading(true);
+    try {
+      const { data } = await uploadUserAvatar(modal.id, file);
+      setForm((current) => ({ ...current, avatarUrl: data.avatarUrl || '' }));
+      setUsers((current) => current.map((user) => user.id === modal.id ? { ...user, avatarUrl: data.avatarUrl || '' } : user));
+      setModal((current) => (current && current !== 'new' ? { ...current, avatarUrl: data.avatarUrl || '' } : current));
+      toast.success('Foto do usuário atualizada.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível atualizar a foto do usuário.');
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
+  async function handleUserAvatarRemove() {
+    if (avatarUploading || modal === 'new') return;
+    setAvatarUploading(true);
+    try {
+      const { data } = await removeUserAvatar(modal.id);
+      setForm((current) => ({ ...current, avatarUrl: '' }));
+      setUsers((current) => current.map((user) => user.id === modal.id ? { ...user, avatarUrl: '' } : user));
+      setModal((current) => (current && current !== 'new' ? { ...current, avatarUrl: '' } : current));
+      toast.success('Foto do usuário removida.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível remover a foto do usuário.');
+    } finally {
+      setAvatarUploading(false);
     }
   }
 
@@ -206,7 +245,7 @@ export default function Users() {
                   <tr key={user.id} style={s.tr}>
                     <td style={s.td}>
                       <div style={s.nameCell}>
-                        <div style={s.avatar}>{user.name[0].toUpperCase()}</div>
+                        <UserAvatar user={user} size={34} style={s.avatar} />
                         <div style={s.nameInfo}>
                           <div style={s.nameText} title={user.name}>{user.name}</div>
                           <div style={s.metaText}>{user.active ? 'Disponível' : 'Arquivado'}</div>
@@ -280,6 +319,21 @@ export default function Users() {
             </div>
 
             <form onSubmit={handleSave} style={s.form}>
+              <div style={s.profilePhotoCard}>
+                <UserAvatar user={form} name={form.name} size={60} style={s.profilePhoto} />
+                <div style={s.profilePhotoInfo}>
+                  <strong>Foto do perfil</strong>
+                  <span style={s.metaText}>JPG, PNG ou WebP, até 2 MB.</span>
+                  <div style={s.profilePhotoActions}>
+                    <label htmlFor="managed-user-avatar-upload" style={{ ...s.actionBtn, width: 'auto', cursor: avatarUploading || modal === 'new' ? 'not-allowed' : 'pointer', opacity: avatarUploading || modal === 'new' ? 0.65 : 1 }}>
+                      {avatarUploading ? 'Enviando...' : 'Escolher foto'}
+                    </label>
+                    <input id="managed-user-avatar-upload" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleUserAvatarUpload} disabled={avatarUploading || modal === 'new'} style={{ display: 'none' }} />
+                    {form.avatarUrl ? <button type="button" style={{ ...s.actionBtn, ...s.actionDanger, width: 'auto' }} onClick={handleUserAvatarRemove} disabled={avatarUploading}>Remover</button> : null}
+                  </div>
+                </div>
+              </div>
+
               <div style={s.formGrid}>
                 <div style={s.field}>
                   <label style={s.label}>Nome completo</label>
@@ -509,6 +563,10 @@ const s = {
     minWidth: 0,
     maxWidth: '14rem',
   },
+  profilePhotoCard: { display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.9rem 1rem', borderRadius: '14px', background: 'var(--bg-base)', border: '1px solid var(--border-color)' },
+  profilePhoto: { background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '50%' },
+  profilePhotoInfo: { minWidth: 0, display: 'grid', gap: '.3rem' },
+  profilePhotoActions: { display: 'flex', flexWrap: 'wrap', gap: '.5rem', marginTop: '.2rem' },
   avatar: {
     width: '38px',
     height: '38px',

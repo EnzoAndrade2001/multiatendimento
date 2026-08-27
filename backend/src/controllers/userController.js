@@ -5,6 +5,7 @@ const { normalizeProfile, normalizePermissionList, resolveUserAccess, resolveHom
 const publicUserSelect = {
   id: true, name: true, email: true, role: true, active: true, createdAt: true,
   firebirdSupportName: true, accessProfile: true, permissions: true, homePage: true,
+  avatarUrl: true,
 };
 
 function serializeUser(user) {

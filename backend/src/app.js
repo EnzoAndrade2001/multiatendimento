@@ -92,6 +92,7 @@ const { uploadsPath } = require('./utils/uploads');
 // Arquivos públicos não sensíveis (ex.: logotipo da empresa) continuam em /uploads.
 app.use('/uploads/media', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
 app.use('/uploads/knowledge', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
+app.use('/uploads/user-avatars', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
 app.use('/uploads', express.static(uploadsPath, {
   setHeaders(res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -124,6 +125,7 @@ app.use('/api/integrations/firebird', firebirdSyncRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/privacy', privacyRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/user-avatars', require('./routes/userAvatars'));
 
 const jwt = require('jsonwebtoken');
 const prisma = require('./lib/prisma');

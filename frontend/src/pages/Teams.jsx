@@ -4,6 +4,7 @@ import { toast } from '../utils/toast';
 import { getTeams, createTeam, updateTeam, deleteTeam, getUsers, addTeamMember, removeTeamMember } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
+import UserAvatar from '../components/ui/UserAvatar';
 
 export default function Teams() {
   const [teams, setTeams] = useState([]);
@@ -162,7 +163,7 @@ export default function Teams() {
                     const isRemoving = removingMemberKey === memberKey;
                     return (
                       <div key={member.userId} style={s.memberRow}>
-                        <div style={s.avatarSmall}>{member.user.name[0]}</div>
+                        <UserAvatar user={member.user} size={28} style={s.avatarSmall} />
                         <span style={s.memberName} title={member.user.name}>{member.user.name}</span>
                         <button
                           style={{ ...s.removeBtn, opacity: isRemoving ? 0.5 : 1 }}

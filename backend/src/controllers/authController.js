@@ -38,6 +38,7 @@ async function login(req, res) {
     token,
     user: {
       id: user.id, name: user.name, email: user.email, role: user.role,
+      avatarUrl: user.avatarUrl,
       accessProfile: access.profile, permissions: access.permissions,
       homePage: resolveHomePage(user.homePage, access),
     },
@@ -50,6 +51,7 @@ async function me(req, res) {
     where: { id: req.user.userId },
     select: {
       id: true, name: true, email: true, role: true, tenantId: true,
+      avatarUrl: true,
       accessProfile: true, permissions: true, homePage: true, active: true,
       tenant: {
         select: { id: true, name: true, slug: true, primaryColor: true, logoUrl: true }

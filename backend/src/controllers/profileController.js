@@ -17,7 +17,7 @@ async function updateProfile(req, res) {
   const user = await prisma.user.update({
     where: { id: userId },
     data,
-    select: { id: true, name: true, email: true, role: true },
+    select: { id: true, name: true, email: true, role: true, avatarUrl: true },
   });
 
   res.json(user);

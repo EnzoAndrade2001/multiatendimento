@@ -6,6 +6,8 @@ import {
   getInstances,
   saveSettings,
   updateProfile,
+  uploadProfileAvatar,
+  removeProfileAvatar,
   getMe,
   getQuickResponses,
   createQuickResponse,
@@ -28,6 +30,7 @@ import Users from './Users';
 import Teams from './Teams';
 import ModalShell from '../components/ui/ModalShell';
 import { usePermissions } from '../auth/PermissionContext';
+import UserAvatar from '../components/ui/UserAvatar';
 
 const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'iLux Sentinela', 'Minha conta', 'Agente Local'];
 const TAB_PERMISSIONS = [
@@ -112,7 +115,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [, setSaved] = useState(false);
   const [, setSaveError] = useState('');
-  const [profile, setProfile] = useState({ name: '', email: '', password: '' });
+  const [profile, setProfile] = useState({ name: '', email: '', password: '', avatarUrl: '' });
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [quickResponses, setQuickResponses] = useState([]);
   const [newQuick, setNewQuick] = useState({ shortcut: '', message: '' });
@@ -160,7 +164,7 @@ export default function Settings() {
     }
 
     if (meResult.status === 'fulfilled') {
-      setProfile({ name: meResult.value.data.name, email: meResult.value.data.email, password: '' });
+      setProfile({ name: meResult.value.data.name, email: meResult.value.data.email, password: '', avatarUrl: meResult.value.data.avatarUrl || '' });
       setTenant(meResult.value.data.tenant);
     }
 
@@ -278,13 +282,47 @@ export default function Settings() {
     e.preventDefault();
     setSaving(true);
     try {
-      await updateProfile(profile);
+      const { data } = await updateProfile(profile);
+      setProfile((current) => ({ ...current, ...data, password: '' }));
+      window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: data }));
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 2500);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao salvar perfil');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleProfileAvatarUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setAvatarUploading(true);
+    try {
+      const { data } = await uploadProfileAvatar(file);
+      setProfile((current) => ({ ...current, avatarUrl: data.avatarUrl || '' }));
+      window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: data }));
+      toast.success('Foto do perfil atualizada.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível atualizar a foto do perfil.');
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
+  async function handleProfileAvatarRemove() {
+    if (avatarUploading) return;
+    setAvatarUploading(true);
+    try {
+      const { data } = await removeProfileAvatar();
+      setProfile((current) => ({ ...current, avatarUrl: '' }));
+      window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: data }));
+      toast.success('Foto do perfil removida.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível remover a foto do perfil.');
+    } finally {
+      setAvatarUploading(false);
     }
   }
 
@@ -1204,6 +1242,21 @@ export default function Settings() {
           </div>
 
           <div style={s.form}>
+            <div style={s.profilePhotoCard}>
+              <UserAvatar user={profile} name={profile.name} size={76} style={s.profilePhoto} />
+              <div style={s.profilePhotoInfo}>
+                <strong style={s.profilePhotoTitle}>Foto do perfil</strong>
+                <p style={s.hint}>JPG, PNG ou WebP, até 2 MB. Ela será exibida no menu, na equipe e no chat interno.</p>
+                <div style={s.profilePhotoActions}>
+                  <label htmlFor="profile-avatar-upload" style={{ ...s.iconButton, cursor: avatarUploading ? 'not-allowed' : 'pointer', opacity: avatarUploading ? 0.65 : 1 }}>
+                    {avatarUploading ? 'Enviando...' : 'Escolher foto'}
+                  </label>
+                  <input id="profile-avatar-upload" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleProfileAvatarUpload} disabled={avatarUploading} style={{ display: 'none' }} />
+                  {profile.avatarUrl ? <button type="button" style={{ ...s.iconButton, color: 'var(--danger-text)', borderColor: 'var(--danger-border)' }} onClick={handleProfileAvatarRemove} disabled={avatarUploading}>Remover</button> : null}
+                </div>
+              </div>
+            </div>
+
             <div style={s.field}>
               <label style={s.label}>Seu nome</label>
               <input style={s.input} value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
@@ -1651,6 +1704,11 @@ const s = {
     resize: 'vertical',
     whiteSpace: 'pre',
   },
+  profilePhotoCard: { display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem 1.1rem', borderRadius: '14px', background: 'var(--bg-base)', border: '1px solid var(--border-color)' },
+  profilePhoto: { background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '50%', fontSize: '1.55rem' },
+  profilePhotoInfo: { minWidth: 0, display: 'grid', gap: '.35rem' },
+  profilePhotoTitle: { color: 'var(--text-main)', fontSize: 'var(--text-md)' },
+  profilePhotoActions: { display: 'flex', flexWrap: 'wrap', gap: '.55rem', marginTop: '.25rem' },
   saveBtn: {
     background: 'var(--accent)',
     color: 'var(--text-inverse)',

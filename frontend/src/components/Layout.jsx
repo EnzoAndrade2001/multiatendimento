@@ -27,6 +27,7 @@ import {
   BarChart2,
 } from 'lucide-react';
 import { getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
+import UserAvatar from './ui/UserAvatar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ToastContainer from './ToastContainer';
 import InternalChatDrawer from './InternalChatDrawer';
@@ -121,6 +122,11 @@ export default function Layout() {
         setTenant(res.data.tenant);
       })
       .catch(() => {});
+
+    const onProfileUpdated = (event) => {
+      if (event.detail) setCurrentUser((previous) => ({ ...previous, ...event.detail }));
+    };
+    window.addEventListener('user-profile-updated', onProfileUpdated);
 
     if (canUseInternalChat) {
       getInternalConversations()
@@ -234,6 +240,7 @@ export default function Layout() {
 
     return () => {
       window.clearTimeout(notificationTimerRef.current);
+      window.removeEventListener('user-profile-updated', onProfileUpdated);
       setInternalSocket(null);
       socket.disconnect();
     };
@@ -431,13 +438,13 @@ export default function Layout() {
           {currentUser?.name ? (
             <div ref={userMenuRef} style={styles.userMenuWrap}>
               <button type="button" className="header-action-button" style={{ ...styles.userIdentity, ...(isMobile ? styles.userIdentityMobile : {}) }} onClick={() => setUserMenuOpen((open) => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" title={`Usuário conectado: ${currentUser.name}`}>
-                <span style={styles.userAvatar}>{currentUser.name.trim().charAt(0).toUpperCase()}</span>
+                <UserAvatar user={currentUser} size={30} style={styles.userAvatar} />
                 {!isMobile ? <span style={styles.userName}>{currentUser.name}</span> : null}
                 {!isMobile ? <ChevronDown size={14} /> : null}
               </button>
               {userMenuOpen ? <div style={styles.userMenu} role="menu">
                 <div style={styles.userMenuHeader}>
-                  <span style={styles.userMenuAvatar}>{currentUser.name.trim().charAt(0).toUpperCase()}</span>
+                  <UserAvatar user={currentUser} size={38} style={styles.userMenuAvatar} />
                   <span style={styles.userMenuProfile}><strong>{currentUser.name}</strong><small>{currentUser.email || 'Usuário do sistema'}</small></span>
                 </div>
                 <button type="button" className="user-menu-item" role="menuitem" style={styles.userMenuItem} onClick={() => { setUserMenuOpen(false); navigate('/settings?tab=account'); }}><Settings size={17} /><span>Minha conta</span></button>

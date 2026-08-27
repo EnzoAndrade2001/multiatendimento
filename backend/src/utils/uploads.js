@@ -21,8 +21,17 @@ if (!fs.existsSync(knowledgePath)) {
   fs.mkdirSync(knowledgePath, { recursive: true });
 }
 
+// Fotos de usuários ficam no volume persistente de uploads, separadas dos
+// anexos de atendimento. O diretório é servido somente pela rota tenant-aware
+// /api/user-avatars/:filename.
+const userAvatarPath = path.join(uploadsPath, 'user-avatars');
+if (!fs.existsSync(userAvatarPath)) {
+  fs.mkdirSync(userAvatarPath, { recursive: true });
+}
+
 module.exports = {
   uploadsPath,
   mediaPath,
   knowledgePath,
+  userAvatarPath,
 };

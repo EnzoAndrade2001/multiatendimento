@@ -8,7 +8,7 @@ const { recordPrivacyAudit } = require('../services/privacyAuditService');
 const { fingerprint } = require('../utils/privacy');
 
 const MESSAGE_INCLUDE = {
-  sender: { select: { id: true, name: true } },
+  sender: { select: { id: true, name: true, avatarUrl: true } },
   replyTo: { select: { id: true, body: true, senderId: true, type: true, attachmentName: true } },
   reactions: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
   reads: { select: { userId: true, readAt: true } },
@@ -104,7 +104,7 @@ async function resolveConversation(req, key) {
     if (parsed.id === req.user.userId) return null;
     const user = await prisma.user.findFirst({
       where: { id: parsed.id, tenantId: req.user.tenantId, active: true },
-      select: { id: true, name: true, role: true },
+      select: { id: true, name: true, role: true, avatarUrl: true },
     });
     return user ? { ...parsed, target: user } : null;
   }
@@ -148,7 +148,7 @@ async function listConversations(req, res) {
   const tenantId = req.user.tenantId;
   const userId = req.user.userId;
   const [users, teams, states, directMessages] = await Promise.all([
-    prisma.user.findMany({ where: { tenantId, active: true, id: { not: userId } }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } }),
+    prisma.user.findMany({ where: { tenantId, active: true, id: { not: userId } }, select: { id: true, name: true, role: true, avatarUrl: true }, orderBy: { name: 'asc' } }),
     prisma.team.findMany({
       where: { tenantId, ...(hasPermission(req.user, 'teams.manage') ? {} : { members: { some: { userId } } }) },
       select: { id: true, name: true }, orderBy: { name: 'asc' },
