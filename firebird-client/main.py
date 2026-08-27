@@ -709,6 +709,21 @@ class CRMClient:
             # de conveniencia na tela do CRM, o log local continua valendo.
             logging.warning("Falha ao espelhar log de teste no CRM: %s", exc)
 
+
+# IXLEQUIPAMENTO.SEQCONTRATO nao e limpo quando a maquina sai do contrato e
+# TFINATIVO nao e usado nesta base (fica sempre 'N'). O vinculo real esta em
+# IXLCONTRATOSIT: uma linha por equipamento que passou pelo contrato, com
+# DTINSTALACAOFIN = fim do contrato enquanto instalado e uma data real no
+# passado quando o equipamento foi removido/trocado. Essas duas colunas dizem
+# se o equipamento ainda esta instalado em algum contrato.
+_EQUIPMENT_CONTRACT_STATUS_COLS = """
+                (select count(*) from IXLCONTRATOSIT it
+                   where it.SEQCONTRATO = eq.SEQCONTRATO and it.CDEQUIPAMENTO = eq.CDEQUIPAMENTO
+                     and (it.DTINSTALACAOFIN is null or it.DTINSTALACAOFIN >= CURRENT_DATE)) as CONTRATO_INSTAL_ATIVA,
+                (select count(*) from IXLCONTRATOSIT it
+                   where it.SEQCONTRATO = eq.SEQCONTRATO and it.CDEQUIPAMENTO = eq.CDEQUIPAMENTO) as CONTRATO_INSTAL_TOTAL"""
+
+
 class FirebirdRepository:
     def __init__(self, config: AppConfig):
         self.config = config
@@ -981,13 +996,14 @@ class FirebirdRepository:
         yield from self._rows(sql, (cursor,))
 
     def fetch_equipments(self, cursor: int) -> Iterator[dict[str, Any]]:
-        sql = """
+        sql = f"""
             select
                 eq.CDEQUIPAMENTO, eq.CDCLIENTE, eq.CDPRODUTO, eq.SERIE, eq.MODELO, eq.FABRICANTE,
                 eq.SEQCONTRATO, eq.PATRIMONIO, eq.TFINATIVO,
                 eq.ENDERECO, eq.NUM, eq.BAIRRO, eq.COMPLEMENTO, eq.LOCALINSTAL, eq.DEPARTAMENTO, eq.CONTATO, eq.FONE, eq.DDD, eq.CIDADE, eq.UF,
                 eq.INCLUSAO, eq.ATUALIZADO,
-                p.NMPRODUTO as PRODUCT_NAME
+                p.NMPRODUTO as PRODUCT_NAME,
+{_EQUIPMENT_CONTRACT_STATUS_COLS}
             from IXLEQUIPAMENTO eq
             left join IPRODUTO p on p.CDPRODUTO = eq.CDPRODUTO
             where eq.CDEQUIPAMENTO > ?
@@ -1000,20 +1016,28 @@ class FirebirdRepository:
         trocado), independente de quando foram cadastrados. O cursor normal de
         `fetch_equipments` so avanca (CDEQUIPAMENTO > cursor) e nunca revisita
         um equipamento ja sincronizado, entao uma edicao feita anos depois do
-        cadastro original nunca seria enviada de novo sem isso."""
+        cadastro original nunca seria enviada de novo sem isso. Com limite alto
+        cobre a frota inteira, corrigindo tambem o vinculo de contrato de
+        maquinas trocadas que nunca mais teriam ATUALIZADO no topo."""
         sql = f"""
             select first {max(1, int(limit))}
                 eq.CDEQUIPAMENTO, eq.CDCLIENTE, eq.CDPRODUTO, eq.SERIE, eq.MODELO, eq.FABRICANTE,
                 eq.SEQCONTRATO, eq.PATRIMONIO, eq.TFINATIVO,
                 eq.ENDERECO, eq.NUM, eq.BAIRRO, eq.COMPLEMENTO, eq.LOCALINSTAL, eq.DEPARTAMENTO, eq.CONTATO, eq.FONE, eq.DDD, eq.CIDADE, eq.UF,
                 eq.INCLUSAO, eq.ATUALIZADO,
-                p.NMPRODUTO as PRODUCT_NAME
+                p.NMPRODUTO as PRODUCT_NAME,
+{_EQUIPMENT_CONTRACT_STATUS_COLS}
             from IXLEQUIPAMENTO eq
             left join IPRODUTO p on p.CDPRODUTO = eq.CDPRODUTO
             where eq.ATUALIZADO is not null
             order by eq.ATUALIZADO desc
         """
         yield from self._rows(sql, ())
+
+    def fetch_equipment_ids(self) -> Iterator[dict[str, Any]]:
+        """Lista completa e enxuta de CDEQUIPAMENTO para o snapshot de
+        reconciliacao (desativa no CRM o que sumiu do iLux)."""
+        yield from self._rows("select CDEQUIPAMENTO from IXLEQUIPAMENTO", ())
 
     def fetch_contracts(self, cursor: int) -> Iterator[dict[str, Any]]:
         sql = """
@@ -2074,6 +2098,17 @@ def normalize_equipment(record: dict[str, Any]) -> dict[str, Any]:
 
     address_str = " - ".join(addr_parts) if addr_parts else None
 
+    # Vinculo de contrato pelo historico de instalacao (IXLCONTRATOSIT), nao pelo
+    # IXLEQUIPAMENTO.SEQCONTRATO (que fica preso ao ultimo contrato). Se o
+    # equipamento ja saiu de todos os contratos por onde passou, ele nao esta
+    # mais vinculado nem ativo -- TFINATIVO nao e confiavel nesta base.
+    seq_contrato = first_non_empty(record.get("seqcontrato"))
+    instal_ativa = int(record.get("contrato_instal_ativa") or 0)
+    instal_total = int(record.get("contrato_instal_total") or 0)
+    left_contract = bool(seq_contrato) and instal_total > 0 and instal_ativa == 0
+    contract_external_id = None if (not seq_contrato or left_contract) else seq_contrato
+    tf_inativo = str(record.get("tfinativo") or "").strip().upper() == "S"
+
     return {
         "externalId": external_id,
         "clientExternalId": client_external_id,
@@ -2090,9 +2125,9 @@ def normalize_equipment(record: dict[str, Any]) -> dict[str, Any]:
         "state": first_non_empty(record.get("uf")),
         "contact": first_non_empty(record.get("contato")),
         "phone": compose_brazil_phone(record.get("ddd"), record.get("fone")) or normalize_phone(record.get("fone")),
-        "contractExternalId": first_non_empty(record.get("seqcontrato")),
+        "contractExternalId": contract_external_id,
         "assetTag": first_non_empty(record.get("patrimonio")),
-        "inactive": first_non_empty(record.get("tfinativo")),
+        "inactive": bool(tf_inativo or left_contract),
         "updatedAt": parse_firebird_timestamp(record.get("atualizado")),
         "inclusionAt": parse_firebird_timestamp(record.get("inclusao")),
         "raw": {k: json_safe(v) for k, v in record.items()},
@@ -2435,8 +2470,22 @@ def sync_crm360_details(
             crm, "equipmentMeters", repo.fetch_recent_equipment_meters(1000), normalize_equipment_meter, batch_size
         )
         recent_equipments, _ = push_normalized_batches(
-            crm, "equipments", repo.fetch_recently_updated_equipments(1000), normalize_equipment, batch_size
+            crm, "equipments", repo.fetch_recently_updated_equipments(5000), normalize_equipment, batch_size
         )
+        equipment_ids = sorted({
+            int(row["cdequipamento"])
+            for row in repo.fetch_equipment_ids()
+            if row.get("cdequipamento") is not None
+        })
+        if equipment_ids:
+            crm.push("equipmentsSnapshot", [{
+                "completeWindow": True,
+                "count": len(equipment_ids),
+                "minExternalId": equipment_ids[0],
+                "maxExternalId": equipment_ids[-1],
+                "externalIds": [str(value) for value in equipment_ids],
+                "capturedAt": datetime.now().isoformat(timespec="seconds"),
+            }])
         state.data["crm360_recent_refresh_at"] = datetime.now().isoformat(timespec="seconds")
         logging.info(
             "CRM 360: atualizados %s titulo(s), %s medidor(es) e %s equipamento(s) recentes",

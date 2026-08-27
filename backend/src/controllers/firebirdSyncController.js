@@ -10,6 +10,7 @@ const billingDocumentService = require('../services/billingDocumentService');
 const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
 
 const RECEIVABLE_SNAPSHOT_ENTITY = 'receivablesSnapshot';
+const EQUIPMENT_SNAPSHOT_ENTITY = 'equipmentsSnapshot';
 
 function pick(...values) {
   for (const value of values) {
@@ -18,6 +19,12 @@ function pick(...values) {
     if (text) return text;
   }
   return null;
+}
+
+// `pick` estringa tudo, entao um booleano `inactive` do agente chega como
+// 'true'/'false'; `tfinativo` legado chega como 'S'/'N'.
+function isInactiveFlag(value) {
+  return ['1', 'S', 'SIM', 'TRUE', 'Y', 'YES'].includes(String(value ?? '').trim().toUpperCase());
 }
 
 function normalizeDate(value) {
@@ -193,6 +200,44 @@ async function reconcileReceivablesSnapshot(tenantId, snapshot) {
   return missing.length;
 }
 
+// Desativa no CRM os equipamentos que o agente nao reporta mais dentro da janela
+// autoritativa (removidos de vez do iLux ou movidos para outro tenant). Nunca
+// apaga -- so vira isActive=false, reversivel no proximo sync.
+async function reconcileEquipmentsSnapshot(tenantId, snapshot) {
+  const externalIds = [...new Set((snapshot?.externalIds || []).map(String).filter((value) => /^\d+$/.test(value)))];
+  const minExternalId = Number(snapshot?.minExternalId);
+  const maxExternalId = Number(snapshot?.maxExternalId);
+  const declaredCount = Number(snapshot?.count);
+  if (!snapshot?.completeWindow || !externalIds.length
+    || !Number.isSafeInteger(minExternalId) || !Number.isSafeInteger(maxExternalId)
+    || minExternalId <= 0 || maxExternalId < minExternalId
+    || declaredCount !== externalIds.length) {
+    throw new Error('Snapshot de equipamentos invalido ou incompleto; reconciliacao ignorada por seguranca.');
+  }
+
+  const present = new Set(externalIds);
+  const cached = await prisma.crmEquipment.findMany({
+    where: { tenantId, externalSource: 'firebird', isActive: true },
+    select: { id: true, externalId: true },
+  });
+  const missingIds = cached
+    .filter((record) => {
+      const numericId = Number(record.externalId);
+      return Number.isSafeInteger(numericId)
+        && numericId >= minExternalId
+        && numericId <= maxExternalId
+        && !present.has(String(record.externalId));
+    })
+    .map((record) => record.id);
+  if (missingIds.length) {
+    await prisma.crmEquipment.updateMany({
+      where: { id: { in: missingIds } },
+      data: { isActive: false },
+    });
+  }
+  return missingIds.length;
+}
+
 async function findOrCreateContact(tenant, instance, data) {
   const externalId = pick(data.externalId, data.cdCliente, data.clientExternalId, data.clientId);
   const externalSource = 'firebird';
@@ -336,8 +381,12 @@ async function upsertCrmEquipment(tenant, data) {
     city: pick(data.city, data.cidade),
     state: pick(data.state, data.uf),
     phone: normalizePhone(pick(data.phone, data.fone, data.celular, data.whatsapp), null),
-    contractExternalId: pick(data.contractExternalId, data.seqContrato, data.seqcontrato),
-    isActive: !['S', 'SIM', 'TRUE', '1'].includes(String(pick(data.inactive, data.tfinativo) || '').toUpperCase()),
+    // O agente ja resolve o vinculo real pelo historico de instalacao do
+    // contrato (IXLCONTRATOSIT); quando a maquina saiu do contrato ele manda
+    // null/inactive. `?? null` garante que o vinculo antigo seja limpo no
+    // update (pick devolveria undefined e o Prisma manteria o valor velho).
+    contractExternalId: pick(data.contractExternalId, data.seqContrato, data.seqcontrato) ?? null,
+    isActive: !isInactiveFlag(pick(data.inactive, data.tfinativo)),
     raw: data.raw || data,
   };
 
@@ -521,6 +570,11 @@ async function pushBatch(req, res) {
       try {
         if (entity === RECEIVABLE_SNAPSHOT_ENTITY) {
           stats.reconciled += await reconcileReceivablesSnapshot(tenant.id, record);
+          stats.stored += 1;
+          continue;
+        }
+        if (entity === EQUIPMENT_SNAPSHOT_ENTITY) {
+          stats.reconciled += await reconcileEquipmentsSnapshot(tenant.id, record);
           stats.stored += 1;
           continue;
         }
@@ -1203,6 +1257,7 @@ async function agentPing(req, res) {
 module.exports = {
   pushBatch,
   reconcileReceivablesSnapshot,
+  reconcileEquipmentsSnapshot,
   getPendingCommands,
   commandCallback,
   agentPing,

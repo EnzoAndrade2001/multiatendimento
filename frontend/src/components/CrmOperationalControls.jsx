@@ -54,13 +54,10 @@ export function CrmContactActions({ contact, quickActions, onOpenConversation })
 }
 
 export function isContractedEquipment(equipment) {
-  return Boolean(
-    equipment?.contractExternalId
-    || equipment?.contractId
-    || equipment?.raw?.contractExternalId
-    || equipment?.raw?.seqixlcontratos
-    || equipment?.raw?.seqcontrato
-  );
+  // Só o vínculo já resolvido no backend (contractExternalId). Os campos crus
+  // (raw.seqcontrato / raw.seqixlcontratos) não são limpos no iLux quando a
+  // máquina sai do contrato e inflavam "Em contrato" com equipamentos trocados.
+  return Boolean(equipment?.contractExternalId || equipment?.contractId);
 }
 
 export function filterCrmEquipments(equipments, statusFilter) {

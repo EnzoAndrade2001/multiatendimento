@@ -24,7 +24,8 @@ A integração é híbrida e assíncrona, composta por três partes principais:
 
 3. **Banco de Dados Firebird (ERP ILUX):**
    - Tabela `ICLIENTES`: Cadastro de clientes.
-   - Tabela `IXLEQUIPAMENTO`: Cadastro de equipamentos.
+   - Tabela `IXLEQUIPAMENTO`: Cadastro de equipamentos. `SEQCONTRATO`/`TFINATIVO` não são confiáveis (o SEQCONTRATO fica preso ao último contrato e o TFINATIVO nunca é usado nesta base).
+   - Tabela `IXLCONTRATOSIT`: Histórico de instalação equipamento×contrato. `DTINSTALACAOFIN` no passado = equipamento removido/trocado; é a fonte real de "equipamento ativo/em contrato".
    - Tabela `IXLOS`: Cadastro das ordens de serviço.
    - Tabela `IXLCONTROLESEQ`: Tabela que armazena os sequenciais das tabelas (geradores manuais).
    - Tabela `IXLOSDEFEITOTP`: Tabela de tipos de defeito cadastrados no ERP.
