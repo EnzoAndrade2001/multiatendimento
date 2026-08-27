@@ -82,6 +82,26 @@ test('auditoria registra modo e publico usados pela resposta', () => {
   assert.match(source, /actorTechnicalContactId/);
 });
 
+test('tecnico cadastrado com o 9o digito casa com mensagem sem o 9 (e vice-versa)', { concurrency: false }, async () => {
+  const previousTechnicalFindMany = prisma.technicalContact.findMany;
+  technicalAssistantService.clearActorCache();
+  // Cadastrado COM o 9; o WhatsApp entrega SEM o 9.
+  prisma.technicalContact.findMany = async () => [{
+    id: 'tc-9', name: 'Diego', phone: '5551986876737', firebirdSupportName: 'DIEGO',
+  }];
+  try {
+    const semNove = await technicalAssistantService.resolveWhatsAppActor({ tenantId: 'tenant-9', phone: '555186876737' });
+    assert.equal(semNove?.type, 'TECHNICIAN');
+    assert.equal(semNove?.technicalContactId, 'tc-9');
+    technicalAssistantService.clearActorCache();
+    const comNove = await technicalAssistantService.resolveWhatsAppActor({ tenantId: 'tenant-9', phone: '5551986876737@s.whatsapp.net' });
+    assert.equal(comNove?.type, 'TECHNICIAN');
+  } finally {
+    prisma.technicalContact.findMany = previousTechnicalFindMany;
+    technicalAssistantService.clearActorCache();
+  }
+});
+
 test('parseModeChoice so aceita escolha explicita do menu de modo', () => {
   assert.equal(technicalAssistantService.parseModeChoice('1'), 'TECHNICIAN');
   assert.equal(technicalAssistantService.parseModeChoice('1 - assistente'), 'TECHNICIAN');

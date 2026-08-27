@@ -51,10 +51,29 @@ function isTechnicianProfile(user) {
   return ['tecnico', 'technician'].includes(profile) || ['tecnico', 'technician'].includes(role);
 }
 
+// Celular BR: 55 + DD + (9 + 8 dígitos) OU (8 dígitos legado). O WhatsApp
+// entrega ora com ora sem o 9, e um técnico pode ter sido cadastrado de um
+// jeito e mandar mensagem do outro. Geramos as duas formas para o match não
+// depender disso.
+function brazilNinthDigitVariants(digits) {
+  const value = String(digits || '');
+  const match = value.match(/^55(\d{2})(\d{8,9})$/);
+  if (!match) return [value];
+  const [, area, local] = match;
+  const variants = new Set([value]);
+  if (local.length === 9 && local.startsWith('9')) variants.add(`55${area}${local.slice(1)}`);
+  if (local.length === 8) variants.add(`55${area}9${local}`);
+  return [...variants];
+}
+
 function normalizeCandidates(phone) {
-  return new Set(evolutionService.buildPhoneLookupCandidates(String(phone || ''))
-    .map((candidate) => evolutionService.normalizePhoneNumber(candidate))
-    .filter(Boolean));
+  const out = new Set();
+  for (const candidate of evolutionService.buildPhoneLookupCandidates(String(phone || ''))) {
+    const normalized = evolutionService.normalizePhoneNumber(candidate);
+    if (!normalized) continue;
+    for (const variant of brazilNinthDigitVariants(normalized)) out.add(variant);
+  }
+  return out;
 }
 
 function cacheKey(tenantId, phone) {
