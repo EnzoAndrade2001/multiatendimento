@@ -7,6 +7,8 @@ const {
 const ALLOWED_PERIOD_DAYS = [7, 30, 90];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FIREBIRD_STALE_AFTER_MS = 15 * 60 * 1000;
+const DASHBOARD_CACHE_TTL_MS = Math.max(5000, Number.parseInt(process.env.DASHBOARD_CACHE_TTL_MS, 10) || 30000);
+const dashboardCache = new Map();
 
 function resolvePeriodDays(raw) {
   const parsed = parseInt(raw, 10);
@@ -69,10 +71,16 @@ function messagesWithinSession(session, messages = []) {
 }
 
 function summarizeSessionOutcomes(sessions = [], messages = []) {
+  const messagesByTicket = new Map();
+  messages.forEach((message) => {
+    const rows = messagesByTicket.get(message.ticketId) || [];
+    rows.push(message);
+    messagesByTicket.set(message.ticketId, rows);
+  });
   let engagedSampleSize = 0;
   let retainedByIAEngaged = 0;
   sessions.forEach((session) => {
-    const scoped = messagesWithinSession(session, messages);
+    const scoped = messagesWithinSession(session, messagesByTicket.get(session.ticketId) || []);
     const engaged = scoped.some(isMeaningfulBotMessage);
     if (!engaged) return;
     engagedSampleSize += 1;
@@ -291,6 +299,12 @@ async function buildAgentBreakdown(tenantId, periodStart, activeAgents) {
 async function getStats(req, res) {
   const tenantId = req.user.tenantId;
   const periodDays = resolvePeriodDays(req.query.days);
+  const cacheKey = `${tenantId}:${periodDays}`;
+  const cached = dashboardCache.get(cacheKey);
+  const forceRefresh = ['1', 'true'].includes(String(req.query.refresh || '').toLowerCase());
+  if (!forceRefresh && cached && Date.now() - cached.storedAt < DASHBOARD_CACHE_TTL_MS) {
+    return res.json({ ...cached.payload, cache: { hit: true, ttlMs: DASHBOARD_CACHE_TTL_MS } });
+  }
   const generatedAt = new Date();
   const periodStart = new Date(generatedAt.getTime() - periodDays * DAY_MS);
 
@@ -375,7 +389,7 @@ async function getStats(req, res) {
   const totalResolved = resolvedSessions.length;
   const reconstructedSessions = resolvedSessions.filter((session) => session.reconstructed).length;
 
-  res.json({
+  const payload = {
     periodDays,
     generatedAt: generatedAt.toISOString(),
     health,
@@ -428,7 +442,10 @@ async function getStats(req, res) {
     agentBreakdown,
     dailyMessages: fillDailyMessages(dailyMessageRows, periodStart, generatedAt),
     ratingsDistribution: Object.keys(dist).map((rating) => ({ rating, count: dist[rating] })),
-  });
+    cache: { hit: false, ttlMs: DASHBOARD_CACHE_TTL_MS },
+  };
+  dashboardCache.set(cacheKey, { storedAt: Date.now(), payload });
+  res.json(payload);
 }
 
 module.exports = {

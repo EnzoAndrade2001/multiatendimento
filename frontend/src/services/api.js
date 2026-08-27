@@ -249,7 +249,9 @@ export const updateTag = (id, data) => api.patch(`/tags/${id}`, data);
 export const deleteTag = (id) => api.delete(`/tags/${id}`);
 
 // Dashboard
-export const getDashboardStats = (days) => api.get('/dashboard/stats', { params: days ? { days } : undefined });
+export const getDashboardStats = (days, refresh = false) => api.get('/dashboard/stats', {
+  params: { ...(days ? { days } : {}), ...(refresh ? { refresh: 1 } : {}) },
+});
 export const getRevenueStats = () => api.get('/revenue/stats');
 export const getRevenueBenchmark = (days) => api.get('/revenue/benchmark', { params: days ? { days } : undefined });
 export const getRevenueDetective = () => api.get('/revenue/detective');

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getDashboardStats } from '../services/api';
 import {
   Area,
@@ -24,22 +24,36 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [periodDays, setPeriodDays] = useState(30);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const periodCacheRef = useRef(new Map());
+  const latestRequestRef = useRef(0);
 
   useEffect(() => {
-    load(periodDays);
+    const cached = periodCacheRef.current.get(periodDays);
+    if (cached) {
+      setStats(cached);
+      setLastUpdatedAt(cached.generatedAt || new Date().toISOString());
+      load(periodDays, { silent: true });
+    } else {
+      load(periodDays, { silent: Boolean(stats) });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodDays]);
 
-  async function load(days, { silent = false } = {}) {
+  async function load(days, { silent = false, force = false } = {}) {
+    const requestId = latestRequestRef.current + 1;
+    latestRequestRef.current = requestId;
     if (silent) setRefreshing(true);
     else setLoading(true);
     try {
-      const { data } = await getDashboardStats(days);
+      const { data } = await getDashboardStats(days, force);
+      periodCacheRef.current.set(days, data);
+      if (requestId !== latestRequestRef.current) return;
       setStats(data);
       setLastUpdatedAt(data.generatedAt || new Date().toISOString());
     } catch (error) {
       console.error('Erro ao carregar dashboard:', error);
     } finally {
+      if (requestId !== latestRequestRef.current) return;
       if (silent) setRefreshing(false);
       else setLoading(false);
     }
@@ -97,7 +111,7 @@ export default function Dashboard() {
             <div style={{ ...s.statusBadge, ...healthStatus.badge }} title="Status calculado a partir das instâncias WhatsApp e da última sincronização do iLux">
               <span style={{ ...s.dot, background: healthStatus.color, boxShadow: `0 0 10px ${healthStatus.glow}` }} /> {healthStatus.label}
             </div>
-            <button type="button" style={s.refreshBtn} onClick={() => load(periodDays, { silent: true })} disabled={refreshing}>
+            <button type="button" style={s.refreshBtn} onClick={() => load(periodDays, { silent: true, force: true })} disabled={refreshing}>
               <RefreshCw size={15} style={refreshing ? { animation: 'dashboard-spin 0.9s linear infinite' } : undefined} />
               {refreshing ? 'Atualizando...' : 'Atualizar'}
             </button>
