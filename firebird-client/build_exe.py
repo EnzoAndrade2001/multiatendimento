@@ -12,6 +12,13 @@ PyInstaller.__main__.run([
     '--onefile',          # Pack everything into a single .exe
     '--hidden-import=main',
     '--hidden-import=financial_document_index',
+    # firebirdsql importa passlib.hash.des_crypt so dentro de get_crypt(), na
+    # hora de conectar no Firebird -- import tardio que o PyInstaller nao
+    # descobre sozinho. Sem isso o exe sobe mas todo connect() quebra com
+    # "No module named 'passlib'". O hidden-import poe passlib no grafo; o
+    # hook oficial (hook-passlib.py) puxa o resto.
+    '--hidden-import=passlib.hash',
+    '--exclude-module=passlib.tests',
     '--exclude-module=chardet',
     f'--add-data={customtkinter_folder};customtkinter/',
     '--clean'
