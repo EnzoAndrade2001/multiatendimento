@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { normalizeTagList } = require('../utils/tagUtils');
 const xlsx = require('xlsx');
 const evolutionService = require('../services/evolutionService');
 
@@ -104,7 +105,7 @@ async function updateContact(req, res) {
     where: { id },
     data: {
       ...(notes !== undefined && { notes }),
-      ...(tags !== undefined && { tags: typeof tags === 'string' ? tags : JSON.stringify(tags) }),
+      ...(tags !== undefined && { tags: JSON.stringify(normalizeTagList(tags)) }),
       ...(name !== undefined && { name }),
       ...(fantasyName !== undefined && { fantasyName: String(fantasyName) }),
       ...(phone !== undefined && { phone: normalizedPhone }),

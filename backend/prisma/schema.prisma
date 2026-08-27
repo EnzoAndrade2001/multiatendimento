@@ -20,6 +20,7 @@ model Tenant {
   createdAt                  DateTime                    @default(now())
   contacts                   Contact[]
   quickResponses             QuickResponse[]
+  quickResponseAudits        QuickResponseAudit[]
   scheduledMessages          ScheduledMessage[]
   internalMessages           InternalMessage[]
   teams                      Team[]
@@ -145,6 +146,7 @@ model User {
   internalConversationStates InternalConversationState[]
   campaigns                  Campaign[]
   quickResponses             QuickResponse[]             @relation("QuickResponseOwner")
+  quickResponseAudits        QuickResponseAudit[]
 
   @@unique([tenantId, email])
 }
@@ -427,7 +429,10 @@ model Tag {
   tenantId String
   name     String
   color    String @default("#D4AF37")
+  archivedAt DateTime?
   tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, archivedAt])
 }
 
 model Message {
@@ -469,16 +474,37 @@ model QuickResponse {
   usageCount  Int       @default(0)
   lastUsedAt  DateTime?
   isFavorite  Boolean   @default(false)
+  archivedAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @default(now()) @updatedAt
   tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner       User?     @relation("QuickResponseOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   team        Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  audits      QuickResponseAudit[]
 
   @@unique([tenantId, shortcut])
   @@index([tenantId, scope, category])
+  @@index([tenantId, archivedAt])
   @@index([ownerUserId])
   @@index([teamId])
+}
+
+model QuickResponseAudit {
+  id              String        @id @default(cuid())
+  tenantId        String
+  quickResponseId String?
+  actorUserId     String?
+  action          String
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  quickResponse QuickResponse?  @relation(fields: [quickResponseId], references: [id], onDelete: SetNull)
+  actor         User?           @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, quickResponseId, createdAt])
+  @@index([actorUserId])
 }
 
 model ScheduledMessage {

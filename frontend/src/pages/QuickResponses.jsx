@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Archive,
+  ArchiveRestore,
+  Copy,
   Eye,
   Globe2,
   MessageSquare,
@@ -10,7 +13,6 @@ import {
   Send,
   Star,
   Tag,
-  Trash2,
   UsersRound,
   X,
 } from 'lucide-react';
@@ -74,26 +76,33 @@ export default function QuickResponses() {
   const [form, setForm] = useState({ id: null, shortcut: '', message: '', category: 'GENERAL', scope: 'GLOBAL', teamId: '' });
   const [teams, setTeams] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  const [duplicatingId, setDuplicatingId] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedIds, setArchivedIds] = useState([]);
   const [pinned, setPinned] = useState(() => {
     try { return JSON.parse(localStorage.getItem('quick-response-pins') || '[]'); } catch { return []; }
   });
 
   useEffect(() => {
-    load();
     getTeams().then(({ data }) => setTeams(Array.isArray(data) ? data : data?.teams || [])).catch(() => setTeams([]));
   }, []);
+
+  useEffect(() => {
+    load(showArchived);
+  }, [showArchived]);
 
   useEffect(() => {
     try { localStorage.setItem('quick-response-pins', JSON.stringify(pinned)); } catch { /* storage bloqueado */ }
   }, [pinned]);
 
-  async function load() {
+  async function load(includeArchived = showArchived) {
     setLoading(true);
     try {
-      const { data } = await getQuickResponses();
+      const { data } = await getQuickResponses(includeArchived ? { includeArchived: 'true' } : {});
       const rows = Array.isArray(data) ? data : data?.responses || [];
-      setResponses(rows.map(normalize));
+      const normalized = rows.map(normalize);
+      setResponses(normalized);
+      setArchivedIds(normalized.filter((row) => row.archived || row.archivedAt).map((row) => row.id));
     } catch (error) {
       toast.error(error.response?.data?.error || 'Não foi possível carregar os modelos de mensagem.');
     } finally {
@@ -118,11 +127,12 @@ export default function QuickResponses() {
     if (saving) return;
     const shortcut = form.shortcut.trim().replace(/\s+/g, '-');
     if (!shortcut || !form.message.trim()) return toast.info('Informe o atalho e a mensagem completa.');
+    if (form.scope === 'TEAM' && !form.teamId) return toast.info('Selecione uma equipe para este modelo.');
     if (form.scope === 'TEAM' && !(form.teamId || teams[0]?.id)) return toast.info('Você precisa participar de uma equipe para usar o escopo de equipe.');
     setSaving(true);
     try {
       if (form.scope === 'TEAM' && !(form.teamId || teams[0]?.id)) return toast.info('Selecione a equipe que terá acesso ao modelo.');
-      const payload = { shortcut, message: form.message.trim(), category: form.category, scope: form.scope, ...(form.scope === 'TEAM' ? { teamId: form.teamId || teams[0].id } : {}) };
+      const payload = { shortcut, message: form.message.trim(), category: form.category, scope: form.scope, ...(form.scope === 'TEAM' ? { teamId: form.teamId } : {}) };
       if (form.id) {
         try {
           await updateQuickResponse(form.id, payload);
@@ -146,21 +156,34 @@ export default function QuickResponses() {
     }
   }
 
-  function handleDelete(item) {
-    if (deletingId) return;
-    toast.confirm(`Excluir o modelo "/${item.shortcut}"? Essa ação não pode ser desfeita.`, async () => {
-      setDeletingId(item.id);
-      try {
-        await deleteQuickResponse(item.id);
-        setPinned((items) => items.filter((id) => id !== item.id));
-        setResponses((items) => items.filter((row) => row.id !== item.id));
-        toast.success('Modelo excluído.');
-      } catch (error) {
-        toast.error(error.response?.data?.error || 'Não foi possível excluir o modelo.');
-      } finally {
-        setDeletingId(null);
-      }
-    });
+  async function handleDuplicate(item) {
+    if (duplicatingId) return;
+    if (item.scope === 'TEAM' && !item.teamId) return toast.info('O modelo não possui equipe vinculada e não pode ser duplicado neste escopo.');
+    const used = new Set(responses.map((row) => row.shortcut.toLowerCase()));
+    const base = item.shortcut.replace(/-copia(?:-\d+)?$/i, '');
+    let shortcut = `${base}-copia`;
+    let suffix = 2;
+    while (used.has(shortcut.toLowerCase())) shortcut = `${base}-copia-${suffix++}`;
+    setDuplicatingId(item.id);
+    try {
+      await createQuickResponse({ shortcut, message: item.message, category: item.category, scope: item.scope, ...(item.scope === 'TEAM' ? { teamId: item.teamId } : {}) });
+      toast.success(`Modelo /${shortcut} criado a partir da cópia.`);
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível duplicar o modelo.');
+    } finally { setDuplicatingId(null); }
+  }
+
+  async function toggleArchive(item) {
+    const wasArchived = archivedIds.includes(item.id);
+    try {
+      await updateQuickResponse(item.id, { archived: !wasArchived });
+      setArchivedIds((items) => wasArchived ? items.filter((id) => id !== item.id) : [...items, item.id]);
+      setResponses((items) => items.map((row) => row.id === item.id ? { ...row, archived: !wasArchived, archivedAt: wasArchived ? null : new Date().toISOString() } : row));
+      toast.success(wasArchived ? 'Modelo restaurado.' : 'Modelo arquivado.');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível alterar o arquivamento do modelo.');
+    }
   }
 
   async function toggleFavorite(item) {
@@ -178,14 +201,16 @@ export default function QuickResponses() {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return responses
+      .filter((item) => showArchived ? archivedIds.includes(item.id) : !archivedIds.includes(item.id))
       .filter((item) => category === 'all' || item.category === category)
       .filter((item) => scope === 'all' || item.scope === scope)
       .filter((item) => !onlyFavorites || pinned.includes(item.id) || item.favorite)
       .filter((item) => !term || item.shortcut.toLowerCase().includes(term) || item.message.toLowerCase().includes(term));
-  }, [responses, search, category, scope, onlyFavorites, pinned]);
+  }, [responses, search, category, scope, onlyFavorites, pinned, showArchived, archivedIds]);
 
   const usageTotal = responses.reduce((sum, item) => sum + item.usageCount, 0);
   const favoriteTotal = responses.filter((item) => pinned.includes(item.id) || item.favorite).length;
+  const activeTotal = responses.filter((item) => !archivedIds.includes(item.id)).length;
 
   return (
     <div style={s.container}>
@@ -198,7 +223,7 @@ export default function QuickResponses() {
       />
 
       <div style={s.metrics}>
-        <div style={s.metric}><MessageSquare size={17} /><div><strong>{responses.length}</strong><span>modelos ativos</span></div></div>
+        <div style={s.metric}><MessageSquare size={17} /><div><strong>{activeTotal}</strong><span>modelos ativos</span></div></div>
         <div style={s.metric}><Star size={17} /><div><strong>{favoriteTotal}</strong><span>favoritos</span></div></div>
         <div style={s.metric}><Send size={17} /><div><strong>{usageTotal}</strong><span>usos registrados</span></div></div>
       </div>
@@ -207,21 +232,23 @@ export default function QuickResponses() {
         <div style={s.searchBox}><Search size={17} style={s.searchIcon} /><input aria-label="Buscar modelos" style={s.searchInput} placeholder="Buscar por atalho ou conteúdo" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
         <select aria-label="Filtrar categoria" style={s.filterSelect} value={scope} onChange={(e) => setScope(e.target.value)}><option value="all">Todos os escopos</option>{SCOPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
         <button type="button" style={{ ...s.favoriteFilter, ...(onlyFavorites ? s.favoriteFilterActive : {}) }} onClick={() => setOnlyFavorites((value) => !value)}><Star size={15} fill={onlyFavorites ? 'currentColor' : 'none'} /> Favoritos</button>
+        <button type="button" style={{ ...s.favoriteFilter, ...(showArchived ? s.favoriteFilterActive : {}) }} onClick={() => setShowArchived((value) => !value)}><Archive size={15} /> {showArchived ? 'Arquivados' : 'Ativos'}</button>
       </div>
-      <div style={s.categoryTabs} role="tablist" aria-label="Categorias de modelos">{CATEGORIES.map((item) => <button type="button" role="tab" aria-selected={category === item.value} key={item.value} style={{ ...s.categoryTab, ...(category === item.value ? s.categoryTabActive : {}) }} onClick={() => setCategory(item.value)}>{item.label}{item.value !== 'all' ? <span style={s.categoryCount}>{responses.filter((row) => row.category === item.value).length}</span> : null}</button>)}</div>
+      <div style={s.categoryTabs} role="tablist" aria-label="Categorias de modelos">{CATEGORIES.map((item) => <button type="button" role="tab" aria-selected={category === item.value} key={item.value} style={{ ...s.categoryTab, ...(category === item.value ? s.categoryTabActive : {}) }} onClick={() => setCategory(item.value)}>{item.label}{item.value !== 'all' ? <span style={s.categoryCount}>{responses.filter((row) => row.category === item.value && (showArchived ? archivedIds.includes(row.id) : !archivedIds.includes(row.id))).length}</span> : null}</button>)}</div>
 
       <div style={s.grid}>
-        {loading ? <div style={s.empty}>Carregando modelos...</div> : filtered.length === 0 ? <div style={s.emptyCard}><MessageSquare size={22} /><div style={s.emptyTitle}>Nenhum modelo encontrado</div><div style={s.emptyText}>Ajuste os filtros ou crie um novo modelo de resposta.</div><ActionButton onClick={openCreate} style={{ marginTop: '1rem' }}><Plus size={16} /> Criar modelo</ActionButton></div> : filtered.map((item) => {
+        {loading ? <div style={s.empty}>Carregando modelos...</div> : filtered.length === 0 ? <div style={s.emptyCard}><MessageSquare size={22} /><div style={s.emptyTitle}>{showArchived ? 'Nenhum modelo arquivado' : 'Nenhum modelo encontrado'}</div><div style={s.emptyText}>{showArchived ? 'Arquive um modelo ativo para encontrá-lo aqui e restaurá-lo quando necessário.' : 'Ajuste os filtros ou crie um novo modelo de resposta.'}</div>{!showArchived ? <ActionButton onClick={openCreate} style={{ marginTop: '1rem' }}><Plus size={16} /> Criar modelo</ActionButton> : null}</div> : filtered.map((item) => {
           const isPinned = pinned.includes(item.id) || item.favorite;
-          return <article key={item.id} style={{ ...s.card, ...(isPinned ? s.cardPinned : {}) }}>
-            <div style={s.cardHeader}><div style={s.shortcut} title={`/${item.shortcut}`}>/{item.shortcut}</div><div style={s.cardActions}><button type="button" aria-label={isPinned ? 'Desafixar modelo' : 'Fixar modelo'} title={isPinned ? 'Desafixar' : 'Fixar'} style={{ ...s.iconBtn, color: isPinned ? 'var(--accent)' : 'var(--text-muted)' }} onClick={() => toggleFavorite(item)}><Pin size={16} fill={isPinned ? 'currentColor' : 'none'} /></button><button type="button" aria-label="Editar modelo" title="Editar" style={s.iconBtn} onClick={() => openEdit(item)}><Pencil size={16} /></button><button type="button" aria-label="Excluir modelo" title="Excluir" style={{ ...s.iconBtn, color: 'var(--danger-text)' }} onClick={() => handleDelete(item)} disabled={deletingId === item.id}><Trash2 size={16} /></button></div></div>
+          const isArchived = archivedIds.includes(item.id);
+          return <article key={item.id} style={{ ...s.card, ...(isPinned ? s.cardPinned : {}), ...(isArchived ? s.cardArchived : {}) }}>
+            <div style={s.cardHeader}><div style={s.shortcut} title={`/${item.shortcut}`}>/{item.shortcut}{isArchived ? <span style={s.archivedLabel}>Arquivado</span> : null}</div><div style={s.cardActions}><button type="button" aria-label={isPinned ? 'Desafixar modelo' : 'Fixar modelo'} title={isPinned ? 'Desafixar' : 'Fixar'} style={{ ...s.iconBtn, color: isPinned ? 'var(--accent)' : 'var(--text-muted)' }} onClick={() => toggleFavorite(item)}><Pin size={16} fill={isPinned ? 'currentColor' : 'none'} /></button><button type="button" aria-label="Duplicar modelo" title="Duplicar" style={s.iconBtn} onClick={() => handleDuplicate(item)} disabled={duplicatingId === item.id}><Copy size={15} /></button><button type="button" aria-label="Editar modelo" title="Editar" style={s.iconBtn} onClick={() => openEdit(item)}><Pencil size={16} /></button><button type="button" aria-label={isArchived ? 'Restaurar modelo' : 'Arquivar modelo'} title={isArchived ? 'Restaurar' : 'Arquivar'} style={s.iconBtn} onClick={() => toggleArchive(item)}>{isArchived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button></div></div>
             <div style={s.cardBody}>{item.message}</div>
             <div style={s.cardFooter}><span style={s.metaBadge}><Tag size={13} /> {CATEGORIES.find((entry) => entry.value === item.category)?.label || item.category}</span><span style={s.metaBadge}>{SCOPES.find((entry) => entry.value === item.scope)?.label || item.scope}</span><span style={s.usage}><Send size={12} /> {item.usageCount} usos</span><button type="button" style={s.previewLink} onClick={() => setPreview(item)}><Eye size={14} /> Pré-visualizar</button></div>
           </article>;
         })}
       </div>
 
-      {modal ? <div style={s.overlay} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(false); }}><div style={s.modal} role="dialog" aria-modal="true" aria-labelledby="quick-response-title"><div style={s.modalHeader}><div><p style={s.modalKicker}>{form.id ? 'Editar modelo' : 'Novo modelo'}</p><h3 id="quick-response-title" style={s.modalTitle}>{form.id ? 'Atualizar resposta' : 'Cadastrar resposta oficial'}</h3></div><button type="button" style={s.closeBtn} aria-label="Fechar" onClick={() => setModal(false)}><X size={17} /></button></div><form onSubmit={handleSubmit} style={s.form}><div style={s.field}><label style={s.label} htmlFor="quick-shortcut">Atalho</label><div style={s.inputWrapper}><span style={s.prefix}>/</span><input id="quick-shortcut" style={s.inputWithPrefix} value={form.shortcut} onChange={(e) => setForm({ ...form, shortcut: e.target.value.replace(/\s/g, '') })} required placeholder="faturas" /></div></div><div style={s.twoCols}><div style={s.field}><label style={s.label} htmlFor="quick-category">Categoria</label><select id="quick-category" style={s.input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.filter((item) => item.value !== 'all').map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><div style={s.field}><label style={s.label} htmlFor="quick-scope">Disponível para</label><select id="quick-scope" style={s.input} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })}>{SCOPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div><div style={s.field}><label style={s.label} htmlFor="quick-message">Mensagem completa</label><textarea id="quick-message" style={s.textarea} rows={7} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required placeholder="Escreva o modelo completo aqui..." /><p style={s.hint}>Use [nome], [cliente] ou [numero_os]. No chat, digite “/” para encontrar o atalho.</p></div>{form.message ? <div style={s.inlinePreview}><div style={s.inlinePreviewHead}><strong>Prévia para o cliente</strong><span>Exemplo</span></div><p>{sampleMessage(form.message)}</p></div> : null}<div style={s.modalFooter}><ActionButton variant="secondary" type="button" onClick={() => setModal(false)}>Cancelar</ActionButton><ActionButton type="submit" loading={saving}>{form.id ? 'Salvar alterações' : 'Criar modelo'}</ActionButton></div></form></div></div> : null}
+      {modal ? <div style={s.overlay} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(false); }}><div style={s.modal} role="dialog" aria-modal="true" aria-labelledby="quick-response-title"><div style={s.modalHeader}><div><p style={s.modalKicker}>{form.id ? 'Editar modelo' : 'Novo modelo'}</p><h3 id="quick-response-title" style={s.modalTitle}>{form.id ? 'Atualizar resposta' : 'Cadastrar resposta oficial'}</h3></div><button type="button" style={s.closeBtn} aria-label="Fechar" onClick={() => setModal(false)}><X size={17} /></button></div>{form.scope === 'TEAM' ? <div style={{ ...s.field, padding: '0 var(--space-6)', paddingTop: 'var(--space-4)' }}><label style={s.label} htmlFor="quick-team">Equipe com acesso</label><select id="quick-team" style={s.input} value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}><option value="">Selecione uma equipe...</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>{teams.length === 0 ? <p style={s.hint}>Nenhuma equipe disponível para este usuário.</p> : null}</div> : null}<form onSubmit={handleSubmit} style={s.form}><div style={s.field}><label style={s.label} htmlFor="quick-shortcut">Atalho</label><div style={s.inputWrapper}><span style={s.prefix}>/</span><input id="quick-shortcut" style={s.inputWithPrefix} value={form.shortcut} onChange={(e) => setForm({ ...form, shortcut: e.target.value.replace(/\s/g, '') })} required placeholder="faturas" /></div></div><div style={s.twoCols}><div style={s.field}><label style={s.label} htmlFor="quick-category">Categoria</label><select id="quick-category" style={s.input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.filter((item) => item.value !== 'all').map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div><div style={s.field}><label style={s.label} htmlFor="quick-scope">Disponível para</label><select id="quick-scope" style={s.input} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })}>{SCOPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div></div><div style={s.field}><label style={s.label} htmlFor="quick-message">Mensagem completa</label><textarea id="quick-message" style={s.textarea} rows={7} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required placeholder="Escreva o modelo completo aqui..." /><p style={s.hint}>Use [nome], [cliente] ou [numero_os]. No chat, digite “/” para encontrar o atalho.</p></div>{form.message ? <div style={s.inlinePreview}><div style={s.inlinePreviewHead}><strong>Prévia para o cliente</strong><span>Exemplo</span></div><p>{sampleMessage(form.message)}</p></div> : null}<div style={s.modalFooter}><ActionButton variant="secondary" type="button" onClick={() => setModal(false)}>Cancelar</ActionButton><ActionButton type="submit" loading={saving}>{form.id ? 'Salvar alterações' : 'Criar modelo'}</ActionButton></div></form></div></div> : null}
       {preview ? <div style={s.overlay} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}><div style={{ ...s.modal, maxWidth: '32rem' }} role="dialog" aria-modal="true" aria-labelledby="preview-title"><div style={s.modalHeader}><div><p style={s.modalKicker}>Pré-visualização</p><h3 id="preview-title" style={s.modalTitle}>/{preview.shortcut}</h3></div><button type="button" style={s.closeBtn} aria-label="Fechar" onClick={() => setPreview(null)}><X size={17} /></button></div><div style={s.previewBody}><div style={s.previewRecipient}><div style={s.avatar}>{(preview.shortcut || 'M').slice(0, 1).toUpperCase()}</div><div><strong>Maria — exemplo</strong><small>Mensagem do atendimento</small></div></div><div style={s.bubble}>{sampleMessage(preview.message)}</div><p style={s.hint}>As variáveis serão substituídas pelos dados reais do contato quando usadas.</p></div></div></div> : null}
     </div>
   );
@@ -245,10 +272,12 @@ const s = {
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 'var(--space-5)' },
   card: { background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', minWidth: 0 },
   cardPinned: { borderColor: 'var(--accent-border)', boxShadow: '0 0 0 1px var(--accent-border)' },
+  cardArchived: { opacity: 0.82, borderStyle: 'dashed' },
   cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.7rem' },
   cardActions: { display: 'flex', gap: '0.25rem' },
   iconBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-panel)', color: 'var(--text-muted)', cursor: 'pointer' },
   shortcut: { display: 'inline-flex', maxWidth: '75%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'var(--accent-light)', color: 'var(--accent)', padding: '0.35rem 0.65rem', borderRadius: 'var(--radius-pill)', fontSize: 'var(--text-xs)', fontWeight: 800, border: '1px solid var(--accent-border)' },
+  archivedLabel: { marginLeft: '0.45rem', color: 'var(--text-dim)', fontWeight: 700, fontSize: '0.62rem' },
   cardBody: { color: 'var(--text-main)', fontSize: 'var(--text-sm)', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', flex: 1 },
   cardFooter: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.6rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.8rem' },
   metaBadge: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem', color: 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 700 },

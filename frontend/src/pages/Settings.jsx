@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from '../utils/toast';
 import {
   getSettings,
@@ -15,7 +15,9 @@ import {
   getBusinessHours,
   saveBusinessHours,
   getTags,
+  getTagUsage,
   createTag,
+  updateTag,
   deleteTag,
   uploadLogo,
   getMediaUrl,
@@ -51,9 +53,31 @@ function isMaskedSecret(value) {
   return MASKED_SECRET_PATTERN.test(String(value || '').trim());
 }
 
+function normalizeTagName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function canonicalTagName(value) {
+  return normalizeTagName(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+}
+
+function isValidTagColor(value) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || '').trim());
+}
+
+function tagTextColor(value) {
+  const hex = String(value || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return '#101418';
+  const channels = [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+  const luminance = channels.map((channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+  const relativeLuminance = 0.2126 * luminance[0] + 0.7152 * luminance[1] + 0.0722 * luminance[2];
+  return relativeLuminance > 0.55 ? '#101418' : '#ffffff';
+}
+
 export default function Settings() {
   const { can } = usePermissions();
   const location = useLocation();
+  const navigate = useNavigate();
   const isMobile = window.innerWidth <= 768;
   const isAdmin = localStorage.getItem('role') === 'admin' || localStorage.getItem('role') === 'superadmin';
   const [tab, setTab] = useState(() => {
@@ -124,6 +148,13 @@ export default function Settings() {
   const [tags, setTags] = useState([]);
   const [newTag, setNewTag] = useState({ name: '', color: '#D4AF37' });
   const [addingTag, setAddingTag] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState('all');
+  const [tagUsage, setTagUsage] = useState({});
+  const [tagUsageLoading, setTagUsageLoading] = useState(false);
+  const [editingTag, setEditingTag] = useState(null);
+  const [tagEditForm, setTagEditForm] = useState({ name: '', color: '#D4AF37' });
+  const [savingTagEdit, setSavingTagEdit] = useState(false);
   const [promptPreview, setPromptPreview] = useState(null);
   const [loadingPromptPreview, setLoadingPromptPreview] = useState(false);
   const [testingIntegration, setTestingIntegration] = useState(false);
@@ -143,6 +174,24 @@ export default function Settings() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (tab === 6) loadTagUsage();
+  }, [tab]);
+
+  async function loadTagUsage() {
+    setTagUsageLoading(true);
+    try {
+      const { data } = await getTagUsage();
+      setTagUsage(data?.counts || {});
+    } catch {
+      // Usage is an enhancement; a missing contacts permission must not hide the
+      // official tag list from an administrator.
+      setTagUsage({});
+    } finally {
+      setTagUsageLoading(false);
+    }
+  }
 
   async function load() {
     // As 7 chamadas eram feitas uma depois da outra (await em sequência), então
@@ -355,16 +404,64 @@ export default function Settings() {
 
   async function handleAddTag(e) {
     e.preventDefault();
-    if (!newTag.name || addingTag) return;
+    if (addingTag) return;
+    const name = normalizeTagName(newTag.name);
+    if (name.length < 2 || name.length > 80) {
+      toast.error('Informe um nome de etiqueta entre 2 e 80 caracteres.');
+      return;
+    }
+    if (!isValidTagColor(newTag.color)) {
+      toast.error('Escolha uma cor válida para a etiqueta.');
+      return;
+    }
+    if (tags.some((item) => canonicalTagName(item.name) === canonicalTagName(name))) {
+      toast.error('Já existe uma etiqueta com esse nome.');
+      return;
+    }
     setAddingTag(true);
     try {
-      const { data } = await createTag(newTag);
-      setTags([...tags, data]);
+      const { data } = await createTag({ name, color: newTag.color.toUpperCase() });
+      setTags((current) => [...current, data]);
       setNewTag({ name: '', color: '#D4AF37' });
+      toast.success('Etiqueta criada.');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao adicionar etiqueta');
     } finally {
       setAddingTag(false);
+    }
+  }
+
+  function openTagEditor(item) {
+    setEditingTag(item);
+    setTagEditForm({ name: item.name || '', color: isValidTagColor(item.color) ? item.color : '#D4AF37' });
+  }
+
+  async function handleUpdateTag(e) {
+    e.preventDefault();
+    if (!editingTag || savingTagEdit) return;
+    const name = normalizeTagName(tagEditForm.name);
+    if (name.length < 2 || name.length > 80) {
+      toast.error('Informe um nome de etiqueta entre 2 e 80 caracteres.');
+      return;
+    }
+    if (!isValidTagColor(tagEditForm.color)) {
+      toast.error('Escolha uma cor válida para a etiqueta.');
+      return;
+    }
+    if (tags.some((item) => item.id !== editingTag.id && canonicalTagName(item.name) === canonicalTagName(name))) {
+      toast.error('Já existe uma etiqueta com esse nome.');
+      return;
+    }
+    setSavingTagEdit(true);
+    try {
+      const { data } = await updateTag(editingTag.id, { name, color: tagEditForm.color.toUpperCase() });
+      setTags((current) => current.map((item) => (item.id === editingTag.id ? { ...item, ...data } : item)));
+      setEditingTag(null);
+      toast.success('Etiqueta atualizada.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao atualizar etiqueta');
+    } finally {
+      setSavingTagEdit(false);
     }
   }
 
@@ -481,10 +578,14 @@ export default function Settings() {
   }
 
   async function handleDeleteTag(id, name) {
-    toast.confirm(`Excluir a etiqueta "${name || ''}"?`, async () => {
+    const usageCount = tagUsage[canonicalTagName(name)] || 0;
+    const warning = usageCount > 0
+      ? `A etiqueta "${name || ''}" está associada a ${usageCount} contato(s). Excluir remove apenas a etiqueta oficial; os contatos e o histórico não serão apagados. Continuar?`
+      : `Excluir a etiqueta "${name || ''}"?`;
+    toast.confirm(warning, async () => {
       try {
         await deleteTag(id);
-        setTags(tags.filter((item) => item.id !== id));
+        setTags((current) => current.filter((item) => item.id !== id));
         toast.success('Etiqueta excluída');
       } catch {
         toast.error('Erro ao excluir etiqueta');
@@ -533,6 +634,17 @@ export default function Settings() {
     'LOG_DIR=logs',
     'LOG_FILE=logs/client.log',
   ].join('\n');
+
+  const normalizedTagSearch = canonicalTagName(tagSearch);
+  const visibleTags = tags.filter((item) => {
+    const normalizedName = canonicalTagName(item.name);
+    const usageCount = tagUsage[normalizedName] || 0;
+    const matchesSearch = !normalizedTagSearch || normalizedName.includes(normalizedTagSearch);
+    const matchesFilter = tagFilter === 'all' || (tagFilter === 'used' ? usageCount > 0 : usageCount === 0);
+    return matchesSearch && matchesFilter;
+  });
+  const usedTagCount = tags.filter((item) => (tagUsage[canonicalTagName(item.name)] || 0) > 0).length;
+  const totalTaggedContacts = Object.values(tagUsage).reduce((total, value) => total + value, 0);
 
   return (
     <div className="settings-container" style={s.container}>
@@ -1088,6 +1200,26 @@ export default function Settings() {
       )}
 
       {tab === 5 && (
+        <section style={s.card} aria-labelledby="quick-responses-settings-title">
+          <div style={s.quickRedirectHeader}>
+            <div>
+              <p style={s.kicker}>Central de mensagens</p>
+              <h3 id="quick-responses-settings-title" style={s.sectionHeading}>Respostas rápidas</h3>
+              <p style={s.hint}>A gestão completa foi movida para uma tela própria, com busca, categorias, escopos, favoritos, edição e pré-visualização.</p>
+            </div>
+            <button type="button" style={s.saveBtn} onClick={() => navigate('/quick-responses')}>
+              Abrir respostas rápidas
+            </button>
+          </div>
+          <div style={s.quickRedirectGrid}>
+            <div><strong>Atalhos no atendimento</strong><span>Digite “/” no chat para localizar os modelos disponíveis para seu usuário.</span></div>
+            <div><strong>Escopos e permissões</strong><span>Publique modelos para toda a empresa, uma equipe ou somente para você.</span></div>
+            <div><strong>Compatibilidade</strong><span>Os modelos existentes continuam disponíveis; use a tela dedicada para editar sem perder a configuração.</span></div>
+          </div>
+        </section>
+      )}
+
+      {false && tab === 5 && (
         <section style={s.card}>
           <div style={{ marginBottom: '2rem' }}>
             <h3 style={s.sectionHeading}>Respostas rápidas</h3>
@@ -1126,44 +1258,93 @@ export default function Settings() {
       )}
 
       {tab === 6 && (
-        <section style={s.card}>
-          <div style={{ marginBottom: '2rem' }}>
-            <h3 style={s.sectionHeading}>Gestao de etiquetas</h3>
-            <p style={s.hint}>Defina as etiquetas oficiais que serao usadas para organizar seus contatos.</p>
+        <section style={s.card} aria-labelledby="tags-settings-title">
+          <div className="tag-header" style={s.tagHeader}>
+            <div>
+              <p style={s.kicker}>Organização do atendimento</p>
+              <h3 id="tags-settings-title" style={s.sectionHeading}>Gestão de etiquetas</h3>
+              <p style={s.hint}>Crie etiquetas consistentes para segmentar contatos e encontrar conversas com rapidez.</p>
+            </div>
+            <div className="tag-stats" style={s.tagStats} aria-live="polite">
+              <div style={s.tagStat}><strong>{tags.length}</strong><span>etiquetas oficiais</span></div>
+              <div style={s.tagStat}><strong>{usedTagCount}</strong><span>em uso</span></div>
+              <div style={s.tagStat}><strong>{totalTaggedContacts}</strong><span>vínculos identificados</span></div>
+            </div>
           </div>
 
-          <form onSubmit={handleAddTag} style={{ ...s.quickAddBox, flexDirection: isMobile ? 'column' : 'row' }}>
-            <input
-              style={s.input}
-              value={newTag.name}
-              onChange={(e) => setNewTag({ ...newTag, name: e.target.value })}
-              placeholder="Nome da etiqueta (ex: Financeiro)"
-            />
-            <input
-              type="color"
-              style={{ ...s.input, width: isMobile ? '100%' : '60px', padding: '2px' }}
-              value={newTag.color}
-              onChange={(e) => setNewTag({ ...newTag, color: e.target.value })}
-            />
-            <button type="submit" style={s.saveBtn} disabled={addingTag}>
-              {addingTag ? 'Adicionando...' : 'Adicionar'}
+          <form className="tag-create-box" onSubmit={handleAddTag} style={s.tagCreateBox} aria-label="Criar etiqueta">
+            <div style={s.tagCreateField}>
+              <label style={s.label} htmlFor="new-tag-name">Nova etiqueta</label>
+              <input
+                id="new-tag-name"
+                style={s.input}
+                value={newTag.name}
+                maxLength={80}
+                onChange={(e) => setNewTag({ ...newTag, name: e.target.value })}
+                placeholder="Ex.: Financeiro"
+              />
+            </div>
+            <div style={s.tagColorField}>
+              <label style={s.label} htmlFor="new-tag-color">Cor</label>
+              <input
+                id="new-tag-color"
+                type="color"
+                style={s.colorInput}
+                value={newTag.color}
+                onChange={(e) => setNewTag({ ...newTag, color: e.target.value })}
+                aria-label="Cor da nova etiqueta"
+              />
+            </div>
+            <button type="submit" style={{ ...s.saveBtn, marginTop: 0 }} disabled={addingTag}>
+              {addingTag ? 'Criando...' : 'Criar etiqueta'}
             </button>
           </form>
 
-          <div style={s.quickList}>
-            {tags.length === 0 ? (
-              <p style={s.hint}>Nenhuma etiqueta cadastrada ainda. Use o formulario acima para criar a primeira.</p>
-            ) : (
-              tags.map((item) => (
-                <div key={item.id} style={s.quickItem}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: item.color, flexShrink: 0 }} />
-                    <strong style={{ color: item.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
+          <div style={s.tagToolbar}>
+            <label style={s.tagSearchWrap}>
+              <span aria-hidden="true">⌕</span>
+              <input
+                style={s.tagSearchInput}
+                value={tagSearch}
+                onChange={(e) => setTagSearch(e.target.value)}
+                placeholder="Buscar etiqueta"
+                aria-label="Buscar etiqueta"
+              />
+            </label>
+            <select style={s.tagFilterSelect} value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} aria-label="Filtrar etiquetas">
+              <option value="all">Todas</option>
+              <option value="used">Em uso</option>
+              <option value="unused">Sem uso</option>
+            </select>
+            <button type="button" style={s.iconButton} onClick={loadTagUsage} disabled={tagUsageLoading}>
+              {tagUsageLoading ? 'Atualizando...' : 'Atualizar uso'}
+            </button>
+          </div>
+          <p style={{ ...s.hint, margin: '0 0 1rem' }}>O uso é atualizado a partir dos contatos disponíveis. Excluir uma etiqueta não remove contatos nem histórico.</p>
+
+          <div style={s.tagList}>
+            {visibleTags.length === 0 ? (
+              <div style={s.tagEmpty}>
+                <strong>{tags.length ? 'Nenhuma etiqueta corresponde ao filtro.' : 'Nenhuma etiqueta cadastrada ainda.'}</strong>
+                <span>{tags.length ? 'Tente outro termo ou filtro.' : 'Crie a primeira etiqueta acima para organizar seus contatos.'}</span>
+              </div>
+            ) : visibleTags.map((item) => {
+              const usageCount = tagUsage[canonicalTagName(item.name)] || 0;
+              const color = isValidTagColor(item.color) ? item.color : '#D4AF37';
+              return (
+                <div className="tag-row" key={item.id} style={s.tagRow}>
+                  <span className="tag-chip" style={{ ...s.tagChip, background: color, color: tagTextColor(color) }}>
+                    <span aria-hidden="true" style={s.tagChipDot} />
+                    {item.name}
+                  </span>
+                  <span style={s.tagUsageBadge}>{usageCount} {usageCount === 1 ? 'contato' : 'contatos'}</span>
+                  <div style={s.tagRowActions}>
+                    <button type="button" onClick={() => openTagEditor(item)} style={s.iconButton} aria-label={`Editar etiqueta ${item.name}`}>Editar</button>
+                    <button type="button" onClick={() => handleDeleteTag(item.id, item.name)} style={s.delBtn}>Excluir</button>
                   </div>
-                  <button type="button" onClick={() => handleDeleteTag(item.id, item.name)} style={s.delBtn}>Excluir</button>
                 </div>
-              ))
-            )}
+              );
+            })}
           </div>
         </section>
       )}
@@ -1459,6 +1640,46 @@ export default function Settings() {
           </div>
         </ModalShell>
       )}
+
+      {editingTag && (
+        <ModalShell
+          kicker="Etiquetas"
+          title={`Editar etiqueta: ${editingTag.name || ''}`}
+          onClose={() => setEditingTag(null)}
+          maxWidth="30rem"
+        >
+          <form onSubmit={handleUpdateTag} style={{ ...s.form, padding: 'var(--space-6)' }}>
+            <div style={s.field}>
+              <label style={s.label} htmlFor="edit-tag-name">Nome da etiqueta</label>
+              <input
+                id="edit-tag-name"
+                style={s.input}
+                value={tagEditForm.name}
+                maxLength={80}
+                onChange={(e) => setTagEditForm({ ...tagEditForm, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+            <div style={s.field}>
+              <label style={s.label} htmlFor="edit-tag-color">Cor da etiqueta</label>
+              <div style={s.tagEditColorRow}>
+                <input
+                  id="edit-tag-color"
+                  type="color"
+                  style={s.colorInput}
+                  value={tagEditForm.color}
+                  onChange={(e) => setTagEditForm({ ...tagEditForm, color: e.target.value })}
+                />
+                <span style={{ ...s.tagChip, background: tagEditForm.color, color: tagTextColor(tagEditForm.color) }}>{normalizeTagName(tagEditForm.name) || 'Prévia'}</span>
+              </div>
+            </div>
+            <div style={s.tagModalActions}>
+              <button type="button" style={s.iconButton} onClick={() => setEditingTag(null)}>Cancelar</button>
+              <button type="submit" style={{ ...s.saveBtn, marginTop: 0 }} disabled={savingTagEdit}>{savingTagEdit ? 'Salvando...' : 'Salvar alterações'}</button>
+            </div>
+          </form>
+        </ModalShell>
+      )}
     </div>
   );
 }
@@ -1489,6 +1710,13 @@ const settingsResponsiveCss = `
     .settings-container table { min-width: 620px; }
     .settings-hour-row { grid-template-columns: 1fr !important; gap: .55rem !important; align-items: stretch !important; }
     .settings-hour-day { width: auto !important; }
+    .settings-container .tag-header { flex-direction: column !important; }
+    .settings-container .tag-stats { width: 100% !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+    .settings-container .tag-create-box { grid-template-columns: minmax(0, 1fr) 58px !important; }
+    .settings-container .tag-create-box > button { grid-column: 1 / -1 !important; width: 100% !important; }
+    .settings-container .tag-row { align-items: flex-start !important; flex-wrap: wrap !important; }
+    .settings-container .tag-chip { max-width: calc(100% - 5rem) !important; }
+    .settings-container .tag-row-actions { width: 100% !important; margin-left: 0 !important; justify-content: flex-end !important; }
   }
 `;
 
@@ -1730,6 +1958,19 @@ const s = {
     marginBottom: '2rem',
     border: '1px solid var(--border-color)',
   },
+  quickRedirectHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '1.5rem',
+    flexWrap: 'wrap',
+    marginBottom: '1.5rem',
+  },
+  quickRedirectGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(13rem, 1fr))',
+    gap: '0.8rem',
+  },
   quickList: { display: 'flex', flexDirection: 'column', gap: '1rem' },
   quickItem: {
     display: 'flex',
@@ -1742,6 +1983,26 @@ const s = {
     border: '1px solid var(--border-color)',
   },
   quickMessage: { fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: 'var(--leading-normal)', wordBreak: 'break-word' },
+  tagHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.5rem', marginBottom: '1.5rem' },
+  tagStats: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(90px, 1fr))', gap: '.55rem', flexShrink: 0 },
+  tagStat: { display: 'grid', gap: '.15rem', minWidth: '90px', padding: '.7rem .8rem', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-base)' },
+  tagCreateBox: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 70px auto', alignItems: 'end', gap: '.75rem', padding: '1rem', marginBottom: '1.25rem', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '14px' },
+  tagCreateField: { display: 'grid', gap: '.5rem', minWidth: 0 },
+  tagColorField: { display: 'grid', gap: '.5rem' },
+  colorInput: { width: '100%', height: '43px', padding: '3px', cursor: 'pointer', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '10px' },
+  tagToolbar: { display: 'flex', alignItems: 'center', gap: '.65rem', flexWrap: 'wrap', marginBottom: '.75rem' },
+  tagSearchWrap: { display: 'flex', alignItems: 'center', gap: '.5rem', flex: '1 1 240px', minWidth: 0, padding: '0 .85rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-base)', color: 'var(--text-dim)' },
+  tagSearchInput: { width: '100%', minWidth: 0, border: 0, outline: 0, padding: '.75rem 0', background: 'transparent', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
+  tagFilterSelect: { minWidth: '130px', padding: '.75rem .8rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-base)', color: 'var(--text-main)', fontWeight: 700 },
+  tagList: { display: 'grid', gap: '.65rem' },
+  tagRow: { display: 'flex', alignItems: 'center', gap: '.7rem', minWidth: 0, padding: '.8rem .9rem', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-panel)' },
+  tagChip: { display: 'inline-flex', alignItems: 'center', gap: '.4rem', maxWidth: 'min(50%, 320px)', padding: '.35rem .65rem', borderRadius: '999px', fontSize: 'var(--text-xs)', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  tagChipDot: { width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor', opacity: .7, flexShrink: 0 },
+  tagUsageBadge: { color: 'var(--text-dim)', fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' },
+  tagRowActions: { display: 'flex', alignItems: 'center', gap: '.45rem', marginLeft: 'auto', flexShrink: 0 },
+  tagEmpty: { display: 'grid', gap: '.3rem', placeItems: 'center', padding: '2rem 1rem', textAlign: 'center', border: '1px dashed var(--border-color)', borderRadius: '12px', color: 'var(--text-muted)' },
+  tagEditColorRow: { display: 'flex', alignItems: 'center', gap: '.75rem' },
+  tagModalActions: { display: 'flex', justifyContent: 'flex-end', gap: '.65rem', marginTop: '.5rem' },
   delBtn: {
     background: 'transparent',
     border: '1px solid var(--border-color)',

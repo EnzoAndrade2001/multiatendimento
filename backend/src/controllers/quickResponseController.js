@@ -42,6 +42,38 @@ function isAdministrator(user) {
   return user?.role === 'admin' || user?.role === 'superadmin' || user?.accessProfile === 'admin';
 }
 
+function isTrue(value) {
+  return ['1', 'true', 'yes', 'sim', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+// Auditing must never break a quick-response operation (for example while a
+// tenant is upgrading from a schema without the audit table). We keep only
+// operational metadata and deliberately omit message bodies.
+async function writeQuickResponseAudit({ tenantId, quickResponseId = null, actorUserId = null, action, metadata = null }) {
+  try {
+    await prisma.quickResponseAudit.create({
+      data: {
+        tenantId,
+        quickResponseId,
+        actorUserId,
+        action,
+        metadata,
+      },
+    });
+  } catch (err) {
+    console.error('[quick-responses:audit]', err.message);
+  }
+}
+
+function safeMetadata(body = {}) {
+  return Object.fromEntries(Object.entries({
+    shortcut: body.shortcut,
+    category: body.category,
+    scope: body.scope,
+    favorite: body.favorite ?? body.pinned,
+  }).filter(([, value]) => value !== undefined));
+}
+
 async function canManage(row, req, teamIds = null) {
   if (row.scope === 'GLOBAL') return true;
   if (row.scope === 'PERSONAL') return row.ownerUserId === req.user.userId;
@@ -63,15 +95,25 @@ async function listQuickResponses(req, res) {
     }
     const category = req.query.category ? normalizeCategory(req.query.category) : null;
     if (req.query.category && !category) return res.status(400).json({ error: 'Categoria inválida.' });
+    const scope = req.query.scope ? normalizeScope(req.query.scope) : null;
+    if (req.query.scope && !scope) return res.status(400).json({ error: 'Escopo inválido.' });
+    // Arquivados continuam sujeitos ao mesmo filtro de escopo; não expomos
+    // modelos de outras equipes. Usuários que podem gerenciar respostas podem
+    // restaurar os modelos que também podem administrar.
+    const includeArchived = isTrue(req.query.includeArchived);
+    const search = String(req.query.q || req.query.search || '').trim();
     const rows = await prisma.quickResponse.findMany({
       where: {
         tenantId: req.user.tenantId,
+        ...(includeArchived ? {} : { archivedAt: null }),
         ...(category ? { category } : {}),
-        OR: [
+        ...(scope ? { scope } : {}),
+        ...(search ? { OR: [{ shortcut: { contains: search, mode: 'insensitive' } }, { message: { contains: search, mode: 'insensitive' } }] } : {}),
+        AND: [{ OR: [
           { scope: 'GLOBAL' },
           { scope: 'PERSONAL', ownerUserId: req.user.userId },
           ...(teamIds.length ? [{ scope: 'TEAM', teamId: { in: teamIds } }] : []),
-        ],
+        ] }],
       },
       include: { owner: { select: { id: true, name: true } }, team: { select: { id: true, name: true } } },
       orderBy: [{ category: 'asc' }, { shortcut: 'asc' }],
@@ -111,6 +153,13 @@ async function createQuickResponse(req, res) {
       data: { tenantId: req.user.tenantId, shortcut, message, category, scope, teamId, ownerUserId: scope === 'PERSONAL' ? req.user.userId : null },
       include: { owner: { select: { id: true, name: true } }, team: { select: { id: true, name: true } } },
     });
+    await writeQuickResponseAudit({
+      tenantId: req.user.tenantId,
+      quickResponseId: response.id,
+      actorUserId: req.user.userId,
+      action: 'CREATED',
+      metadata: safeMetadata({ shortcut, category, scope }),
+    });
     res.status(201).json(response);
   } catch (err) {
     if (err.code === 'P2002') return res.status(400).json({ error: 'Atalho já existe.' });
@@ -130,6 +179,8 @@ async function updateQuickResponse(req, res) {
   if (!(await canManage(existing, req, teamIds))) return res.status(403).json({ error: 'Você não pode alterar este modelo.' });
 
   const data = {};
+  const archiveRequested = req.body.archived !== undefined || req.body.archivedAt !== undefined;
+  let archiveChanged = false;
   if (req.body.shortcut !== undefined) {
     data.shortcut = normalizeShortcut(req.body.shortcut);
     if (!data.shortcut) return res.status(400).json({ error: 'Atalho inválido.' });
@@ -147,6 +198,13 @@ async function updateQuickResponse(req, res) {
     if (typeof favorite !== 'boolean') return res.status(400).json({ error: 'Favorito inválido.' });
     data.isFavorite = favorite;
   }
+  if (archiveRequested) {
+    const rawArchived = req.body.archived !== undefined ? req.body.archived : req.body.archivedAt;
+    const requestedArchived = typeof rawArchived === 'boolean' ? rawArchived : isTrue(rawArchived);
+    const currentArchived = Boolean(existing.archivedAt);
+    archiveChanged = requestedArchived !== currentArchived;
+    data.archivedAt = requestedArchived ? new Date() : null;
+  }
   if (req.body.scope !== undefined) {
     data.scope = normalizeScope(req.body.scope);
     if (!data.scope) return res.status(400).json({ error: 'Escopo inválido.' });
@@ -157,8 +215,16 @@ async function updateQuickResponse(req, res) {
     if (existing.scope !== 'TEAM' || !teamIds.includes(String(req.body.teamId))) return res.status(403).json({ error: 'Equipe inválida para este modelo.' });
     data.teamId = String(req.body.teamId);
   }
+  if (!Object.keys(data).length) return res.status(400).json({ error: 'Nenhuma alteração informada.' });
   try {
     const response = await prisma.quickResponse.update({ where: { id: existing.id }, data, include: { owner: { select: { id: true, name: true } }, team: { select: { id: true, name: true } } } });
+    await writeQuickResponseAudit({
+      tenantId: req.user.tenantId,
+      quickResponseId: response.id,
+      actorUserId: req.user.userId,
+      action: archiveChanged ? (data.archivedAt ? 'ARCHIVED' : 'RESTORED') : 'UPDATED',
+      metadata: safeMetadata({ ...req.body, shortcut: data.shortcut ?? existing.shortcut, category: data.category ?? existing.category, scope: data.scope ?? existing.scope }),
+    });
     res.json(response);
   } catch (err) {
     if (err.code === 'P2002') return res.status(400).json({ error: 'Atalho já existe.' });
@@ -175,20 +241,23 @@ async function useQuickResponse(req, res) {
     teamIds = allTeams.map((item) => item.id);
   }
   const row = await prisma.quickResponse.findFirst({
-    where: { id: req.params.id, tenantId: req.user.tenantId, OR: [{ scope: 'GLOBAL' }, { scope: 'PERSONAL', ownerUserId: req.user.userId }, { scope: 'TEAM', teamId: { in: teamIds } }] },
+    where: { id: req.params.id, tenantId: req.user.tenantId, archivedAt: null, OR: [{ scope: 'GLOBAL' }, { scope: 'PERSONAL', ownerUserId: req.user.userId }, { scope: 'TEAM', teamId: { in: teamIds } }] },
   });
   if (!row) return res.status(404).json({ error: 'Modelo não encontrado ou sem acesso.' });
   const response = await prisma.quickResponse.update({ where: { id: row.id }, data: { usageCount: { increment: 1 }, lastUsedAt: new Date() } });
+  await writeQuickResponseAudit({ tenantId: req.user.tenantId, quickResponseId: row.id, actorUserId: req.user.userId, action: 'USED', metadata: { shortcut: row.shortcut, category: row.category, scope: row.scope } });
   res.json(response);
 }
 
 async function stats(req, res) {
-  const rows = await prisma.quickResponse.findMany({ where: { tenantId: req.user.tenantId }, select: { category: true, scope: true, usageCount: true } });
+  const includeArchived = isTrue(req.query.includeArchived) && isAdministrator(req.user);
+  const rows = await prisma.quickResponse.findMany({ where: { tenantId: req.user.tenantId, ...(includeArchived ? {} : { archivedAt: null }) }, select: { category: true, scope: true, usageCount: true, archivedAt: true } });
   const result = { total: rows.length, totalUses: rows.reduce((sum, row) => sum + row.usageCount, 0), byCategory: {}, byScope: {} };
   rows.forEach((row) => {
     result.byCategory[row.category] = (result.byCategory[row.category] || 0) + 1;
     result.byScope[row.scope] = (result.byScope[row.scope] || 0) + 1;
   });
+  if (includeArchived) result.archived = rows.filter((row) => row.archivedAt).length;
   res.json(result);
 }
 
@@ -196,8 +265,74 @@ async function deleteQuickResponse(req, res) {
   const existing = await prisma.quickResponse.findFirst({ where: { id: req.params.id, tenantId: req.user.tenantId } });
   if (!existing) return res.status(404).json({ error: 'Modelo não encontrado.' });
   if (!(await canManage(existing, req))) return res.status(403).json({ error: 'Você não pode excluir este modelo.' });
-  await prisma.quickResponse.delete({ where: { id: existing.id } });
+  if (!existing.archivedAt) {
+    await prisma.quickResponse.update({ where: { id: existing.id }, data: { archivedAt: new Date() } });
+    await writeQuickResponseAudit({ tenantId: req.user.tenantId, quickResponseId: existing.id, actorUserId: req.user.userId, action: 'ARCHIVED', metadata: { shortcut: existing.shortcut, category: existing.category, scope: existing.scope, via: 'delete' } });
+  }
   res.sendStatus(204);
 }
 
-module.exports = { listQuickResponses, createQuickResponse, updateQuickResponse, useQuickResponse, stats, deleteQuickResponse, normalizeShortcut, normalizeCategory, normalizeScope };
+async function archiveQuickResponse(req, res) {
+  const existing = await prisma.quickResponse.findFirst({ where: { id: req.params.id, tenantId: req.user.tenantId } });
+  if (!existing) return res.status(404).json({ error: 'Modelo não encontrado.' });
+  if (!(await canManage(existing, req))) return res.status(403).json({ error: 'Você não pode arquivar este modelo.' });
+  if (existing.archivedAt) return res.json({ ...existing, archived: true });
+  const response = await prisma.quickResponse.update({ where: { id: existing.id }, data: { archivedAt: new Date() } });
+  await writeQuickResponseAudit({ tenantId: req.user.tenantId, quickResponseId: existing.id, actorUserId: req.user.userId, action: 'ARCHIVED', metadata: { shortcut: existing.shortcut, category: existing.category, scope: existing.scope } });
+  res.json({ ...response, archived: true });
+}
+
+async function restoreQuickResponse(req, res) {
+  const existing = await prisma.quickResponse.findFirst({ where: { id: req.params.id, tenantId: req.user.tenantId } });
+  if (!existing) return res.status(404).json({ error: 'Modelo não encontrado.' });
+  if (!(await canManage(existing, req))) return res.status(403).json({ error: 'Você não pode restaurar este modelo.' });
+  if (!existing.archivedAt) return res.json({ ...existing, archived: false });
+  const response = await prisma.quickResponse.update({ where: { id: existing.id }, data: { archivedAt: null } });
+  await writeQuickResponseAudit({ tenantId: req.user.tenantId, quickResponseId: existing.id, actorUserId: req.user.userId, action: 'RESTORED', metadata: { shortcut: existing.shortcut, category: existing.category, scope: existing.scope } });
+  res.json({ ...response, archived: false });
+}
+
+async function listQuickResponseAudit(req, res) {
+  if (!isAdministrator(req.user)) return res.status(403).json({ error: 'Apenas administradores podem consultar a auditoria.' });
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 100000);
+  const where = {
+    tenantId: req.user.tenantId,
+    ...(req.query.quickResponseId ? { quickResponseId: String(req.query.quickResponseId) } : {}),
+    ...(req.query.action ? { action: String(req.query.action).trim().toUpperCase() } : {}),
+  };
+  try {
+    const [items, total] = await Promise.all([
+      prisma.quickResponseAudit.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+        include: {
+          actor: { select: { id: true, name: true, email: true } },
+          quickResponse: { select: { id: true, shortcut: true, category: true } },
+        },
+      }),
+      prisma.quickResponseAudit.count({ where }),
+    ]);
+    res.json({ items, total, limit, offset, hasMore: offset + items.length < total });
+  } catch (err) {
+    console.error('[quick-responses:audit:list]', err.message);
+    res.status(500).json({ error: 'Erro ao consultar auditoria dos modelos.' });
+  }
+}
+
+module.exports = {
+  listQuickResponses,
+  createQuickResponse,
+  updateQuickResponse,
+  useQuickResponse,
+  stats,
+  deleteQuickResponse,
+  archiveQuickResponse,
+  restoreQuickResponse,
+  listQuickResponseAudit,
+  normalizeShortcut,
+  normalizeCategory,
+  normalizeScope,
+};

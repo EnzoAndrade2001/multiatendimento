@@ -192,7 +192,7 @@ export const createTenant = (data) => api.post('/superadmin/tenants', data);
 export const updateTenant = (id, data) => api.patch(`/superadmin/tenants/${id}`, data);
 
 // Quick Responses
-export const getQuickResponses = () => api.get('/quick-responses');
+export const getQuickResponses = (params = {}) => api.get('/quick-responses', { params });
 // Registra o uso sem bloquear o envio caso a instalação ainda não tenha essa rota.
 export const useQuickResponse = (id) => api.post(`/quick-responses/${encodeURIComponent(id)}/use`);
 export const createQuickResponse = (data) => api.post('/quick-responses', data);
@@ -239,6 +239,7 @@ export const getCampaignInstances = () => api.get('/campaigns/instances');
 
 // Tags
 export const getTags = () => api.get('/tags');
+export const getTagUsage = () => api.get('/tags/usage');
 export const createTag = (data) => api.post('/tags', data);
 export const updateTag = (id, data) => api.patch(`/tags/${id}`, data);
 export const deleteTag = (id) => api.delete(`/tags/${id}`);
