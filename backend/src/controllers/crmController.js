@@ -192,6 +192,24 @@ function normalizeContract(record) {
   };
 }
 
+function isTruthyIntegrationFlag(value) {
+  if (value === true || value === 1) return true;
+  return ['1', 'S', 'SIM', 'Y', 'YES', 'TRUE'].includes(String(value ?? '').trim().toUpperCase());
+}
+
+function receivableIsCancelled(record) {
+  const payload = record?.payload || record || {};
+  const statusCode = String(rawValue(payload, 'statusCode', 'cd_receita_status') || '').trim().toUpperCase();
+  const status = [
+    rawValue(payload, 'statusLabel', 'ds_receita_status'),
+    statusCode,
+  ].filter(Boolean).join(' ').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  return isTruthyIntegrationFlag(rawValue(payload, 'sourceDeleted'))
+    || isTruthyIntegrationFlag(rawValue(payload, 'invoiceCancelled', 'tfnfscancelada'))
+    || ['C', 'CANCELADO', 'CANCELADA'].includes(statusCode)
+    || status.includes('CANCEL');
+}
+
 function normalizeReceivable(record) {
   const payload = record?.payload || record || {};
   const dueAt = asCalendarDate(rawValue(payload, 'dueAt', 'dtvectorec'));
@@ -199,6 +217,7 @@ function normalizeReceivable(record) {
   const value = asNumber(rawValue(payload, 'value', 'valreceita')) || 0;
   const paidValue = asNumber(rawValue(payload, 'paidValue', 'valreceitapaga')) || 0;
   const openValue = Math.max(0, asNumber(rawValue(payload, 'openValue')) ?? (value - paidValue));
+  const isCancelled = receivableIsCancelled(record);
   const isPaid = Boolean(paidAt) || (value > 0 && openValue <= 0);
   const isOverdue = !isPaid && dueAt && dueAt < brazilCalendarToday();
   return {
@@ -217,7 +236,9 @@ function normalizeReceivable(record) {
     invoiceNumber: first(rawValue(payload, 'invoiceNumber', 'numnf')),
     invoiceExternalId: first(rawValue(payload, 'invoiceExternalId', 'seqincnfs')),
     invoiceValue: asNumber(rawValue(payload, 'invoiceValue', 'valtotalnfs')) || value,
-    invoiceCancelled: Boolean(rawValue(payload, 'invoiceCancelled')),
+    invoiceCancelled: isTruthyIntegrationFlag(rawValue(payload, 'invoiceCancelled', 'tfnfscancelada')),
+    sourceDeleted: isTruthyIntegrationFlag(rawValue(payload, 'sourceDeleted')),
+    isCancelled,
     invoiceNotes: first(rawValue(payload, 'invoiceNotes', 'nf_obs')),
     statementExternalId: first(rawValue(payload, 'statementExternalId', 'seqdemonstrativo')),
     billingType: first(rawValue(payload, 'billingType', 'faturamento_tipo')),
@@ -236,7 +257,7 @@ function normalizeReceivable(record) {
       || String(first(rawValue(payload, 'paymentMethod', 'nmformapagto')) || '').toUpperCase().includes('BOLETO')
     ),
     statusLabel: first(rawValue(payload, 'statusLabel', 'ds_receita_status')),
-    status: isPaid ? 'paid' : isOverdue ? 'overdue' : 'open',
+    status: isCancelled ? 'cancelled' : isPaid ? 'paid' : isOverdue ? 'overdue' : 'open',
   };
 }
 
@@ -864,6 +885,7 @@ async function loadCustomerOperationalMetrics(tenantId, customers) {
   }
   for (const record of receivableRecords) {
     const normalized = normalizeReceivable(record);
+    if (normalized.isCancelled) continue;
     const customer = customerByExternalId.get(text(normalized.clientExternalId));
     if (!customer) continue;
     const metric = metrics.get(customer.id);
@@ -1191,6 +1213,7 @@ async function getCustomer360(req, res) {
   ]);
 
   const receivables = receivableRecords.map(normalizeReceivable)
+    .filter((item) => !item.isCancelled)
     .sort((a, b) => {
       const issuedComparison = String(b.issuedAt || '').localeCompare(String(a.issuedAt || ''));
       if (issuedComparison !== 0) return issuedComparison;
@@ -1420,6 +1443,9 @@ async function getReceivableBoleto(req, res) {
   if (text(normalized.clientExternalId) !== text(customer.externalId)) {
     return res.status(404).json({ error: 'Titulo financeiro nao pertence a este cliente.' });
   }
+  if (normalized.isCancelled) {
+    return res.status(410).json({ error: 'Este titulo foi cancelado ou removido no iLux.' });
+  }
   if (!normalized.hasBoleto) {
     return res.status(409).json({ error: 'Este titulo nao possui boleto vinculado no iLux.' });
   }
@@ -1523,6 +1549,11 @@ async function resolveCustomerReceivable(req) {
   if (text(receivable.clientExternalId) !== text(customer.externalId)) {
     const error = new Error('Titulo financeiro nao pertence a este cliente.');
     error.statusCode = 404;
+    throw error;
+  }
+  if (receivable.isCancelled) {
+    const error = new Error('Este titulo foi cancelado ou removido no iLux e nao pode ser aberto ou reenviado.');
+    error.statusCode = 410;
     throw error;
   }
   return { tenantId, customer, receivable };
@@ -1681,6 +1712,9 @@ async function listFlaggedBillingDocuments(req, res) {
         customerId: customer?.id || null,
         customerName: customer?.fantasyName || customer?.name || payload.customerName || 'Cliente não identificado',
       };
+    }).filter((item) => {
+      const receivable = item.receivableExternalId ? receivableByExternalId.get(item.receivableExternalId) : null;
+      return !receivable?.isCancelled;
     });
 
     return res.json({ items });
@@ -1754,4 +1788,6 @@ module.exports = {
   syncMetadata,
   parseCustomerListOptions,
   queryCustomers,
+  normalizeReceivable,
+  receivableIsCancelled,
 };

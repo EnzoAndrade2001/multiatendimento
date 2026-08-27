@@ -84,7 +84,7 @@ Variáveis do backend:
 \`\`\`
 FIREBIRD_AGENT_RELEASE_DIR=/data/agent-releases
 FIREBIRD_AGENT_FILE_NAME=FirebirdCRMClient.exe
-FIREBIRD_AGENT_VERSION=1.0.2
+FIREBIRD_AGENT_VERSION=1.0.3
 FIREBIRD_AGENT_SHA256=<hash-do-executavel>
 \`\`\`
 

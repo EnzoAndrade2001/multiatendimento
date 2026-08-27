@@ -9,6 +9,8 @@ const { mediaPath } = require('../utils/uploads');
 const billingDocumentService = require('../services/billingDocumentService');
 const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
 
+const RECEIVABLE_SNAPSHOT_ENTITY = 'receivablesSnapshot';
+
 function pick(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -154,6 +156,41 @@ async function upsertRawRecord(tenantId, source, entity, externalId, payload) {
     },
   });
   return safeExternalId;
+}
+
+async function reconcileReceivablesSnapshot(tenantId, snapshot) {
+  const externalIds = [...new Set((snapshot?.externalIds || []).map(String).filter((value) => /^\d+$/.test(value)))];
+  const minExternalId = Number(snapshot?.minExternalId);
+  const maxExternalId = Number(snapshot?.maxExternalId);
+  const declaredCount = Number(snapshot?.count);
+  if (!snapshot?.completeWindow || !externalIds.length
+    || !Number.isSafeInteger(minExternalId) || !Number.isSafeInteger(maxExternalId)
+    || minExternalId <= 0 || maxExternalId < minExternalId
+    || declaredCount !== externalIds.length) {
+    throw new Error('Snapshot de titulos invalido ou incompleto; reconciliacao ignorada por seguranca.');
+  }
+
+  const present = new Set(externalIds);
+  const cached = await prisma.externalSyncRecord.findMany({
+    where: { tenantId, source: 'firebird', entity: 'receivables' },
+    select: { id: true, externalId: true, payload: true },
+  });
+  const missing = cached.filter((record) => {
+    const numericId = Number(record.externalId);
+    return Number.isSafeInteger(numericId)
+      && numericId >= minExternalId
+      && numericId <= maxExternalId
+      && !present.has(String(record.externalId))
+      && !record.payload?.sourceDeleted;
+  });
+  const sourceDeletedAt = snapshot.capturedAt || new Date().toISOString();
+  for (const record of missing) {
+    await prisma.externalSyncRecord.update({
+      where: { id: record.id },
+      data: { payload: { ...(record.payload || {}), sourceDeleted: true, sourceDeletedAt } },
+    });
+  }
+  return missing.length;
 }
 
 async function findOrCreateContact(tenant, instance, data) {
@@ -475,12 +512,18 @@ async function pushBatch(req, res) {
       equipments: 0,
       serviceOrders: 0,
       companyInfo: 0,
+      reconciled: 0,
       skipped: 0,
       errors: [],
     };
 
     for (const record of records) {
       try {
+        if (entity === RECEIVABLE_SNAPSHOT_ENTITY) {
+          stats.reconciled += await reconcileReceivablesSnapshot(tenant.id, record);
+          stats.stored += 1;
+          continue;
+        }
         const payloadToStore = entity === COMPANY_ENTITY
           ? normalizeCompanyProfile(record)
           : record;
@@ -1159,6 +1202,7 @@ async function agentPing(req, res) {
 
 module.exports = {
   pushBatch,
+  reconcileReceivablesSnapshot,
   getPendingCommands,
   commandCallback,
   agentPing,

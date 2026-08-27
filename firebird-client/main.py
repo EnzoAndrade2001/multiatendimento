@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.2"
+DEFAULT_AGENT_VERSION = "1.0.3"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -1148,6 +1148,8 @@ class FirebirdRepository:
             left join IXLDEMOFAT demo on demo.SEQDEMONSTRATIVO = r.SEQDEMONSTRATIVO
             where r.DTPAGTOREC is null
               and coalesce(r.VALRECEITAPAGA, 0) < coalesce(r.VALRECEITA, 0)
+              and coalesce(nf.TFNFSCANCELADA, 'N') <> 'S'
+              and upper(coalesce(rs.DS_RECEITA_STATUS, '')) not containing 'CANCEL'
             order by r.DTVECTOREC, r.SEQRECEITA
         """
         yield from self._rows(sql, ())
@@ -1172,8 +1174,11 @@ class FirebirdRepository:
             from IRECEITAS r
             join ICLIENTES cli on cli.CDCLIENTE = r.CDCLIENTE
             left join INFSAIDA nf on nf.SEQINCNFS = r.SEQINCNFS
+            left join IRECEITAS_STATUS rs on rs.ID_RECEITA_STATUS = r.CD_RECEITA_STATUS
             where r.DTPAGTOREC is null
               and coalesce(r.VALRECEITAPAGA, 0) < coalesce(r.VALRECEITA, 0)
+              and coalesce(nf.TFNFSCANCELADA, 'N') <> 'S'
+              and upper(coalesce(rs.DS_RECEITA_STATUS, '')) not containing 'CANCEL'
             order by r.DTVECTOREC, r.SEQRECEITA
         """
         yield from self._rows(sql, ())
@@ -2409,9 +2414,20 @@ def sync_crm360_details(
     CRM360_REFRESH_INTERVAL_SECONDS = 15 * 60
     refresh_due = force_meter_bootstrap or not last_refresh or (datetime.now() - last_refresh).total_seconds() >= CRM360_REFRESH_INTERVAL_SECONDS
     if refresh_due:
+        recent_receivable_rows = list(repo.fetch_recent_receivables(1000))
         recent_receivables, _ = push_normalized_batches(
-            crm, "receivables", repo.fetch_recent_receivables(1000), normalize_receivable, batch_size
+            crm, "receivables", recent_receivable_rows, normalize_receivable, batch_size
         )
+        recent_receivable_ids = sorted({int(row["seqreceita"]) for row in recent_receivable_rows if row.get("seqreceita") is not None})
+        if recent_receivable_ids:
+            crm.push("receivablesSnapshot", [{
+                "completeWindow": True,
+                "count": len(recent_receivable_ids),
+                "minExternalId": recent_receivable_ids[0],
+                "maxExternalId": recent_receivable_ids[-1],
+                "externalIds": [str(value) for value in recent_receivable_ids],
+                "capturedAt": datetime.now().isoformat(timespec="seconds"),
+            }])
         open_receivables, _ = push_normalized_batches(
             crm, "receivables", repo.fetch_open_receivables(5000), normalize_receivable, batch_size
         )
