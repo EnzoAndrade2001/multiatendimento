@@ -68,7 +68,7 @@ async function create(req, res) {
     if (!queued) {
       const failed = await prisma.knowledgeDocument.update({
         where: { id: document.id },
-        data: { status: 'FAILED', processingError: 'A fila de processamento esta ocupada. O arquivo foi preservado; tente reprocessar em alguns minutos.' },
+        data: { status: 'FAILED', processingError: 'A fila de processamento está ocupada. O arquivo foi preservado; tente reprocessar em alguns minutos.' },
       });
       return res.status(503).json({ ...serialize(failed), error: failed.processingError });
     }
@@ -107,9 +107,9 @@ async function reprocess(req, res) {
     where: { id: document.id, tenantId: req.user.tenantId, status: { not: 'PROCESSING' } },
     data: { status: 'PROCESSING', processingError: null },
   });
-  if (!claimed.count) return res.status(409).json({ error: 'O documento ja esta sendo processado.' });
+  if (!claimed.count) return res.status(409).json({ error: 'O documento já está sendo processado.' });
   if (!documentService.queueDocumentProcessing(document.id)) {
-    const message = 'A fila de processamento esta ocupada. O arquivo foi preservado; tente novamente em alguns minutos.';
+    const message = 'A fila de processamento está ocupada. O arquivo foi preservado; tente novamente em alguns minutos.';
     await prisma.knowledgeDocument.update({ where: { id: document.id }, data: { status: 'FAILED', processingError: message } });
     return res.status(503).json({ error: message });
   }

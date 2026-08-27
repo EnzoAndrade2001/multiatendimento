@@ -23,7 +23,7 @@ test('aceita apenas imagens com assinatura compatível', () => {
 
 test('nao expoe detalhes internos do banco ao falhar processamento', () => {
   const message = formatProcessingError(new Error('Invalid tx.knowledgeChunk.createMany() invocation: Transaction already closed'));
-  assert.match(message, /limite de seguranca/i);
+  assert.match(message, /limite de segurança/i);
   assert.doesNotMatch(message, /createMany|Transaction/i);
 });
 

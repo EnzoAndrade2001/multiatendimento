@@ -38,7 +38,7 @@ const KNOWLEDGE_MAX_EXTRACTED_CHARS = integerSetting('KNOWLEDGE_MAX_EXTRACTED_CH
 const KNOWLEDGE_MAX_CHUNKS = integerSetting('KNOWLEDGE_MAX_CHUNKS', 2500, 100);
 const KNOWLEDGE_CHUNK_BATCH_SIZE = integerSetting('KNOWLEDGE_CHUNK_BATCH_SIZE', 100, 10);
 const KNOWLEDGE_QUEUE_LIMIT = integerSetting('KNOWLEDGE_QUEUE_LIMIT', 20, 1);
-const PROCESSING_FALLBACK_ERROR = 'O processamento foi interrompido por limite de seguranca. O arquivo original foi preservado e pode ser reprocessado.';
+const PROCESSING_FALLBACK_ERROR = 'O processamento foi interrompido por limite de segurança. O arquivo original foi preservado e pode ser reprocessado.';
 
 const processingQueue = [];
 const queuedDocumentIds = new Set();
@@ -107,7 +107,7 @@ async function extractPages(buffer, mimeType, apiKey) {
   if (!apiKey) throw new Error('O documento exige OCR, mas a chave do Gemini não está configurada.');
   if (buffer.length > KNOWLEDGE_OCR_MAX_BYTES) {
     const limitMb = Math.floor(KNOWLEDGE_OCR_MAX_BYTES / 1024 / 1024);
-    const error = new Error(`O arquivo nao possui texto pesquisavel e excede o limite seguro de ${limitMb} MB para OCR. Envie um PDF pesquisavel ou divida o manual em partes menores.`);
+    const error = new Error(`O arquivo não possui texto pesquisável e excede o limite seguro de ${limitMb} MB para OCR. Envie um PDF pesquisável ou divida o manual em partes menores.`);
     error.publicMessage = true;
     throw error;
   }
@@ -121,7 +121,7 @@ function formatProcessingError(error) {
   const message = String(error?.message || error || '');
   if (/texto .*til|texto leg.vel|exige OCR|PDF pesquis.vel|divida o manual/i.test(message)) return message.slice(0, 500);
   if (/timeout|transaction|heap|memory|alloc|closed|expired|createMany/i.test(message)) return PROCESSING_FALLBACK_ERROR;
-  return 'Nao foi possivel processar este documento com seguranca. O arquivo original foi preservado para nova tentativa.';
+  return 'Não foi possível processar este documento com segurança. O arquivo original foi preservado para nova tentativa.';
 }
 
 function splitLongText(text, maxLength = 3400, overlap = 350) {
@@ -225,7 +225,7 @@ async function processDocument(documentId) {
     const pages = await extractPages(buffer, document.mimeType, settings?.geminiKey);
     const totalChars = pages.reduce((sum, item) => sum + String(item.text || '').length, 0);
     if (totalChars > KNOWLEDGE_MAX_EXTRACTED_CHARS) {
-      const error = new Error('O documento possui conteudo demais para uma unica indexacao. Divida o manual em volumes menores.');
+      const error = new Error('O documento possui conteúdo demais para uma única indexação. Divida o manual em volumes menores.');
       error.publicMessage = true;
       throw error;
     }
@@ -317,7 +317,7 @@ function startNextWorker() {
     if (worker.timedOut || code !== 0) {
       console.error('[knowledge-document] worker encerrado:', { documentId, code, signal });
       const failureMessage = worker.memoryExceeded
-        ? `O manual excedeu o limite seguro de ${KNOWLEDGE_WORKER_RSS_MB} MB durante a indexacao. O arquivo original foi preservado; envie uma versao pesquisavel ou divida-o em partes.`
+        ? `O manual excedeu o limite seguro de ${KNOWLEDGE_WORKER_RSS_MB} MB durante a indexação. O arquivo original foi preservado; envie uma versão pesquisável ou divida-o em partes.`
         : PROCESSING_FALLBACK_ERROR;
       await markWorkerFailure(documentId, failureMessage);
     }
