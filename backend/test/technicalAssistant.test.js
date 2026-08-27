@@ -81,3 +81,36 @@ test('auditoria registra modo e publico usados pela resposta', () => {
   assert.match(source, /actorUserId/);
   assert.match(source, /actorTechnicalContactId/);
 });
+
+test('parseModeChoice so aceita escolha explicita do menu de modo', () => {
+  assert.equal(technicalAssistantService.parseModeChoice('1'), 'TECHNICIAN');
+  assert.equal(technicalAssistantService.parseModeChoice('1 - assistente'), 'TECHNICIAN');
+  assert.equal(technicalAssistantService.parseModeChoice('quero o Assistente Técnico'), 'TECHNICIAN');
+  assert.equal(technicalAssistantService.parseModeChoice('2'), 'CUSTOMER');
+  assert.equal(technicalAssistantService.parseModeChoice('atendimento normal'), 'CUSTOMER');
+  // Pergunta técnica de verdade não pode ser confundida com escolha de modo.
+  assert.equal(technicalAssistantService.parseModeChoice('erro 303-403 na xerox'), null);
+  assert.equal(technicalAssistantService.parseModeChoice('bom dia'), null);
+  assert.equal(technicalAssistantService.parseModeChoice(''), null);
+});
+
+test('isMenuRequest so reconhece a mensagem inteira, nao duvida com a palavra menu', () => {
+  assert.equal(technicalAssistantService.isMenuRequest('menu'), true);
+  assert.equal(technicalAssistantService.isMenuRequest('Menu'), true);
+  assert.equal(technicalAssistantService.isMenuRequest('trocar modo'), true);
+  assert.equal(technicalAssistantService.isMenuRequest('mudar de modo'), true);
+  assert.equal(technicalAssistantService.isMenuRequest('menu de configuração da impressora'), false);
+  assert.equal(technicalAssistantService.isMenuRequest('como abro o menu na tela'), false);
+  assert.equal(technicalAssistantService.isMenuRequest('erro 303-403'), false);
+});
+
+test('janela de inatividade do tecnico vem de env em minutos, padrao 10', () => {
+  assert.equal(technicalAssistantService.TECHNICIAN_SESSION_INACTIVITY_MS, technicalAssistantService.TECHNICIAN_SESSION_INACTIVITY_MINUTES * 60 * 1000);
+  assert.ok(technicalAssistantService.TECHNICIAN_SESSION_INACTIVITY_MINUTES >= 1);
+});
+
+test('menu de modo e envio nao entram no historico do LLM', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'controllers', 'webhookController.js'), 'utf8');
+  assert.match(source, /TECHNICIAN_MODE_MENU/);
+  assert.match(source, /\['TECHNICIAN_MODE_MENU', 'TECHNICIAN_MODE_SET'\]\.includes\(m\.automationType\)/);
+});

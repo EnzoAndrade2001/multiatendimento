@@ -18,6 +18,15 @@ const {
 let io;
 function setIo(socketIo) { io = socketIo; }
 
+const TECHNICIAN_MODE_MENU_TEXT = [
+  'Oi! Seu número está autorizado como técnico. O que você precisa agora?',
+  '',
+  '*1* — Assistente Técnico (consulta os manuais e procedimentos publicados)',
+  '*2* — Atendimento (falar como cliente / abrir uma demanda)',
+  '',
+  'Responda *1* ou *2*. Digite *menu* a qualquer momento para trocar.',
+].join('\n');
+
 const pendingConnectionChecks = new Map();
 const DISCONNECT_CONFIRMATION_MS = Number(process.env.EVOLUTION_DISCONNECT_CONFIRMATION_MS || 45000);
 
@@ -500,7 +509,14 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
   }
 
   if (!isHistorical) {
-    const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket, new Date());
+    // Sessão de número autorizado como técnico expira em minutos (não nas 24h
+    // do atendimento a cliente), para o menu de modo reaparecer a cada retorno.
+    let inactivityMs;
+    try {
+      const actor = await technicalAssistantService.resolveWhatsAppActor({ tenantId: tenant.id, phone: contact.phone });
+      if (actor?.type === 'TECHNICIAN') inactivityMs = technicalAssistantService.TECHNICIAN_SESSION_INACTIVITY_MS;
+    } catch { /* identificação nunca bloqueia o fluxo */ }
+    const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket, new Date(), { inactivityMs });
     if (sessionResult.startedNew) ticket.sessionStartedAt = sessionResult.session.startedAt;
   }
 
@@ -842,11 +858,58 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     // Falha na identificação nunca interrompe o atendimento ao cliente.
     console.warn('[technical-assistant] nao foi possivel identificar o remetente:', error.message);
   }
-  const assistantMode = actorContext?.type === 'TECHNICIAN' ? 'TECHNICIAN' : 'CUSTOMER';
-  const knowledgeAudience = actorContext?.audience || 'CUSTOMER';
-  // No modo técnico, o contato não pode carregar dados de cliente para o LLM.
-  const currentNotes = actorContext ? '' : (contact.notes || '');
   const currentUserTurn = describeMessageForAi(incomingMessage, userMessage);
+
+  const sendBotMessage = async (body, automationType) => {
+    try {
+      const sent = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, waInstance.instanceName, contact.phone, body);
+      const botMessage = await prisma.message.create({
+        data: { ticketId: ticket.id, body, fromMe: true, fromBot: true, automationType, externalId: sent?.key?.id || sent?.id },
+      });
+      if (io) io.to(tenant.id).emit('new_message', { ticket, message: botMessage, contact });
+    } catch (err) {
+      console.error('[technical-assistant] falha ao enviar mensagem do menu:', err.message);
+    }
+  };
+
+  // Número autorizado como técnico escolhe, por sessão, se quer o Assistente
+  // Técnico (manuais) ou Atendimento (tratado como cliente). Enquanto a sessão
+  // não tem modo definido, o bot só mostra o menu — não aciona o LLM. A sessão
+  // expira rápido (TECHNICIAN_SESSION_INACTIVITY_MINUTES), reabrindo o menu.
+  let assistantMode = 'CUSTOMER';
+  let knowledgeAudience = 'CUSTOMER';
+  if (actorContext?.type === 'TECHNICIAN') {
+    const session = await prisma.ticketSession.findFirst({
+      where: { ticketId: ticket.id, status: 'OPEN' },
+      orderBy: { startedAt: 'desc' },
+      select: { id: true, assistantMode: true },
+    });
+    if (technicalAssistantService.isMenuRequest(currentUserTurn)) {
+      if (session) await prisma.ticketSession.update({ where: { id: session.id }, data: { assistantMode: null } });
+      await sendBotMessage(TECHNICIAN_MODE_MENU_TEXT, 'TECHNICIAN_MODE_MENU');
+      return;
+    }
+    let chosen = session?.assistantMode || null;
+    if (!chosen) {
+      const choice = technicalAssistantService.parseModeChoice(currentUserTurn);
+      if (choice && session) {
+        await prisma.ticketSession.update({ where: { id: session.id }, data: { assistantMode: choice } });
+        await sendBotMessage(
+          choice === 'TECHNICIAN'
+            ? 'Modo *Assistente Técnico* ativo. ✅ Manda o modelo/código de erro ou a dúvida sobre o procedimento.'
+            : 'Modo *Atendimento* ativo. ✅ Pode falar, como posso ajudar?',
+          'TECHNICIAN_MODE_SET',
+        );
+        return;
+      }
+      await sendBotMessage(TECHNICIAN_MODE_MENU_TEXT, 'TECHNICIAN_MODE_MENU');
+      return;
+    }
+    assistantMode = chosen === 'TECHNICIAN' ? 'TECHNICIAN' : 'CUSTOMER';
+    knowledgeAudience = assistantMode;
+  }
+  // No modo técnico, o contato não pode carregar dados de cliente para o LLM.
+  const currentNotes = assistantMode === 'TECHNICIAN' ? '' : (contact.notes || '');
 
   console.log(`[technical-assistant] Ticket ${ticket.id} | modo=${assistantMode}${actorContext?.name ? ` | usuario=${actorContext.name}` : ''}`);
 
@@ -890,6 +953,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   // legítima de outra etapa não pode ser imitada ou ter o número incrementado.
   const cleanHistory = currentSessionHistory.filter(m => {
     const body = String(m.body || '').toLowerCase();
+    if (['TECHNICIAN_MODE_MENU', 'TECHNICIAN_MODE_SET'].includes(m.automationType)) return false;
     if (isUnsafeOperationalClaim(body)) return false;
     if (m.fromBot && (body.includes('chamados técnico') || body.includes('financeiro') || body.includes('opções que tenho disponíveis'))) return false;
     return true;

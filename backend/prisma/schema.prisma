@@ -341,6 +341,9 @@ model TicketSession {
   endedAt       DateTime?
   status        String    @default("OPEN") // OPEN, RESOLVED, INACTIVE
   trigger       String    @default("CREATED") // CREATED, REOPENED, INACTIVITY, HISTORICAL
+  // Modo escolhido pelo remetente autorizado como técnico nesta sessão:
+  // null = ainda não escolheu (bot pergunta), TECHNICIAN, CUSTOMER.
+  assistantMode String?
   reconstructed Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

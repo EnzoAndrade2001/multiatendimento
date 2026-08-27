@@ -9,12 +9,15 @@ function asDate(value, fallback = null) {
   return Number.isNaN(date.getTime()) ? fallback : date;
 }
 
-function activityStartsNewSession(ticket, occurredAt = new Date()) {
+function activityStartsNewSession(ticket, occurredAt = new Date(), { inactivityMs } = {}) {
   const at = asDate(occurredAt, new Date());
   if (!ticket) return { startsNew: true, trigger: 'CREATED', startedAt: at };
   if (ticket.status === 'resolved') return { startsNew: true, trigger: 'REOPENED', startedAt: at };
   const lastActivity = asDate(ticket.lastMessageAt);
-  if (lastActivity && at.getTime() - lastActivity.getTime() >= SESSION_INACTIVITY_MS) {
+  // Janela de inatividade pode ser encurtada pelo chamador (ex.: sessão de
+  // técnico expira em minutos, não nas 24h padrão do atendimento a cliente).
+  const window = Number.isFinite(inactivityMs) && inactivityMs > 0 ? inactivityMs : SESSION_INACTIVITY_MS;
+  if (lastActivity && at.getTime() - lastActivity.getTime() >= window) {
     return { startsNew: true, trigger: 'INACTIVITY', startedAt: at };
   }
   return {
@@ -54,8 +57,8 @@ async function startTicketSession({ tenantId, ticketId, startedAt = new Date(), 
   });
 }
 
-async function ensureSessionForActivity(ticket, occurredAt = new Date()) {
-  const decision = activityStartsNewSession(ticket, occurredAt);
+async function ensureSessionForActivity(ticket, occurredAt = new Date(), { inactivityMs } = {}) {
+  const decision = activityStartsNewSession(ticket, occurredAt, { inactivityMs });
   return startTicketSession({
     tenantId: ticket.tenantId,
     ticketId: ticket.id,

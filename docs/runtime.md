@@ -311,6 +311,16 @@ quando um ticket resolvido recebe atividade ou após
 `TICKET_SESSION_INACTIVITY_HOURS` horas sem mensagens (padrão: `24`). O
 encerramento do ticket também encerra a sessão corrente.
 
+Para um número autorizado como técnico (`TechnicalContact`), a janela de
+inatividade é `TECHNICIAN_SESSION_INACTIVITY_MINUTES` minutos (padrão: `10`), não
+as 24 h — a sessão dele expira rápido de propósito. Enquanto a sessão não tem
+`assistantMode` definido, o bot só envia o menu ("*1* Assistente Técnico / *2*
+Atendimento") e não aciona o LLM; a escolha fica gravada em
+`TicketSession.assistantMode`. `menu` (mensagem inteira) reabre o menu. "*2*
+Atendimento" faz o técnico ser tratado como cliente comum (transfere para
+humano, usa `notes`); "*1*" mantém o modo técnico (só manuais, sem dados de
+cliente).
+
 O tempo de resolução corrido usa `startedAt`/`endedAt` da sessão. O tempo útil
 considera somente os dias e horários ativos em `BusinessHour`, no fuso
 `BUSINESS_HOURS_TZ` (padrão: `America/Sao_Paulo`). Sem grade ativa, o dashboard
