@@ -236,3 +236,22 @@ and `KNOWLEDGE_LEXICAL_MIN_SCORE=0.34`. Each consultation is recorded in
 `KnowledgeLog`, including whether a match was used, its method and failures.
 The admin screen provides index status, seven-day usage indicators, reindexing
 and a dry-run search that never sends a customer message.
+
+### Document indexing (large manuals)
+
+Uploaded documents are processed in a dedicated child process launched with
+`--expose-gc` and a capped old-space heap (`KNOWLEDGE_WORKER_HEAP_MB`, default
+`512`). On Linux a watchdog SIGKILLs the worker if its RSS passes
+`KNOWLEDGE_WORKER_RSS_MB` (default `768`); the document then shows `FAILED` with
+a generic "safety limit" message that also covers transaction timeouts, so a
+`FAILED` manual is not necessarily an out-of-memory.
+
+To keep the peak bounded, PDF text is extracted in page windows of
+`KNOWLEDGE_PDF_PAGE_BATCH_SIZE` pages (default `12`): a fresh `PDFParse` runs per
+window and is destroyed, with `global.gc()` between windows, so pdf.js
+font/image caches never accumulate across the whole manual. Smaller windows are
+safer for image-heavy PDFs (few pages, large XObjects); larger windows are much
+faster for long text manuals — e.g. a 54 MB / 1487-page service manual extracts
+in ~34 s at `12` vs ~20 s at `200`, with a similar ~400 MB peak either way.
+Reindexing all chunks happens in one Prisma transaction bounded by
+`KNOWLEDGE_TRANSACTION_TIMEOUT_MS` (default `60000`).

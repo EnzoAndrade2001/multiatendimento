@@ -33,6 +33,7 @@ function integerSetting(name, fallback, minimum) {
 const KNOWLEDGE_WORKER_TIMEOUT_MS = integerSetting('KNOWLEDGE_WORKER_TIMEOUT_MS', 20 * 60 * 1000, 60_000);
 const KNOWLEDGE_WORKER_HEAP_MB = integerSetting('KNOWLEDGE_WORKER_HEAP_MB', 512, 256);
 const KNOWLEDGE_WORKER_RSS_MB = integerSetting('KNOWLEDGE_WORKER_RSS_MB', 768, 384);
+const KNOWLEDGE_PDF_PAGE_BATCH_SIZE = integerSetting('KNOWLEDGE_PDF_PAGE_BATCH_SIZE', 12, 1);
 const KNOWLEDGE_OCR_MAX_BYTES = integerSetting('KNOWLEDGE_OCR_MAX_BYTES', 20 * 1024 * 1024, 1024 * 1024);
 const KNOWLEDGE_MAX_EXTRACTED_CHARS = integerSetting('KNOWLEDGE_MAX_EXTRACTED_CHARS', 12_000_000, 100_000);
 const KNOWLEDGE_MAX_CHUNKS = integerSetting('KNOWLEDGE_MAX_CHUNKS', 2500, 100);
@@ -83,19 +84,62 @@ function parseOcrPages(text) {
   return pages.length ? pages : [{ page: null, text: cleanText(text) }];
 }
 
+function buildPdfPageRanges(pageCount, batchSize = KNOWLEDGE_PDF_PAGE_BATCH_SIZE) {
+  const ranges = [];
+  const total = Math.max(0, Number.parseInt(pageCount, 10) || 0);
+  const size = Math.max(1, Number.parseInt(batchSize, 10) || KNOWLEDGE_PDF_PAGE_BATCH_SIZE);
+  for (let first = 1; first <= total; first += size) {
+    ranges.push({ first, last: Math.min(total, first + size - 1) });
+  }
+  return ranges;
+}
+
+async function usePdfParser(buffer, callback) {
+  let parser;
+  try {
+    parser = new PDFParse({ data: buffer });
+    return await callback(parser);
+  } finally {
+    if (parser) await parser.destroy().catch(() => {});
+    // O worker e iniciado com --expose-gc. Liberar caches/fontes do pdf.js entre
+    // lotes evita que manuais extensos acumulem centenas de MB ate o fim.
+    if (typeof global.gc === 'function') global.gc();
+  }
+}
+
+async function extractPdfPagesInBatches(buffer, batchSize = KNOWLEDGE_PDF_PAGE_BATCH_SIZE) {
+  const info = await usePdfParser(buffer, (parser) => parser.getInfo());
+  const pageCount = Number(info?.total || 0);
+  if (!pageCount) throw new Error('O PDF nao possui paginas legiveis.');
+
+  const pages = [];
+  let totalChars = 0;
+  for (const range of buildPdfPageRanges(pageCount, batchSize)) {
+    const result = await usePdfParser(buffer, (parser) => parser.getText(range));
+    for (const item of result.pages || []) {
+      const text = cleanText(item.text);
+      if (!text) continue;
+      totalChars += text.length;
+      if (totalChars > KNOWLEDGE_MAX_EXTRACTED_CHARS) {
+        const error = new Error('O documento possui conteudo demais para uma unica indexacao. Divida o manual em volumes menores.');
+        error.publicMessage = true;
+        throw error;
+      }
+      pages.push({ page: item.num, text });
+    }
+  }
+  return { pageCount, pages };
+}
+
 async function extractPages(buffer, mimeType, apiKey) {
   if (mimeType === 'application/pdf') {
-    let parser;
     try {
-      parser = new PDFParse({ data: buffer });
-      const result = await parser.getText();
-      const pages = (result.pages || []).map((item) => ({ page: item.num, text: cleanText(item.text) })).filter((item) => item.text);
-      const totalChars = pages.reduce((sum, item) => sum + item.text.length, 0);
-      if (totalChars >= Math.max(200, pages.length * 35)) return pages;
+      const extracted = await extractPdfPagesInBatches(buffer);
+      const totalChars = extracted.pages.reduce((sum, item) => sum + item.text.length, 0);
+      if (totalChars >= Math.max(200, extracted.pageCount * 35)) return extracted.pages;
     } catch (error) {
+      if (error.publicMessage) throw error;
       console.warn('[knowledge-document] PDF sem camada textual; tentando OCR:', error.message);
-    } finally {
-      if (parser) await parser.destroy().catch(() => {});
     }
   } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     const result = await mammoth.extractRawText({ buffer });
@@ -277,7 +321,7 @@ function startNextWorker() {
   if (activeWorker || !processingQueue.length) return;
   const documentId = processingQueue.shift();
   const workerPath = path.join(__dirname, '..', 'workers', 'knowledgeDocumentWorker.js');
-  const child = spawn(process.execPath, [`--max-old-space-size=${KNOWLEDGE_WORKER_HEAP_MB}`, workerPath, documentId], {
+  const child = spawn(process.execPath, ['--expose-gc', `--max-old-space-size=${KNOWLEDGE_WORKER_HEAP_MB}`, workerPath, documentId], {
     stdio: ['ignore', 'inherit', 'inherit'],
     env: { ...process.env, KNOWLEDGE_DOCUMENT_WORKER: '1' },
   });
@@ -354,4 +398,4 @@ async function removeStoredFile(storageKey) {
   await fs.unlink(resolveStorageKey(storageKey)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
 }
 
-module.exports = { AUDIENCES, CATEGORIES, chunkPages, cleanupUploadFile, formatProcessingError, processDocument, queueDocumentProcessing, recoverInterruptedDocuments, removeStoredFile, resolveStorageKey, saveUpload, validateSignature };
+module.exports = { AUDIENCES, CATEGORIES, buildPdfPageRanges, chunkPages, cleanupUploadFile, extractPdfPagesInBatches, formatProcessingError, processDocument, queueDocumentProcessing, recoverInterruptedDocuments, removeStoredFile, resolveStorageKey, saveUpload, validateSignature };
