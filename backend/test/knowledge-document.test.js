@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chunkPages, validateSignature } = require('../src/services/knowledgeDocumentService');
+const { chunkPages, formatProcessingError, validateSignature } = require('../src/services/knowledgeDocumentService');
 
 test('valida assinatura real do PDF e rejeita arquivo disfarçado', () => {
   assert.equal(validateSignature(Buffer.from('%PDF-1.7 arquivo'), 'application/pdf'), true);
@@ -19,4 +19,16 @@ test('aceita apenas imagens com assinatura compatível', () => {
   const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
   assert.equal(validateSignature(png, 'image/png'), true);
   assert.equal(validateSignature(Buffer.from('not png'), 'image/png'), false);
+});
+
+test('nao expoe detalhes internos do banco ao falhar processamento', () => {
+  const message = formatProcessingError(new Error('Invalid tx.knowledgeChunk.createMany() invocation: Transaction already closed'));
+  assert.match(message, /limite de seguranca/i);
+  assert.doesNotMatch(message, /createMany|Transaction/i);
+});
+
+test('preserva orientacao segura e acionavel para arquivo grande sem texto', () => {
+  const error = new Error('O arquivo nao possui texto pesquisavel. Envie um PDF pesquisavel ou divida o manual.');
+  error.publicMessage = true;
+  assert.match(formatProcessingError(error), /PDF pesquisavel/i);
 });

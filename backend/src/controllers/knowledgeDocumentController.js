@@ -64,7 +64,14 @@ async function create(req, res) {
       supersedesId: text(req.body.supersedesId) || null,
       createdById: req.user.userId || null,
     } });
-    documentService.queueDocumentProcessing(document.id);
+    const queued = documentService.queueDocumentProcessing(document.id);
+    if (!queued) {
+      const failed = await prisma.knowledgeDocument.update({
+        where: { id: document.id },
+        data: { status: 'FAILED', processingError: 'A fila de processamento esta ocupada. O arquivo foi preservado; tente reprocessar em alguns minutos.' },
+      });
+      return res.status(503).json({ ...serialize(failed), error: failed.processingError });
+    }
     res.status(202).json(serialize(document));
   } catch (error) {
     if (stored?.storageKey) await documentService.removeStoredFile(stored.storageKey).catch(() => {});
@@ -96,8 +103,16 @@ async function reprocess(req, res) {
   const document = await prisma.knowledgeDocument.findFirst({ where: { id: req.params.id, tenantId: req.user.tenantId } });
   if (!document) return res.status(404).json({ error: 'Documento não encontrado.' });
   if (document.status === 'PROCESSING') return res.status(409).json({ error: 'O documento já está sendo processado.' });
-  await prisma.knowledgeDocument.update({ where: { id: document.id }, data: { status: 'PROCESSING', processingError: null } });
-  documentService.queueDocumentProcessing(document.id);
+  const claimed = await prisma.knowledgeDocument.updateMany({
+    where: { id: document.id, tenantId: req.user.tenantId, status: { not: 'PROCESSING' } },
+    data: { status: 'PROCESSING', processingError: null },
+  });
+  if (!claimed.count) return res.status(409).json({ error: 'O documento ja esta sendo processado.' });
+  if (!documentService.queueDocumentProcessing(document.id)) {
+    const message = 'A fila de processamento esta ocupada. O arquivo foi preservado; tente novamente em alguns minutos.';
+    await prisma.knowledgeDocument.update({ where: { id: document.id }, data: { status: 'FAILED', processingError: message } });
+    return res.status(503).json({ error: message });
+  }
   res.status(202).json({ status: 'PROCESSING' });
 }
 

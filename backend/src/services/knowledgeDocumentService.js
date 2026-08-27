@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fsSync = require('fs');
 const fs = require('fs/promises');
 const path = require('path');
+const { spawn } = require('child_process');
 const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const mammoth = require('mammoth');
@@ -23,6 +24,25 @@ const KNOWLEDGE_TRANSACTION_MAX_WAIT_MS = Math.max(
   2_000,
   Number(process.env.KNOWLEDGE_TRANSACTION_MAX_WAIT_MS) || 10_000,
 );
+
+function integerSetting(name, fallback, minimum) {
+  const parsed = Number.parseInt(process.env[name], 10);
+  return Number.isFinite(parsed) ? Math.max(minimum, parsed) : fallback;
+}
+
+const KNOWLEDGE_WORKER_TIMEOUT_MS = integerSetting('KNOWLEDGE_WORKER_TIMEOUT_MS', 20 * 60 * 1000, 60_000);
+const KNOWLEDGE_WORKER_HEAP_MB = integerSetting('KNOWLEDGE_WORKER_HEAP_MB', 512, 256);
+const KNOWLEDGE_WORKER_RSS_MB = integerSetting('KNOWLEDGE_WORKER_RSS_MB', 768, 384);
+const KNOWLEDGE_OCR_MAX_BYTES = integerSetting('KNOWLEDGE_OCR_MAX_BYTES', 20 * 1024 * 1024, 1024 * 1024);
+const KNOWLEDGE_MAX_EXTRACTED_CHARS = integerSetting('KNOWLEDGE_MAX_EXTRACTED_CHARS', 12_000_000, 100_000);
+const KNOWLEDGE_MAX_CHUNKS = integerSetting('KNOWLEDGE_MAX_CHUNKS', 2500, 100);
+const KNOWLEDGE_CHUNK_BATCH_SIZE = integerSetting('KNOWLEDGE_CHUNK_BATCH_SIZE', 100, 10);
+const KNOWLEDGE_QUEUE_LIMIT = integerSetting('KNOWLEDGE_QUEUE_LIMIT', 20, 1);
+const PROCESSING_FALLBACK_ERROR = 'O processamento foi interrompido por limite de seguranca. O arquivo original foi preservado e pode ser reprocessado.';
+
+const processingQueue = [];
+const queuedDocumentIds = new Set();
+let activeWorker = null;
 
 const CATEGORIES = new Set(['PROCEDURE', 'MANUAL', 'PORTFOLIO']);
 const AUDIENCES = new Set(['CUSTOMER', 'AGENT', 'TECHNICIAN']);
@@ -85,9 +105,23 @@ async function extractPages(buffer, mimeType, apiKey) {
   }
 
   if (!apiKey) throw new Error('O documento exige OCR, mas a chave do Gemini não está configurada.');
+  if (buffer.length > KNOWLEDGE_OCR_MAX_BYTES) {
+    const limitMb = Math.floor(KNOWLEDGE_OCR_MAX_BYTES / 1024 / 1024);
+    const error = new Error(`O arquivo nao possui texto pesquisavel e excede o limite seguro de ${limitMb} MB para OCR. Envie um PDF pesquisavel ou divida o manual em partes menores.`);
+    error.publicMessage = true;
+    throw error;
+  }
   const extracted = await geminiService.extractDocumentText(apiKey, buffer.toString('base64'), mimeType);
   if (!cleanText(extracted)) throw new Error('Não foi possível extrair texto legível do arquivo.');
   return parseOcrPages(extracted);
+}
+
+function formatProcessingError(error) {
+  if (error?.publicMessage) return String(error.message).slice(0, 500);
+  const message = String(error?.message || error || '');
+  if (/texto .*til|texto leg.vel|exige OCR|PDF pesquis.vel|divida o manual/i.test(message)) return message.slice(0, 500);
+  if (/timeout|transaction|heap|memory|alloc|closed|expired|createMany/i.test(message)) return PROCESSING_FALLBACK_ERROR;
+  return 'Nao foi possivel processar este documento com seguranca. O arquivo original foi preservado para nova tentativa.';
 }
 
 function splitLongText(text, maxLength = 3400, overlap = 350) {
@@ -189,7 +223,18 @@ async function processDocument(documentId) {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: document.tenantId }, select: { geminiKey: true } });
     const buffer = await fs.readFile(resolveStorageKey(document.storageKey));
     const pages = await extractPages(buffer, document.mimeType, settings?.geminiKey);
+    const totalChars = pages.reduce((sum, item) => sum + String(item.text || '').length, 0);
+    if (totalChars > KNOWLEDGE_MAX_EXTRACTED_CHARS) {
+      const error = new Error('O documento possui conteudo demais para uma unica indexacao. Divida o manual em volumes menores.');
+      error.publicMessage = true;
+      throw error;
+    }
     const chunks = chunkPages(pages);
+    if (chunks.length > KNOWLEDGE_MAX_CHUNKS) {
+      const error = new Error(`O documento gerou mais de ${KNOWLEDGE_MAX_CHUNKS} trechos. Divida o manual em volumes menores.`);
+      error.publicMessage = true;
+      throw error;
+    }
     if (!chunks.length) throw new Error('O arquivo não contém texto útil para consulta.');
 
     for (let index = 0; index < chunks.length; index += 3) {
@@ -202,7 +247,10 @@ async function processDocument(documentId) {
 
     await prisma.$transaction(async (tx) => {
       await tx.knowledgeChunk.deleteMany({ where: { documentId } });
-      await tx.knowledgeChunk.createMany({ data: chunks.map((chunk) => ({ ...chunk, tenantId: document.tenantId, documentId })) });
+      for (let index = 0; index < chunks.length; index += KNOWLEDGE_CHUNK_BATCH_SIZE) {
+        const batch = chunks.slice(index, index + KNOWLEDGE_CHUNK_BATCH_SIZE);
+        await tx.knowledgeChunk.createMany({ data: batch.map((chunk) => ({ ...chunk, tenantId: document.tenantId, documentId })) });
+      }
       await tx.knowledgeDocument.update({
         where: { id: documentId },
         data: { status: 'DRAFT', pageCount: pages.filter((item) => item.page !== null).length || null, chunkCount: chunks.length, processedAt: new Date(), processingError: null },
@@ -212,13 +260,93 @@ async function processDocument(documentId) {
       timeout: KNOWLEDGE_TRANSACTION_TIMEOUT_MS,
     });
   } catch (error) {
-    await prisma.knowledgeDocument.update({ where: { id: documentId }, data: { status: 'FAILED', processingError: String(error.message || error).slice(0, 2000) } }).catch(() => {});
+    console.error('[knowledge-document] falha interna:', documentId, error?.stack || error);
+    await prisma.knowledgeDocument.update({ where: { id: documentId }, data: { status: 'FAILED', processingError: formatProcessingError(error) } }).catch(() => {});
     throw error;
   }
 }
 
+async function markWorkerFailure(documentId, message = PROCESSING_FALLBACK_ERROR) {
+  await prisma.knowledgeDocument.updateMany({
+    where: { id: documentId, status: 'PROCESSING' },
+    data: { status: 'FAILED', processingError: message },
+  }).catch((error) => console.error('[knowledge-document] falha ao registrar interrupcao:', error.message));
+}
+
+function startNextWorker() {
+  if (activeWorker || !processingQueue.length) return;
+  const documentId = processingQueue.shift();
+  const workerPath = path.join(__dirname, '..', 'workers', 'knowledgeDocumentWorker.js');
+  const child = spawn(process.execPath, [`--max-old-space-size=${KNOWLEDGE_WORKER_HEAP_MB}`, workerPath, documentId], {
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, KNOWLEDGE_DOCUMENT_WORKER: '1' },
+  });
+  const worker = { child, documentId, timedOut: false, memoryExceeded: false, memoryGuardBusy: false, timer: null, memoryGuard: null };
+  activeWorker = worker;
+  worker.timer = setTimeout(() => {
+    worker.timedOut = true;
+    console.error('[knowledge-document] worker excedeu o tempo:', documentId);
+    child.kill('SIGKILL');
+  }, KNOWLEDGE_WORKER_TIMEOUT_MS);
+  if (process.platform === 'linux') {
+    worker.memoryGuard = setInterval(async () => {
+      if (worker.memoryGuardBusy || activeWorker !== worker) return;
+      worker.memoryGuardBusy = true;
+      try {
+        const status = await fs.readFile(`/proc/${child.pid}/status`, 'utf8');
+        const rssKb = Number(status.match(/^VmRSS:\s+(\d+)\s+kB$/m)?.[1] || 0);
+        if (rssKb > KNOWLEDGE_WORKER_RSS_MB * 1024) {
+          worker.memoryExceeded = true;
+          console.error('[knowledge-document] worker excedeu memoria RSS:', { documentId, rssMb: Math.round(rssKb / 1024) });
+          child.kill('SIGKILL');
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') console.warn('[knowledge-document] falha no vigia de memoria:', error.message);
+      } finally {
+        worker.memoryGuardBusy = false;
+      }
+    }, 2000);
+  }
+
+  const finish = async (code, signal) => {
+    if (activeWorker !== worker) return;
+    clearTimeout(worker.timer);
+    if (worker.memoryGuard) clearInterval(worker.memoryGuard);
+    activeWorker = null;
+    queuedDocumentIds.delete(documentId);
+    if (worker.timedOut || code !== 0) {
+      console.error('[knowledge-document] worker encerrado:', { documentId, code, signal });
+      const failureMessage = worker.memoryExceeded
+        ? `O manual excedeu o limite seguro de ${KNOWLEDGE_WORKER_RSS_MB} MB durante a indexacao. O arquivo original foi preservado; envie uma versao pesquisavel ou divida-o em partes.`
+        : PROCESSING_FALLBACK_ERROR;
+      await markWorkerFailure(documentId, failureMessage);
+    }
+    setImmediate(startNextWorker);
+  };
+  child.once('error', (error) => {
+    console.error('[knowledge-document] nao foi possivel iniciar worker:', error.message);
+    finish(-1, 'spawn-error').catch(console.error);
+  });
+  child.once('exit', (code, signal) => { finish(code, signal).catch(console.error); });
+}
+
 function queueDocumentProcessing(documentId) {
-  setImmediate(() => processDocument(documentId).catch((error) => console.error('[knowledge-document] processamento falhou:', documentId, error.message)));
+  const normalized = String(documentId || '').trim();
+  if (!normalized || queuedDocumentIds.has(normalized)) return false;
+  if (processingQueue.length >= KNOWLEDGE_QUEUE_LIMIT) return false;
+  queuedDocumentIds.add(normalized);
+  processingQueue.push(normalized);
+  setImmediate(startNextWorker);
+  return true;
+}
+
+async function recoverInterruptedDocuments(bootAt = new Date()) {
+  const result = await prisma.knowledgeDocument.updateMany({
+    where: { status: 'PROCESSING', updatedAt: { lt: bootAt } },
+    data: { status: 'FAILED', processingError: 'O servidor foi reiniciado durante o processamento. O arquivo original foi preservado; clique em Reprocessar.' },
+  });
+  if (result.count) console.warn(`[knowledge-document] ${result.count} processamento(s) interrompido(s) recuperado(s).`);
+  return result.count;
 }
 
 async function removeStoredFile(storageKey) {
@@ -226,4 +354,4 @@ async function removeStoredFile(storageKey) {
   await fs.unlink(resolveStorageKey(storageKey)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
 }
 
-module.exports = { AUDIENCES, CATEGORIES, chunkPages, cleanupUploadFile, processDocument, queueDocumentProcessing, removeStoredFile, resolveStorageKey, saveUpload, validateSignature };
+module.exports = { AUDIENCES, CATEGORIES, chunkPages, cleanupUploadFile, formatProcessingError, processDocument, queueDocumentProcessing, recoverInterruptedDocuments, removeStoredFile, resolveStorageKey, saveUpload, validateSignature };

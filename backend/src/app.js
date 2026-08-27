@@ -253,6 +253,13 @@ server.listen(PORT, () => {
   // Auto-correção de URLs da Evolution inválidas (ex: contendo '@' ou emails)
   (async () => {
     try {
+      const { recoverInterruptedDocuments } = require('./services/knowledgeDocumentService');
+      await recoverInterruptedDocuments(new Date(bootAt));
+    } catch (err) {
+      console.error('[knowledge-document] Erro ao recuperar processamentos interrompidos:', err.message);
+    }
+
+    try {
       const prisma = require('./lib/prisma');
       const { repairInvalidEvolutionSettings } = require('./services/startupEvolutionSettingsService');
       await repairInvalidEvolutionSettings(prisma);
