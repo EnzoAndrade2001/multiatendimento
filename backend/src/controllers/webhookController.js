@@ -487,6 +487,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
         instanceId: waInstance.id,
         contactId: contact.id,
         status: fromMe ? 'open' : (!isGroup && useBotForInstance ? 'bot' : 'pending'),
+        sessionStartedAt: new Date(),
       }
     });
     if (io) io.to(tenant.id).emit('new_ticket', ticket);
@@ -498,11 +499,12 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
   }
 
   if (ticket.status === 'resolved') {
-    // Se o ticket já existia mas estava resolvido, REABRE ele para evitar duplicação na lista
+    // Se o ticket já existia mas estava resolvido, REABRE ele para evitar duplicação na lista.
+    // Reinicia sessionStartedAt: começa uma nova conversa reaproveitando a mesma linha.
     const useBotForInstance = shouldUseBotForInstance(instance, tenant.settings);
     ticket = await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: new Date(), lastMessageAt: new Date(), unreadCount: { increment: 1 } }
+      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: new Date(), lastMessageAt: new Date(), unreadCount: { increment: 1 }, sessionStartedAt: new Date() }
     });
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
     console.log(`[webhook] Ticket ${ticket.id} reaberto para evitar duplicação.`);

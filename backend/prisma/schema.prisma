@@ -286,6 +286,11 @@ model Ticket {
   updatedAt      DateTime  @updatedAt
   resolvedAt     DateTime?
 
+  // Início da conversa/sessão atual. Reiniciado a cada reabertura (o mesmo Ticket
+  // é reaproveitado por contato), para que métricas sejam por conversa e não pela
+  // data do primeiro contato histórico.
+  sessionStartedAt DateTime?
+
   // SLA Fields
   slaDueAt              DateTime?
   firstResponseAt       DateTime?
@@ -322,6 +327,7 @@ model Ticket {
   @@index([contactId])
   @@index([status])
   @@index([createdAt])
+  @@index([sessionStartedAt])
 }
 
 model UserTicketState {

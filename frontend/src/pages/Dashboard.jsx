@@ -151,15 +151,15 @@ export default function Dashboard() {
         <KpiCard
           icon={<TrendingUp color="#10b981" />}
           label="Taxa de Retenção IA"
-          value={formatPercent(kpis.retentionRate)}
-          hint={kpis.retentionSampleSize ? `${kpis.retainedByIA} de ${kpis.retentionSampleSize} conversas sem atendimento humano` : 'Sem conversas encerradas no período'}
+          value={formatPercent(kpis.retentionRateEngaged)}
+          hint={kpis.retentionEngagedSampleSize ? `${kpis.retainedByIAEngaged} de ${kpis.retentionEngagedSampleSize} conversas que o bot atendeu foram resolvidas sem humano` : 'Sem conversas encerradas no período'}
           accentColor="#10b981"
         />
         <KpiCard
           icon={<Clock color="#3b82f6" />}
-          label="Tempo médio de resolução"
-          value={formatDuration(kpis.avgTMA)}
-          hint={kpis.tmaSampleSize ? `Mediana ${formatDuration(kpis.medianTMA)} · P90 ${formatDuration(kpis.p90TMA)} · ${kpis.tmaSampleSize} encerrados` : 'Sem chamados encerrados no período'}
+          label="Tempo de resolução (mediana)"
+          value={formatDuration(kpis.medianTMA)}
+          hint={kpis.tmaSampleSize ? `Média ${formatDuration(kpis.avgTMA)} · P90 ${formatDuration(kpis.p90TMA)} · ${kpis.tmaSampleSize} encerrados` : 'Sem chamados encerrados no período'}
           accentColor="#3b82f6"
         />
         <KpiCard

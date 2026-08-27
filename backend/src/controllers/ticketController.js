@@ -568,6 +568,8 @@ async function assign(req, res) {
       agentId: agentId || null,
       teamId: teamId || null,
       status: agentId ? 'open' : (teamId ? 'pending' : 'open'),
+      // Reabrir um ticket resolvido inicia uma nova conversa (mesma linha reaproveitada).
+      ...(existing.status === 'resolved' ? { sessionStartedAt: new Date() } : {}),
     },
     include: { contact: true, agent: { select: { id: true, name: true } }, team: true },
   });
@@ -649,11 +651,15 @@ async function update(req, res) {
   const existing = await prisma.ticket.findFirst({ where: { id, tenantId: req.user.tenantId } });
   if (!existing) return res.status(404).json({ error: 'Ticket não encontrado' });
 
+  const reopeningFromResolved = existing.status === 'resolved' && status && status !== 'resolved';
+
   const ticket = await prisma.ticket.update({
     where: { id },
     data: {
       ...(priority && { priority }),
-      ...(status && { status })
+      ...(status && { status }),
+      // Reabrir manualmente um ticket resolvido inicia uma nova conversa.
+      ...(reopeningFromResolved ? { sessionStartedAt: new Date() } : {}),
     }
   });
 
@@ -841,7 +847,13 @@ async function sendMessage(req, res) {
     if (ticket.status !== 'open' || !ticket.agentId) {
       await prisma.ticket.update({
         where: { id },
-        data: { status: 'open', agentId: req.user.userId, lastMessageAt: new Date() }
+        data: {
+          status: 'open',
+          agentId: req.user.userId,
+          lastMessageAt: new Date(),
+          // Responder um ticket resolvido reabre a mesma linha: inicia uma nova conversa.
+          ...(ticket.status === 'resolved' ? { sessionStartedAt: new Date() } : {}),
+        }
       });
       if (io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
     }
@@ -1044,7 +1056,13 @@ async function sendMediaMessage(req, res) {
     if (ticket.status !== 'open' || !ticket.agentId) {
       await prisma.ticket.update({
         where: { id },
-        data: { status: 'open', agentId: req.user.userId, lastMessageAt: new Date() }
+        data: {
+          status: 'open',
+          agentId: req.user.userId,
+          lastMessageAt: new Date(),
+          // Responder um ticket resolvido reabre a mesma linha: inicia uma nova conversa.
+          ...(ticket.status === 'resolved' ? { sessionStartedAt: new Date() } : {}),
+        }
       });
       if (io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
     }
@@ -1150,6 +1168,7 @@ async function reopen(req, res) {
       contactId,
       agentId: req.user.userId,
       status: 'open',
+      sessionStartedAt: new Date(),
     },
     include: { contact: true, instance: true }
   });
@@ -1412,7 +1431,7 @@ async function forwardMessage(req, res) {
       if (!instanceId) return res.status(400).json({ error: 'Nenhuma instância disponível' });
 
       ticket = await prisma.ticket.create({
-        data: { contactId: contact.id, instanceId, status: 'open', tenantId, agentId: req.user.userId },
+        data: { contactId: contact.id, instanceId, status: 'open', tenantId, agentId: req.user.userId, sessionStartedAt: new Date() },
         include: { instance: true }
       });
     }

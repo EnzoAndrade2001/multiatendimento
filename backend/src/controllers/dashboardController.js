@@ -19,9 +19,24 @@ function classifyMessageGroups(groups = []) {
   }, { ia: 0, human: 0, received: 0 });
 }
 
+function toTime(value) {
+  if (!value) return NaN;
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(time) ? time : NaN;
+}
+
+// Início da conversa atual. Como o mesmo Ticket é reaproveitado por contato,
+// createdAt aponta para o primeiro contato histórico; sessionStartedAt (quando
+// preenchido) marca o começo da conversa vigente. Fallback para createdAt em
+// tickets anteriores ao backfill.
+function sessionStartTime(row) {
+  const started = toTime(row?.sessionStartedAt);
+  return Number.isFinite(started) ? started : toTime(row?.createdAt);
+}
+
 function durationMinutes(row) {
-  const startedAt = row?.createdAt ? new Date(row.createdAt).getTime() : NaN;
-  const finishedAt = row?.resolvedAt ? new Date(row.resolvedAt).getTime() : NaN;
+  const startedAt = sessionStartTime(row);
+  const finishedAt = toTime(row?.resolvedAt);
   if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) return null;
   return (finishedAt - startedAt) / 60000;
 }
@@ -49,6 +64,41 @@ function summarizeDurations(rows = []) {
     sampleSize: sorted.length,
     invalidCount: rows.length - sorted.length,
   };
+}
+
+function maxCreatedAtByTicket(groups = []) {
+  const map = new Map();
+  groups.forEach((group) => {
+    const time = toTime(group?._max?.createdAt);
+    if (Number.isFinite(time)) map.set(group.ticketId, time);
+  });
+  return map;
+}
+
+// Retenção IA no escopo da conversa atual. "Retido pela IA" = ticket com mensagem
+// do bot e SEM mensagem humana (fromMe e não fromBot) a partir de sessionStartedAt
+// — mensagens humanas de conversas anteriores na mesma linha não desqualificam.
+// Também calcula um denominador mais justo (engajado): apenas conversas em que o
+// bot efetivamente atuou nesta sessão (mensagem fromBot >= sessionStartedAt).
+function summarizeSessionRetention(candidates = [], humanReplyGroups = [], botMessageGroups = []) {
+  const latestHumanReply = maxCreatedAtByTicket(humanReplyGroups);
+  const latestBotMessage = maxCreatedAtByTicket(botMessageGroups);
+  let retainedByIA = 0;
+  let engagedSampleSize = 0;
+  let retainedByIAEngaged = 0;
+  candidates.forEach((ticket) => {
+    const sessionStart = sessionStartTime(ticket);
+    const humanTime = latestHumanReply.get(ticket.id);
+    const retained = humanTime === undefined || humanTime < sessionStart;
+    if (retained) retainedByIA += 1;
+    const botTime = latestBotMessage.get(ticket.id);
+    const engagedThisSession = botTime !== undefined && botTime >= sessionStart;
+    if (engagedThisSession) {
+      engagedSampleSize += 1;
+      if (retained) retainedByIAEngaged += 1;
+    }
+  });
+  return { retainedByIA, retainedByIAEngaged, engagedSampleSize };
 }
 
 function dateKey(value) {
@@ -132,7 +182,7 @@ async function buildAgentBreakdown(tenantId, periodStart, activeAgents) {
   const [resolvedTickets, messageGroups, ratedTickets] = await Promise.all([
     prisma.ticket.findMany({
       where: { tenantId, agentId: { in: agentIds }, status: 'resolved', resolvedAt: { gte: periodStart } },
-      select: { agentId: true, createdAt: true, resolvedAt: true },
+      select: { agentId: true, createdAt: true, sessionStartedAt: true, resolvedAt: true },
     }),
     prisma.message.groupBy({
       by: ['agentId'],
@@ -186,7 +236,7 @@ async function getStats(req, res) {
   const generatedAt = new Date();
   const periodStart = new Date(generatedAt.getTime() - periodDays * DAY_MS);
 
-  const [messages, messagesAllTime, tickets, resolvedByIA, resolvedTickets, totalContacts, newContacts, activeAgents, ratings, ratingsDist, dailyMessageRows, health] = await Promise.all([
+  const [messages, messagesAllTime, tickets, iaCandidateTickets, resolvedTickets, totalContacts, newContacts, activeAgents, ratings, ratingsDist, dailyMessageRows, health] = await Promise.all([
     prisma.message.groupBy({
       by: ['fromBot', 'fromMe'],
       where: { ticket: { tenantId }, createdAt: { gte: periodStart } },
@@ -198,18 +248,21 @@ async function getStats(req, res) {
       _count: { id: true },
     }),
     prisma.ticket.groupBy({ by: ['status'], where: { tenantId }, _count: { id: true } }),
-    prisma.ticket.count({
+    // Candidatas à retenção IA: encerradas no período que tiveram alguma mensagem
+    // do bot (em qualquer momento). O recorte por sessão é feito em JS abaixo,
+    // pois o Prisma não referencia o campo da linha externa dentro de `none`.
+    prisma.ticket.findMany({
       where: {
         tenantId,
         status: 'resolved',
-        agentId: null,
         resolvedAt: { gte: periodStart },
-        messages: { some: { fromBot: true }, none: { fromMe: true, fromBot: false } },
+        messages: { some: { fromBot: true } },
       },
+      select: { id: true, sessionStartedAt: true, createdAt: true },
     }),
     prisma.ticket.findMany({
       where: { tenantId, status: 'resolved', resolvedAt: { gte: periodStart } },
-      select: { createdAt: true, resolvedAt: true },
+      select: { createdAt: true, sessionStartedAt: true, resolvedAt: true },
     }),
     prisma.contact.count({ where: { tenantId } }),
     prisma.contact.count({ where: { tenantId, createdAt: { gte: periodStart } } }),
@@ -241,6 +294,27 @@ async function getStats(req, res) {
   const periodMessages = classifyMessageGroups(messages);
   const allTimeMessages = classifyMessageGroups(messagesAllTime);
   const tma = summarizeDurations(resolvedTickets);
+
+  // Retenção IA no escopo da conversa atual: verifica, para cada candidata, se há
+  // mensagem humana / do bot a partir do início da sessão (sessionStartedAt).
+  const iaCandidateIds = iaCandidateTickets.map((ticket) => ticket.id);
+  const [humanReplyGroups, botMessageGroups] = iaCandidateIds.length
+    ? await Promise.all([
+        prisma.message.groupBy({
+          by: ['ticketId'],
+          where: { ticketId: { in: iaCandidateIds }, fromMe: true, fromBot: false },
+          _max: { createdAt: true },
+        }),
+        prisma.message.groupBy({
+          by: ['ticketId'],
+          where: { ticketId: { in: iaCandidateIds }, fromBot: true },
+          _max: { createdAt: true },
+        }),
+      ])
+    : [[], []];
+  const retention = summarizeSessionRetention(iaCandidateTickets, humanReplyGroups, botMessageGroups);
+  const resolvedByIA = retention.retainedByIA;
+
   const agentBreakdown = await buildAgentBreakdown(tenantId, periodStart, activeAgents);
   const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   ratingsDist.forEach((item) => {
@@ -274,6 +348,12 @@ async function getStats(req, res) {
       retentionRate: totalResolved > 0 ? Math.round((resolvedByIA / totalResolved) * 100) : null,
       retainedByIA: resolvedByIA,
       retentionSampleSize: totalResolved,
+      // Denominador mais justo: só conversas em que o bot atuou nesta sessão.
+      retentionRateEngaged: retention.engagedSampleSize > 0
+        ? Math.round((retention.retainedByIAEngaged / retention.engagedSampleSize) * 100)
+        : null,
+      retainedByIAEngaged: retention.retainedByIAEngaged,
+      retentionEngagedSampleSize: retention.engagedSampleSize,
       totalResolved,
       totalContacts,
       newContacts,
@@ -290,4 +370,12 @@ async function getStats(req, res) {
   });
 }
 
-module.exports = { getStats, classifyMessageGroups, summarizeDurations, fillDailyMessages };
+module.exports = {
+  getStats,
+  classifyMessageGroups,
+  summarizeDurations,
+  fillDailyMessages,
+  durationMinutes,
+  sessionStartTime,
+  summarizeSessionRetention,
+};
