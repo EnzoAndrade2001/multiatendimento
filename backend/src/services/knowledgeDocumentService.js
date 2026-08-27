@@ -1,6 +1,9 @@
 const crypto = require('crypto');
+const fsSync = require('fs');
 const fs = require('fs/promises');
 const path = require('path');
+const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const mammoth = require('mammoth');
 const { PDFParse } = require('pdf-parse');
 const { Prisma } = require('@prisma/client');
@@ -110,6 +113,41 @@ function chunkPages(pages) {
 }
 
 async function saveUpload(tenantId, file) {
+  if (file?.path) {
+    const header = Buffer.alloc(64 * 1024);
+    let handle;
+    try {
+      handle = await fs.open(file.path, 'r');
+      const { bytesRead } = await handle.read(header, 0, header.length, 0);
+      const headerBuffer = header.subarray(0, bytesRead);
+      const zipHeader = file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        && headerBuffer[0] === 0x50 && headerBuffer[1] === 0x4b && headerBuffer[2] === 0x03 && headerBuffer[3] === 0x04;
+      if (!zipHeader && !validateSignature(headerBuffer, file.mimetype)) {
+        throw Object.assign(new Error('O conteudo do arquivo nao corresponde ao formato informado.'), { statusCode: 415 });
+      }
+    } finally {
+      if (handle) await handle.close().catch(() => {});
+    }
+    const directory = path.join(knowledgePath, tenantId);
+    await fs.mkdir(directory, { recursive: true });
+    const storageKey = path.join(tenantId, `${crypto.randomUUID()}${MIME_EXTENSIONS[file.mimetype]}`).replace(/\\/g, '/');
+    const destination = path.join(knowledgePath, storageKey);
+    try {
+      const hash = crypto.createHash('sha256');
+      const hashingTransform = new Transform({
+        transform(chunk, _encoding, callback) {
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      });
+      await pipeline(fsSync.createReadStream(file.path), hashingTransform, fsSync.createWriteStream(destination, { flags: 'wx' }));
+      await fs.unlink(file.path).catch(() => {});
+      return { checksum: hash.digest('hex'), storageKey };
+    } catch (error) {
+      await fs.unlink(destination).catch(() => {});
+      throw error;
+    }
+  }
   if (!validateSignature(file.buffer, file.mimetype)) throw Object.assign(new Error('O conteúdo do arquivo não corresponde ao formato informado.'), { statusCode: 415 });
   const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
   const directory = path.join(knowledgePath, tenantId);
@@ -117,6 +155,10 @@ async function saveUpload(tenantId, file) {
   const storageKey = path.join(tenantId, `${crypto.randomUUID()}${MIME_EXTENSIONS[file.mimetype]}`).replace(/\\/g, '/');
   await fs.writeFile(path.join(knowledgePath, storageKey), file.buffer, { flag: 'wx' });
   return { checksum, storageKey };
+}
+
+async function cleanupUploadFile(file) {
+  if (file?.path) await fs.unlink(file.path).catch(() => {});
 }
 
 function resolveStorageKey(storageKey) {
@@ -168,4 +210,4 @@ async function removeStoredFile(storageKey) {
   await fs.unlink(resolveStorageKey(storageKey)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
 }
 
-module.exports = { AUDIENCES, CATEGORIES, chunkPages, processDocument, queueDocumentProcessing, removeStoredFile, resolveStorageKey, saveUpload, validateSignature };
+module.exports = { AUDIENCES, CATEGORIES, chunkPages, cleanupUploadFile, processDocument, queueDocumentProcessing, removeStoredFile, resolveStorageKey, saveUpload, validateSignature };

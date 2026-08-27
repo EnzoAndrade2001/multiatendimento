@@ -27,6 +27,10 @@ import {
   downloadAgent,
   getSystemPromptPreview,
   syncCompanyFromFirebird,
+  getTechnicalContacts,
+  createTechnicalContact,
+  updateTechnicalContact,
+  deleteTechnicalContact,
 } from '../services/api';
 import Users from './Users';
 import Teams from './Teams';
@@ -164,6 +168,10 @@ export default function Settings() {
   const [testingIntegration, setTestingIntegration] = useState(false);
   const [syncingIntegration, setSyncingIntegration] = useState(false);
   const [syncingCompany, setSyncingCompany] = useState(false);
+  const [technicalContacts, setTechnicalContacts] = useState([]);
+  const [technicalContactForm, setTechnicalContactForm] = useState({ name: '', phone: '', firebirdSupportName: '' });
+  const [editingTechnicalContact, setEditingTechnicalContact] = useState(null);
+  const [technicalContactBusy, setTechnicalContactBusy] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => !HIDDEN_TAB_INDEXES.has(index) && (!TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index])));
 
@@ -202,7 +210,7 @@ export default function Settings() {
     // o tempo total era a SOMA de todas -- por isso a tela demorava ~15s. Elas
     // não dependem uma da outra, então rodam em paralelo agora: o tempo total
     // passa a ser o da mais lenta, não a soma de todas.
-    const [settingsResult, meResult, instancesResult, quickResponsesResult, tagsResult, hoursResult, agentInfoResult] = await Promise.allSettled([
+    const [settingsResult, meResult, instancesResult, quickResponsesResult, tagsResult, hoursResult, agentInfoResult, technicalContactsResult] = await Promise.allSettled([
       getSettings(),
       getMe(),
       getInstances(),
@@ -210,6 +218,7 @@ export default function Settings() {
       getTags(),
       getBusinessHours(),
       can('settings.agent.manage') ? getAgentInfo() : Promise.resolve({ data: null }),
+      can('settings.bot.manage') ? getTechnicalContacts() : Promise.resolve({ data: [] }),
     ]);
 
     if (settingsResult.status === 'fulfilled') {
@@ -243,6 +252,9 @@ export default function Settings() {
 
     if (agentInfoResult.status === 'fulfilled') {
       setAgentInfo(agentInfoResult.value.data);
+    }
+    if (technicalContactsResult.status === 'fulfilled') {
+      setTechnicalContacts(Array.isArray(technicalContactsResult.value.data) ? technicalContactsResult.value.data : []);
     }
   }
 
@@ -345,6 +357,72 @@ export default function Settings() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleTechnicalContactSave(event) {
+    event.preventDefault();
+    if (technicalContactBusy) return;
+    const name = technicalContactForm.name.trim();
+    const phone = technicalContactForm.phone.trim();
+    if (name.length < 2) {
+      toast.error('Informe o nome do técnico.');
+      return;
+    }
+    if (phone.replace(/\D/g, '').length < 10) {
+      toast.error('Informe um WhatsApp válido com DDD e número.');
+      return;
+    }
+    setTechnicalContactBusy(true);
+    try {
+      const payload = { ...technicalContactForm, name, phone };
+      const response = editingTechnicalContact
+        ? await updateTechnicalContact(editingTechnicalContact.id, payload)
+        : await createTechnicalContact(payload);
+      if (editingTechnicalContact) {
+        setTechnicalContacts((current) => current.map((item) => item.id === editingTechnicalContact.id ? response.data : item));
+        toast.success('Autorização do técnico atualizada.');
+      } else {
+        setTechnicalContacts((current) => [...current, response.data]);
+        toast.success('Técnico autorizado para o assistente via WhatsApp.');
+      }
+      setTechnicalContactForm({ name: '', phone: '', firebirdSupportName: '' });
+      setEditingTechnicalContact(null);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível salvar o técnico autorizado.');
+    } finally {
+      setTechnicalContactBusy(false);
+    }
+  }
+
+  function editTechnicalContact(item) {
+    setEditingTechnicalContact(item);
+    setTechnicalContactForm({ name: item.name || '', phone: item.phone || '', firebirdSupportName: item.firebirdSupportName || '' });
+  }
+
+  async function toggleTechnicalContact(item) {
+    try {
+      const response = await updateTechnicalContact(item.id, { active: !item.active });
+      setTechnicalContacts((current) => current.map((contact) => contact.id === item.id ? response.data : contact));
+      toast.success(response.data.active ? 'Técnico reativado.' : 'Técnico desativado.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível alterar o status.');
+    }
+  }
+
+  function removeTechnicalContact(item) {
+    toast.confirm(`Remover a autorização de ${item.name}? O contato não será apagado do WhatsApp.`, async () => {
+      try {
+        await deleteTechnicalContact(item.id);
+        setTechnicalContacts((current) => current.filter((contact) => contact.id !== item.id));
+        if (editingTechnicalContact?.id === item.id) {
+          setEditingTechnicalContact(null);
+          setTechnicalContactForm({ name: '', phone: '', firebirdSupportName: '' });
+        }
+        toast.success('Autorização removida.');
+      } catch (err) {
+        toast.error(err.response?.data?.error || 'Não foi possível remover a autorização.');
+      }
+    });
   }
 
   async function handleProfileAvatarUpload(event) {
@@ -784,6 +862,55 @@ export default function Settings() {
               <button style={s.saveBtn} disabled={saving}>{saving ? 'Salvando...' : 'Salvar alterações'}</button>
             </form>
           </div>
+
+          {can('settings.bot.manage') && (
+            <section style={s.card} aria-labelledby="technical-contacts-title">
+              <h2 id="technical-contacts-title" style={s.cardTitle}>Assistente técnico via WhatsApp</h2>
+              <p style={s.hint}>
+                Autorize números de técnicos de campo para consultarem os manuais publicados pelo WhatsApp. Eles não precisam de usuário, senha ou acesso ao chat; Diego continua administrador normalmente.
+              </p>
+              <form onSubmit={handleTechnicalContactSave} style={{ ...s.form, marginTop: '1rem' }}>
+                <div style={{ display: 'flex', gap: '1rem', flexDirection: isMobile ? 'column' : 'row' }}>
+                  <div style={{ ...s.field, flex: 1 }}>
+                    <label style={s.label} htmlFor="technical-contact-name">Nome do técnico</label>
+                    <input id="technical-contact-name" style={s.input} value={technicalContactForm.name} onChange={(e) => setTechnicalContactForm({ ...technicalContactForm, name: e.target.value })} placeholder="Ex.: Diego Cabral" maxLength={120} />
+                  </div>
+                  <div style={{ ...s.field, flex: 1 }}>
+                    <label style={s.label} htmlFor="technical-contact-phone">WhatsApp autorizado</label>
+                    <input id="technical-contact-phone" type="tel" style={s.input} value={technicalContactForm.phone} onChange={(e) => setTechnicalContactForm({ ...technicalContactForm, phone: e.target.value })} placeholder="5551999999999" maxLength={20} />
+                  </div>
+                </div>
+                <div style={s.field}>
+                  <label style={s.label} htmlFor="technical-contact-firebird-name">Nome do técnico no iLux (opcional)</label>
+                  <input id="technical-contact-firebird-name" style={s.input} value={technicalContactForm.firebirdSupportName} onChange={(e) => setTechnicalContactForm({ ...technicalContactForm, firebirdSupportName: e.target.value })} placeholder="Ex.: DIEGO" maxLength={80} />
+                  <p style={s.hint}>Usado apenas para identificar o técnico ao abrir chamados no iLux.</p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button type="submit" style={s.saveBtn} disabled={technicalContactBusy}>
+                    {technicalContactBusy ? 'Salvando...' : (editingTechnicalContact ? 'Salvar alteração' : 'Autorizar número')}
+                  </button>
+                  {editingTechnicalContact && <button type="button" style={s.iconButton} onClick={() => { setEditingTechnicalContact(null); setTechnicalContactForm({ name: '', phone: '', firebirdSupportName: '' }); }}>Cancelar edição</button>}
+                </div>
+              </form>
+              <div style={{ display: 'grid', gap: '0.65rem', marginTop: '1.25rem' }}>
+                {technicalContacts.length === 0 ? (
+                  <p style={s.hint}>Nenhum número autorizado ainda.</p>
+                ) : technicalContacts.map((item) => (
+                  <div key={item.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem', border: '1px solid var(--border)', borderRadius: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <strong>{item.name}</strong>
+                      <div style={s.hint}>{item.phone}{item.firebirdSupportName ? ` · iLux: ${item.firebirdSupportName}` : ''}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button type="button" style={s.iconButton} onClick={() => toggleTechnicalContact(item)}>{item.active ? 'Ativo' : 'Inativo'}</button>
+                      <button type="button" style={s.iconButton} onClick={() => editTechnicalContact(item)}>Editar</button>
+                      <button type="button" style={s.delBtn} onClick={() => removeTechnicalContact(item)}>Remover</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <div style={s.card}>
             <h2 style={s.cardTitle}>Comportamento da IA</h2>

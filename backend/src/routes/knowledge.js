@@ -4,7 +4,7 @@ const knowledgeController = require('../controllers/knowledgeController');
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
 const documentController = require('../controllers/knowledgeDocumentController');
-const { knowledgeUpload } = require('../middlewares/knowledgeUpload');
+const { handleKnowledgeUpload } = require('../middlewares/knowledgeUpload');
 
 router.use(authenticate, requirePermission('settings.bot.manage'));
 
@@ -14,7 +14,7 @@ router.get('/audit', knowledgeController.audit);
 router.post('/test', knowledgeController.testSearch);
 router.post('/reindex', knowledgeController.reindex);
 router.get('/documents', documentController.list);
-router.post('/documents', knowledgeUpload.single('file'), documentController.create);
+router.post('/documents', handleKnowledgeUpload, documentController.create);
 router.get('/documents/:id', documentController.detail);
 router.get('/documents/:id/download', documentController.download);
 router.patch('/documents/:id', documentController.update);

@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
 const evolutionService = require('../services/evolutionService');
+const technicalAssistantService = require('../services/technicalAssistantService');
 const { normalizeProfile, normalizePermissionList, resolveUserAccess, resolveHomePage, hasPermission } = require('../auth/permissions');
 
 const publicUserSelect = {
@@ -83,6 +84,7 @@ async function create(req, res) {
     },
     select: publicUserSelect,
   });
+  technicalAssistantService.clearActorCache();
   res.json(serializeUser(user));
 }
 
@@ -122,6 +124,7 @@ async function update(req, res) {
     data,
     select: publicUserSelect,
   });
+  technicalAssistantService.clearActorCache();
   res.json(serializeUser(user));
 }
 

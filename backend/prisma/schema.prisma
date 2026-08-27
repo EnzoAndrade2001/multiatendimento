@@ -27,6 +27,7 @@ model Tenant {
   settings                   TenantSettings?
   tickets                    Ticket[]
   users                      User[]
+  technicalContacts          TechnicalContact[]
   instances                  WaInstance[]
   metaInstances              MetaInstance[]
   knowledges                 Knowledge[]
@@ -149,6 +150,24 @@ model User {
   quickResponseAudits        QuickResponseAudit[]
 
   @@unique([tenantId, email])
+}
+
+// Técnicos de campo podem usar o assistente técnico pelo WhatsApp sem possuir
+// conta, senha ou acesso ao painel web. O telefone ativo é a autorização
+// explícita para o modo técnico.
+model TechnicalContact {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  name                String
+  phone               String
+  firebirdSupportName String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @default(now()) @updatedAt
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, active])
 }
 
 model Team {

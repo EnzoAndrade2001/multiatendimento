@@ -35,8 +35,14 @@ async function create(req, res) {
     const title = text(req.body.title);
     const category = text(req.body.category, 30).toUpperCase() || 'MANUAL';
     const audience = text(req.body.audience, 30).toUpperCase() || 'CUSTOMER';
-    if (!title) return res.status(400).json({ error: 'Informe o título do documento.' });
-    if (!documentService.CATEGORIES.has(category) || !documentService.AUDIENCES.has(audience)) return res.status(400).json({ error: 'Categoria ou público inválido.' });
+    if (!title) {
+      await documentService.cleanupUploadFile(req.file);
+      return res.status(400).json({ error: 'Informe o título do documento.' });
+    }
+    if (!documentService.CATEGORIES.has(category) || !documentService.AUDIENCES.has(audience)) {
+      await documentService.cleanupUploadFile(req.file);
+      return res.status(400).json({ error: 'Categoria ou público inválido.' });
+    }
 
     stored = await documentService.saveUpload(req.user.tenantId, req.file);
     const document = await prisma.knowledgeDocument.create({ data: {
@@ -62,6 +68,7 @@ async function create(req, res) {
     res.status(202).json(serialize(document));
   } catch (error) {
     if (stored?.storageKey) await documentService.removeStoredFile(stored.storageKey).catch(() => {});
+    await documentService.cleanupUploadFile(req.file).catch(() => {});
     if (error.code === 'P2002') return res.status(409).json({ error: 'Este mesmo arquivo já foi enviado para a base.' });
     console.error('[knowledge-document] criar:', error.message);
     res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Não foi possível receber o documento.' });

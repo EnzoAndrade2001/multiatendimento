@@ -995,6 +995,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     assistantMode,
     audience: knowledgeAudience,
     actorUserId: actorContext?.userId || null,
+    actorTechnicalContactId: actorContext?.technicalContactId || null,
   };
   console.log(`[bot-audit] Ticket ${ticket.id} | origem=${responseAudit.origin} | fontes=${responseAudit.sources.join(',') || 'nenhuma'} | modelo=${responseModel || 'desconhecido'}`);
 

@@ -21,6 +21,13 @@ if (!fs.existsSync(knowledgePath)) {
   fs.mkdirSync(knowledgePath, { recursive: true });
 }
 
+// Staging do multipart. Fica dentro do mesmo volume persistente de uploads,
+// portanto não depende da camada efêmera do container durante um deploy.
+const knowledgeTempPath = path.join(uploadsPath, '.knowledge-tmp');
+if (!fs.existsSync(knowledgeTempPath)) {
+  fs.mkdirSync(knowledgeTempPath, { recursive: true });
+}
+
 // Fotos de usuários ficam no volume persistente de uploads, separadas dos
 // anexos de atendimento. O diretório é servido somente pela rota tenant-aware
 // /api/user-avatars/:filename.
@@ -33,5 +40,6 @@ module.exports = {
   uploadsPath,
   mediaPath,
   knowledgePath,
+  knowledgeTempPath,
   userAvatarPath,
 };

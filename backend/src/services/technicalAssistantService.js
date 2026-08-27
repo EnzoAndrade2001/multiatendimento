@@ -40,20 +40,41 @@ async function resolveWhatsAppActor({ tenantId, phone }) {
   const cached = getCached(key);
   if (cached !== undefined) return cached;
 
-  const users = await prisma.user.findMany({
-    where: { tenantId, active: true, phone: { not: null } },
-    select: { id: true, name: true, phone: true, role: true, accessProfile: true, firebirdSupportName: true },
+  const authorizedContacts = await prisma.technicalContact.findMany({
+    where: { tenantId, active: true },
+    select: { id: true, name: true, phone: true, firebirdSupportName: true },
   });
-  const technician = users.find((user) => isTechnicianProfile(user)
-    && [...normalizeCandidates(user.phone)].some((candidate) => candidates.has(candidate)));
+  const authorized = authorizedContacts.find((contact) => [...normalizeCandidates(contact.phone)]
+    .some((candidate) => candidates.has(candidate)));
 
-  const value = technician ? {
+  let value = authorized ? {
     type: 'TECHNICIAN',
     audience: 'TECHNICIAN',
-    userId: technician.id,
-    name: technician.name,
-    firebirdSupportName: technician.firebirdSupportName || null,
+    userId: null,
+    technicalContactId: authorized.id,
+    name: authorized.name,
+    firebirdSupportName: authorized.firebirdSupportName || null,
   } : null;
+
+  // Compatibilidade: instalações antigas ainda podem ter o técnico como User.
+  if (!value) {
+    const users = await prisma.user.findMany({
+      where: { tenantId, active: true, phone: { not: null } },
+      select: { id: true, name: true, phone: true, role: true, accessProfile: true, firebirdSupportName: true },
+    });
+    const technician = users.find((user) => isTechnicianProfile(user)
+      && [...normalizeCandidates(user.phone)].some((candidate) => candidates.has(candidate)));
+    if (technician) {
+      value = {
+        type: 'TECHNICIAN',
+        audience: 'TECHNICIAN',
+        userId: technician.id,
+        technicalContactId: null,
+        name: technician.name,
+        firebirdSupportName: technician.firebirdSupportName || null,
+      };
+    }
+  }
   actorCache.set(key, { value, createdAt: Date.now() });
   return value;
 }

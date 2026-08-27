@@ -107,6 +107,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/instance', instanceRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/technical-contacts', require('./routes/technicalContacts'));
 app.use('/api/teams', teamRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/superadmin', superadminRoutes);
