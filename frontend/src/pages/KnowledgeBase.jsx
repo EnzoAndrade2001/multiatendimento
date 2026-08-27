@@ -257,8 +257,8 @@ export default function KnowledgeBase() {
 
       <div style={s.tabs}>
         <button type="button" style={{ ...s.tab, ...(tab === 'answers' ? s.tabActive : {}) }} onClick={() => setTab('answers')}><BookOpen size={17} /> Respostas oficiais</button>
-        <button type="button" style={{ ...s.tab, ...(tab === 'audit' ? s.tabActive : {}) }} onClick={() => setTab('audit')}><ShieldCheck size={17} /> Auditoria da IA</button>
         <button type="button" style={{ ...s.tab, ...(tab === 'documents' ? s.tabActive : {}) }} onClick={() => setTab('documents')}><FileText size={17} /> Manuais e portfólios <span style={s.tabCount}>{documents.length}</span></button>
+        <button type="button" style={{ ...s.tab, ...(tab === 'audit' ? s.tabActive : {}) }} onClick={() => setTab('audit')}><ShieldCheck size={17} /> Auditoria da IA</button>
       </div>
 
       {tab === 'audit' ? (
