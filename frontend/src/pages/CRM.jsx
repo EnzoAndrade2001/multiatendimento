@@ -1445,7 +1445,7 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
                   <span><Wrench size={13} /> {pick(order, 'technicianName', 'technician', 'assignedTo') || 'Técnico não informado'}</span>
                   {pick(order, 'closedAt', 'finishedAt') ? <span><CalendarDays size={13} /> Fechada em {formatDate(pick(order, 'closedAt', 'finishedAt'))}</span> : null}
                 </div>
-                {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing') ? <div style={s.resolution}><strong>Fechamento:</strong> {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing')}</div> : null}
+                {closed && pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing') ? <div style={s.resolution}><strong>Fechamento:</strong> {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing')}</div> : null}
                 <div style={s.osActions}>
                   <button type="button" style={s.osActionBtn} disabled={!printable} title={printable ? '' : 'Aguardando confirmacao do iLux'} onClick={() => openPdf(order)}><FileText size={14} /> Abrir O.S. / Reimprimir</button>
                   <button type="button" style={s.osActionPrimary} disabled={!printable || Boolean(sendingId)} onClick={() => sendToManager(order)}>
