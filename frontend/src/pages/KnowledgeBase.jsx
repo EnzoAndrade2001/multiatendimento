@@ -472,7 +472,7 @@ const s = {
   auditDetails: { color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.5, padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-panel)' },
   panelTitle: { margin: 0, fontSize: 'var(--text-lg)' },
   panelText: { margin: 'var(--space-1) 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' },
-  testForm: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) auto', gap: 'var(--space-3)' },
+  testForm: { display: 'grid', gridTemplateColumns: 'minmax(170px, 210px) minmax(240px, 1fr) auto', gap: 'var(--space-3)', alignItems: 'center' },
   testResults: { display: 'grid', gap: 'var(--space-3)' },
   simulatedAnswer: { display: 'grid', gap: 'var(--space-3)', padding: 'var(--space-5)', border: '1px solid var(--success)', borderRadius: 'var(--radius-md)', background: 'var(--success-light)' },
   answerLabel: { color: 'var(--success-text)', fontSize: 'var(--text-xs)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.05em' },

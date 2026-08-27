@@ -202,7 +202,7 @@ export default function Dashboard() {
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-main)' }}
                   itemStyle={{ fontSize: '12px' }}
-                  formatter={(value, name) => [Number(value || 0).toLocaleString('pt-BR'), name === 'ia' ? 'IA' : 'Humano']}
+                  formatter={(value, name) => [Number(value || 0).toLocaleString('pt-BR'), name]}
                 />
                 <Area type="monotone" dataKey="ia" name="IA" stroke="#D4AF37" fillOpacity={1} fill="url(#colorIA)" strokeWidth={3} />
                 <Area type="monotone" dataKey="human" name="Humano" stroke="var(--text-muted)" fillOpacity={0} strokeWidth={2} strokeDasharray="5 5" />
