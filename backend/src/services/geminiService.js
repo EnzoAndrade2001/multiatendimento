@@ -109,7 +109,7 @@ async function generateText(apiKey, contents, {
   throw lastError;
 }
 
-async function chat(apiKey, systemPrompt, history, userMessage) {
+async function chat(apiKey, systemPrompt, history, userMessage, options = {}) {
   const ai = createClient(apiKey);
   let lastError = null;
 
@@ -141,7 +141,8 @@ async function chat(apiKey, systemPrompt, history, userMessage) {
 
       const result = await chatSession.sendMessage({ message: userMessage });
       console.log(`[gemini] chat OK com ${modelName}`);
-      return responseText(result);
+      const text = responseText(result);
+      return options?.returnMetadata ? { text, model: modelName } : text;
     } catch (err) {
       console.warn(`[gemini] falha chat com ${modelName}:`, err.message);
       lastError = err;

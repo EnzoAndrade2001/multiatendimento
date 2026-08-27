@@ -290,6 +290,7 @@ model Ticket {
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   serviceOrders ServiceOrder[]
   userStates    UserTicketState[]
+  knowledgeLogs KnowledgeLog[]
 
   @@index([tenantId])
   @@index([tenantId, status, updatedAt])
@@ -447,6 +448,7 @@ model Message {
   createdAt     DateTime @default(now())
   agent         User?    @relation(fields: [agentId], references: [id])
   ticket        Ticket   @relation(fields: [ticketId], references: [id])
+  knowledgeLogs KnowledgeLog[]
 
   @@index([ticketId])
   @@index([ticketId, createdAt])
@@ -571,10 +573,14 @@ model InternalConversationState {
 model KnowledgeLog {
   id          String             @id @default(cuid())
   tenantId    String
+  ticketId    String?
+  messageId   String?
   knowledgeId String?
   documentId  String?
   chunkId     String?
   tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  ticket      Ticket?            @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  message     Message?           @relation(fields: [messageId], references: [id], onDelete: SetNull)
   knowledge   Knowledge?         @relation(fields: [knowledgeId], references: [id], onDelete: SetNull)
   document    KnowledgeDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
   chunk       KnowledgeChunk?    @relation(fields: [chunkId], references: [id], onDelete: SetNull)
@@ -585,9 +591,15 @@ model KnowledgeLog {
   searched    Boolean            @default(false)
   method      String?
   error       String?
+  responseOrigin  String? // RAG, ILUX_DATA, LLM_GENERAL ou MIXED
+  responseSources Json?   // Fontes disponibilizadas ao modelo, sem expor ao cliente
+  responseModel   String?
   createdAt   DateTime           @default(now())
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, responseOrigin, createdAt])
+  @@index([ticketId, createdAt])
+  @@index([messageId])
   @@index([knowledgeId, createdAt])
   @@index([documentId, createdAt])
   @@index([chunkId, createdAt])

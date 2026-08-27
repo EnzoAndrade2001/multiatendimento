@@ -10,6 +10,7 @@ router.use(authenticate, requirePermission('settings.bot.manage'));
 
 router.get('/', knowledgeController.list);
 router.get('/stats', knowledgeController.stats);
+router.get('/audit', knowledgeController.audit);
 router.post('/test', knowledgeController.testSearch);
 router.post('/reindex', knowledgeController.reindex);
 router.get('/documents', documentController.list);

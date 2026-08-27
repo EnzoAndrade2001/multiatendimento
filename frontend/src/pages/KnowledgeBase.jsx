@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, BookOpen, CheckCircle2, ChevronDown, Download, FileText, Plus, RefreshCw, Search, Upload } from 'lucide-react';
+import { Activity, AlertTriangle, BookOpen, CheckCircle2, ChevronDown, Download, FileText, Plus, RefreshCw, Search, ShieldCheck, Upload } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   createKnowledge,
@@ -17,6 +17,7 @@ import {
   unpublishKnowledgeDocument,
   uploadKnowledgeDocument,
   updateKnowledgeDocument,
+  getKnowledgeAudit,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -26,6 +27,11 @@ import ModalShell from '../components/ui/ModalShell';
 
 const EMPTY_FORM = { question: '', answer: '', tags: '', active: true };
 const EMPTY_DOCUMENT = { title: '', description: '', category: 'MANUAL', audience: 'CUSTOMER', manufacturer: '', equipmentModel: '', version: '', language: 'pt-BR', supersedesId: '', file: null };
+const AUDIT_ORIGIN_LABELS = { RAG: 'RAG', ILUX_DATA: 'Dados do iLux', LLM_GENERAL: 'Conhecimento geral da IA', MIXED: 'Misto' };
+
+function formatAuditOrigin(origin) {
+  return AUDIT_ORIGIN_LABELS[origin] || 'Não identificado';
+}
 
 export default function KnowledgeBase() {
   const [data, setData] = useState([]);
@@ -48,6 +54,10 @@ export default function KnowledgeBase() {
   const [documentForm, setDocumentForm] = useState(EMPTY_DOCUMENT);
   const [documentBusy, setDocumentBusy] = useState(false);
   const [editingDocument, setEditingDocument] = useState(null);
+  const [audit, setAudit] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditOrigin, setAuditOrigin] = useState('');
+  const [auditSearch, setAuditSearch] = useState('');
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -55,6 +65,9 @@ export default function KnowledgeBase() {
     const timer = window.setInterval(load, 5000);
     return () => window.clearInterval(timer);
   }, [documents]);
+  useEffect(() => {
+    if (tab === 'audit') loadAudit();
+  }, [tab, auditOrigin]);
 
   async function load() {
     setLoading(true);
@@ -69,6 +82,23 @@ export default function KnowledgeBase() {
       toast.error('Erro ao carregar a base de conhecimento. Tente novamente.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadAudit() {
+    setAuditLoading(true);
+    try {
+      const response = await getKnowledgeAudit({
+        limit: 100,
+        ...(auditOrigin ? { origin: auditOrigin } : {}),
+        ...(auditSearch.trim() ? { search: auditSearch.trim() } : {}),
+      });
+      setAudit(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error(error);
+      toast.error(error.response?.data?.error || 'Não foi possível carregar a auditoria da IA.');
+    } finally {
+      setAuditLoading(false);
     }
   }
 
@@ -213,22 +243,76 @@ export default function KnowledgeBase() {
         title="Base de conhecimento"
         subtitle="Cadastre respostas oficiais, confira a indexação e teste exatamente o que o bot encontrará."
         actions={<div style={s.headerActions}>
-          <ActionButton variant="secondary" onClick={() => { setShowTest((value) => !value); setTestResult(null); }}>
-            <Search size={17} /> Testar consulta
-          </ActionButton>
-          <ActionButton variant="secondary" onClick={handleReindex} loading={reindexing}>
-            <RefreshCw size={17} /> Reindexar base
-          </ActionButton>
-          <ActionButton onClick={tab === 'answers' ? openCreate : () => setShowDocumentModal(true)}>{tab === 'answers' ? <Plus size={18} /> : <Upload size={18} />} {tab === 'answers' ? 'Novo conhecimento' : 'Anexar documento'}</ActionButton>
+          {tab === 'audit' ? null : <>
+            <ActionButton variant="secondary" onClick={() => { setShowTest((value) => !value); setTestResult(null); }}>
+              <Search size={17} /> Testar consulta
+            </ActionButton>
+            <ActionButton variant="secondary" onClick={handleReindex} loading={reindexing}>
+              <RefreshCw size={17} /> Reindexar base
+            </ActionButton>
+            <ActionButton onClick={tab === 'answers' ? openCreate : () => setShowDocumentModal(true)}>{tab === 'answers' ? <Plus size={18} /> : <Upload size={18} />} {tab === 'answers' ? 'Novo conhecimento' : 'Anexar documento'}</ActionButton>
+          </>}
         </div>}
       />
 
       <div style={s.tabs}>
         <button type="button" style={{ ...s.tab, ...(tab === 'answers' ? s.tabActive : {}) }} onClick={() => setTab('answers')}><BookOpen size={17} /> Respostas oficiais</button>
+        <button type="button" style={{ ...s.tab, ...(tab === 'audit' ? s.tabActive : {}) }} onClick={() => setTab('audit')}><ShieldCheck size={17} /> Auditoria da IA</button>
         <button type="button" style={{ ...s.tab, ...(tab === 'documents' ? s.tabActive : {}) }} onClick={() => setTab('documents')}><FileText size={17} /> Manuais e portfólios <span style={s.tabCount}>{documents.length}</span></button>
       </div>
 
-      {tab === 'answers' ? <><div style={s.statsGrid}>
+      {tab === 'audit' ? (
+        <SurfaceCard style={s.auditPanel}>
+          <div style={s.auditHeader}>
+            <div>
+              <h3 style={s.panelTitle}>Auditoria das respostas</h3>
+              <p style={s.panelText}>Consulte as fontes disponibilizadas ao modelo e a origem provável registrada para cada resposta. Esses detalhes são internos e nunca são enviados ao cliente.</p>
+            </div>
+            <ActionButton variant="secondary" onClick={loadAudit} loading={auditLoading}><RefreshCw size={17} /> Atualizar</ActionButton>
+          </div>
+          <div style={s.auditFilters}>
+            <input style={s.input} value={auditSearch} onChange={(event) => setAuditSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') loadAudit(); }} placeholder="Buscar pergunta, chamado ou cliente" />
+            <select style={s.input} value={auditOrigin} onChange={(event) => setAuditOrigin(event.target.value)}>
+              <option value="">Todas as origens</option>
+              <option value="RAG">RAG (base de conhecimento)</option>
+              <option value="ILUX_DATA">Dados do iLux</option>
+              <option value="LLM_GENERAL">Conhecimento geral da IA</option>
+              <option value="MIXED">Misto</option>
+            </select>
+            <ActionButton variant="secondary" onClick={loadAudit} loading={auditLoading}><Search size={17} /> Consultar</ActionButton>
+          </div>
+          {auditLoading ? <div style={s.loading}>Carregando auditoria...</div> : audit.length ? (
+            <div style={s.auditList}>
+              {audit.map((item) => {
+                const sourceSnapshot = item.responseSources && typeof item.responseSources === 'object' ? item.responseSources : {};
+                const sourceItems = Array.isArray(sourceSnapshot.matches) ? sourceSnapshot.matches : [];
+                const contact = item.ticket?.contact;
+                return (
+                  <article key={item.id} style={s.auditRow}>
+                    <div style={s.auditRowTop}>
+                      <div style={s.auditMeta}>
+                        <span style={{ ...s.auditBadge, ...(item.responseOrigin === 'MIXED' ? s.auditBadgeMixed : item.responseOrigin === 'LLM_GENERAL' ? s.auditBadgeWarning : s.auditBadgeSuccess) }}>{formatAuditOrigin(item.responseOrigin)}</span>
+                        <span style={s.auditDate}>{item.createdAt ? new Date(item.createdAt).toLocaleString('pt-BR') : 'Data não informada'}</span>
+                        {item.responseModel ? <span style={s.auditDate}>{item.responseModel}</span> : null}
+                      </div>
+                      <span style={s.auditDate}>{contact?.name || item.ticket?.subject || 'Atendimento não identificado'}</span>
+                    </div>
+                    <p style={s.auditQuery}>{item.query || 'Pergunta não informada'}</p>
+                    <div style={s.auditSources}>
+                      <span>{item.found ? 'Correspondência encontrada na consulta' : 'Nenhuma correspondência oficial encontrada'}</span>
+                      {sourceSnapshot.equipmentCount ? <span>{sourceSnapshot.equipmentCount} equipamento(s) do iLux no contexto</span> : null}
+                      {sourceSnapshot.hasNotes ? <span>Observações do cliente no contexto</span> : null}
+                      {sourceItems.length ? <span>{sourceItems.length} fonte(s) disponibilizada(s)</span> : null}
+                    </div>
+                    {item.error ? <div style={s.auditDetails}>Falha na consulta: {item.error}</div> : null}
+                    {item.message?.body ? <details style={s.auditDetails}><summary>Ver resposta enviada</summary><p>{item.message.body}</p></details> : null}
+                  </article>
+                );
+              })}
+            </div>
+          ) : <EmptyState icon={<ShieldCheck size={22} />} title="Nenhuma resposta auditada encontrada" description="As respostas automáticas aparecerão aqui depois que o próximo atendimento for processado." />}
+        </SurfaceCard>
+      ) : tab === 'answers' ? <><div style={s.statsGrid}>
         {indicators.map(({ label, value, detail, icon: Icon }) => (
           <SurfaceCard key={label} style={s.statCard}>
             <div style={s.statTop}><span style={s.statLabel}>{label}</span><Icon size={18} color="var(--accent)" /></div>
@@ -359,6 +443,21 @@ const s = {
   statValue: { display: 'block', fontSize: 'var(--text-2xl)', lineHeight: 1.05, color: 'var(--text-main)' },
   statDetail: { display: 'block', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.4 },
   testPanel: { marginBottom: 'var(--space-6)', gap: 'var(--space-4)' },
+  auditPanel: { display: 'grid', gap: 'var(--space-5)', padding: 'var(--space-6)' },
+  auditHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-4)', flexWrap: 'wrap' },
+  auditFilters: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(190px, 240px) auto', gap: 'var(--space-3)', alignItems: 'center' },
+  auditList: { display: 'grid', gap: 'var(--space-3)' },
+  auditRow: { display: 'grid', gap: 'var(--space-3)', padding: 'var(--space-4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)' },
+  auditRowTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' },
+  auditMeta: { display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' },
+  auditBadge: { borderRadius: '999px', padding: '4px 10px', fontSize: 'var(--text-xs)', fontWeight: 900 },
+  auditBadgeSuccess: { color: 'var(--success-text)', background: 'var(--success-light)' },
+  auditBadgeWarning: { color: 'var(--warning-text)', background: 'var(--warning-light)' },
+  auditBadgeMixed: { color: 'var(--accent)', background: 'var(--accent-light)' },
+  auditDate: { color: 'var(--text-dim)', fontSize: 'var(--text-xs)' },
+  auditQuery: { margin: 0, color: 'var(--text-main)', fontSize: 'var(--text-md)', fontWeight: 800, lineHeight: 1.45, whiteSpace: 'pre-wrap' },
+  auditSources: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' },
+  auditDetails: { color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.5, padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-panel)' },
   panelTitle: { margin: 0, fontSize: 'var(--text-lg)' },
   panelText: { margin: 'var(--space-1) 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' },
   testForm: { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) auto', gap: 'var(--space-3)' },

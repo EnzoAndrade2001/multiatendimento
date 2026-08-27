@@ -91,6 +91,76 @@ async function stats(req, res) {
   }
 }
 
+function serializeKnowledgeAudit(item) {
+  return {
+    id: item.id,
+    tenantId: item.tenantId,
+    ticketId: item.ticketId,
+    messageId: item.messageId,
+    query: item.query,
+    found: item.found,
+    searched: item.searched,
+    method: item.method,
+    similarity: item.similarity,
+    error: item.error,
+    responseOrigin: item.responseOrigin,
+    responseSources: item.responseSources,
+    responseModel: item.responseModel,
+    content: item.content ? String(item.content).slice(0, 1200) : null,
+    createdAt: item.createdAt,
+    ticket: item.ticket ? {
+      id: item.ticket.id,
+      subject: item.ticket.subject,
+      contact: item.ticket.contact ? {
+        id: item.ticket.contact.id,
+        name: item.ticket.contact.name,
+        phone: item.ticket.contact.phone,
+      } : null,
+    } : null,
+    message: item.message ? {
+      id: item.message.id,
+      body: item.message.body,
+      createdAt: item.message.createdAt,
+    } : null,
+  };
+}
+
+async function audit(req, res) {
+  try {
+    const tenantId = req.user.tenantId;
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 200) : 100;
+    const origin = cleanRequired(req.query.origin).toUpperCase();
+    const search = cleanRequired(req.query.search);
+    const where = {
+      tenantId,
+      searched: true,
+      ...(origin && ['RAG', 'ILUX_DATA', 'LLM_GENERAL', 'MIXED'].includes(origin) ? { responseOrigin: origin } : {}),
+      ...(search ? {
+        OR: [
+          { query: { contains: search, mode: 'insensitive' } },
+          { ticket: { subject: { contains: search, mode: 'insensitive' } } },
+          { ticket: { contact: { name: { contains: search, mode: 'insensitive' } } } },
+          { ticket: { contact: { phone: { contains: search } } } },
+        ],
+      } : {}),
+    };
+    const logs = await prisma.knowledgeLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        ticket: { select: { id: true, subject: true, contact: { select: { id: true, name: true, phone: true } } } },
+        message: { select: { id: true, body: true, createdAt: true } },
+      },
+    });
+    res.json(logs.map(serializeKnowledgeAudit));
+  } catch (error) {
+    console.error('[knowledge] falha ao carregar auditoria:', error.message);
+    res.status(500).json({ error: 'NÃ£o foi possÃ­vel carregar a auditoria das respostas da IA.' });
+  }
+}
+
 async function create(req, res) {
   try {
     const { tenantId } = req.user;
@@ -215,4 +285,4 @@ async function remove(req, res) {
   }
 }
 
-module.exports = { create, list, reindex, remove, stats, testSearch, update };
+module.exports = { audit, create, list, reindex, remove, stats, testSearch, update };

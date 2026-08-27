@@ -6,6 +6,7 @@ const geminiService = require('../services/geminiService');
 const businessHourService = require('../services/businessHourService');
 const botPromptService = require('../services/botPromptService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
+const { classifyResponseOrigin } = require('../services/aiResponseAuditService');
 const {
   guardBotReply,
   isUnsafeOperationalClaim,
@@ -909,6 +910,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   let topChunkId = null;
   let knowledgeMethod = null;
   let knowledgeError = null;
+  let matchedSources = [];
 
   try {
     const knowledgeResult = await knowledgeSearchService.searchTenantKnowledge({
@@ -920,6 +922,17 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     const relevant = knowledgeResult.matches;
     knowledgeContext = knowledgeSearchService.buildKnowledgeContext(relevant);
     found = relevant.length > 0;
+    matchedSources = relevant.map((item) => ({
+      sourceType: item.sourceType || 'unknown',
+      sourceTitle: item.sourceTitle || item.question || null,
+      documentId: item.documentId || null,
+      chunkId: item.chunkId || null,
+      knowledgeId: item.sourceType === 'answer' ? item.id : null,
+      score: Number.isFinite(item.score) ? item.score : null,
+      method: item.method || null,
+      pageStart: item.pageStart || null,
+      pageEnd: item.pageEnd || null,
+    }));
     if (found) {
       topKnowledgeId = relevant[0].sourceType === 'answer' ? relevant[0].id : null;
       topDocumentId = relevant[0].documentId || null;
@@ -947,7 +960,24 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
 
   console.log(`[bot] Ticket ${ticket.id} | Turno atual normalizado:\n${currentUserTurn}`);
 
-  let botReply = await geminiService.chat(settings.geminiKey, finalPrompt, reversedHistory, currentUserTurn);
+  const generatedReply = await geminiService.chat(settings.geminiKey, finalPrompt, reversedHistory, currentUserTurn, { returnMetadata: true });
+  const responseModel = typeof generatedReply === 'object' ? generatedReply.model : null;
+  let botReply = typeof generatedReply === 'object' ? generatedReply.text : generatedReply;
+
+  const responseAudit = classifyResponseOrigin({
+    found,
+    equipmentCount: equipments.length,
+    currentNotes,
+    responseModel,
+  });
+  const responseSourceSnapshot = {
+    sources: responseAudit.sources,
+    confidence: responseAudit.confidence,
+    equipmentCount: equipments.length,
+    hasNotes: Boolean(String(currentNotes || '').trim()),
+    matches: matchedSources,
+  };
+  console.log(`[bot-audit] Ticket ${ticket.id} | origem=${responseAudit.origin} | fontes=${responseAudit.sources.join(',') || 'nenhuma'} | modelo=${responseModel || 'desconhecido'}`);
 
   // EXTRAÇÃO DE MEMÓRIA DE LONGO PRAZO (Background Task)
   if (shouldExtractClientMemory(currentUserTurn)) {
@@ -1038,11 +1068,14 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   }
   */
 
-  // Auditoria
+  // Auditoria da busca e da origem provável da resposta. Os detalhes ficam
+  // somente no backend/painel administrativo; nada é acrescentado ao WhatsApp.
+  let knowledgeLogId = null;
   try {
-    await prisma.knowledgeLog.create({
+    const auditLog = await prisma.knowledgeLog.create({
       data: {
         tenantId: tenant.id,
+        ticketId: ticket.id,
         knowledgeId: topKnowledgeId,
         documentId: topDocumentId,
         chunkId: topChunkId,
@@ -1053,8 +1086,12 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
         searched: true,
         method: knowledgeMethod,
         error: knowledgeError ? String(knowledgeError).slice(0, 500) : null,
+        responseOrigin: responseAudit.origin,
+        responseSources: responseSourceSnapshot,
+        responseModel,
       }
     });
+    knowledgeLogId = auditLog.id;
   } catch (err) { console.error('[log] erro ao gravar auditoria:', err.message); }
 
   const sent = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, waInstance.instanceName, contact.phone, finalMessageBody);
@@ -1069,6 +1106,12 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
       externalId // Guardamos o ID para saber que FOI O ROBÔ que mandou
     },
   });
+
+  if (knowledgeLogId) {
+    try {
+      await prisma.knowledgeLog.update({ where: { id: knowledgeLogId }, data: { messageId: botMessage.id } });
+    } catch (err) { console.error('[log] falha ao vincular auditoria Ã  resposta:', err.message); }
+  }
 
   // Notifica o painel em tempo real sobre a nova mensagem do robô
   if (io) {
