@@ -54,12 +54,21 @@ function sanitizeAuditMetadata(value) {
 
     // Keep the record valid JSON and bounded even if a caller accidentally
     // passes a very large object (for example, an uploaded document body).
-    return {
+    let preview = encoded.slice(0, MAX_METADATA_BYTES - 256);
+    let bounded = {
       truncated: true,
       reason: 'metadata_size_limit',
-      // Leave room for the wrapper keys and JSON escaping overhead.
-      preview: encoded.slice(0, MAX_METADATA_BYTES - 256),
+      preview,
     };
+
+    // `slice` counts UTF-16 code units, not UTF-8 bytes. Trim in small
+    // chunks until the serialized JSON is within the hard byte limit even
+    // when metadata contains emoji or other multibyte characters.
+    while (Buffer.byteLength(JSON.stringify(bounded), 'utf8') > MAX_METADATA_BYTES && preview.length > 0) {
+      preview = preview.slice(0, Math.max(0, preview.length - 256));
+      bounded = { truncated: true, reason: 'metadata_size_limit', preview };
+    }
+    return bounded;
   } catch {
     return { truncated: true, reason: 'metadata_serialization_failed' };
   }
