@@ -49,6 +49,7 @@ model Tenant {
   revenueSnapshots           RevenueSnapshot[]
   userTicketStates           UserTicketState[]
   privacyAuditLogs           PrivacyAuditLog[]
+  auditEvents                AuditEvent[]
   privacyRetentionPolicy     PrivacyRetentionPolicy?
   privacyPolicies            PrivacyPolicy[]
   privacyAcceptances         PrivacyAcceptance[]
@@ -149,6 +150,7 @@ model User {
   campaigns                  Campaign[]
   quickResponses             QuickResponse[]             @relation("QuickResponseOwner")
   quickResponseAudits        QuickResponseAudit[]
+  auditEvents                AuditEvent[]                @relation("AuditEventActor")
 
   @@unique([tenantId, email])
 }
@@ -942,6 +944,34 @@ model PrivacyAuditLog {
 
   @@index([tenantId, createdAt])
   @@index([tenantId, action, createdAt])
+}
+
+// Trilha central de auditoria das ações realizadas no painel e pela API.
+// Dados de contexto são opcionais para que eventos automáticos também possam
+// ser registrados sem inventar um usuário. Metadata deve ser sempre
+// sanitizada pelo auditEventService antes de chegar ao banco.
+model AuditEvent {
+  id           String   @id @default(cuid())
+  tenantId     String
+  actorId      String?
+  action       String
+  resourceType String
+  resourceId   String?
+  status       String   @default("SUCCESS")
+  metadata     Json?
+  ipAddress    String?
+  userAgent    String?
+  requestId    String?
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor  User?  @relation("AuditEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, actorId, createdAt])
+  @@index([tenantId, action, createdAt])
+  @@index([tenantId, resourceType, resourceId, createdAt])
+  @@index([tenantId, requestId])
 }
 
 model PrivacyRetentionPolicy {
