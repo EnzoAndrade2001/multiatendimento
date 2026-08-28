@@ -1729,9 +1729,74 @@ export default function Settings() {
                   <li>Baixe o executável e salve-o no servidor do iLux.</li>
                   <li>Abra o agente, informe o token salvo nesta tela e configure o Firebird.</li>
                   <li>Defina as pastas de Documentos financeiros e teste a conexão.</li>
-                  <li>Deixe o agente iniciado ou configure a tarefa automática do Windows.</li>
+                  <li>Configure a tarefa automática do Windows abaixo para o agente iniciar mesmo sem login.</li>
                 </ol>
               </div>
+
+              {isAdmin && (
+                <div style={s.agentStartupGuide}>
+                  <div style={s.agentStartupHeader}>
+                    <div>
+                      <strong style={s.integrationGuideTitle}>Iniciar automaticamente, mesmo sem login</strong>
+                      <p style={{ ...s.hint, margin: 0 }}>
+                        Este é o modo recomendado para servidores. O Agendador de Tarefas inicia o agente durante o boot do Windows, sem depender de alguém entrar no servidor.
+                      </p>
+                    </div>
+                    <span style={s.adminOnlyBadge}>Somente administradores</span>
+                  </div>
+
+                  <div style={s.agentStartupWarning}>
+                    <strong>Não use os dois modos juntos.</strong>
+                    <span>
+                      Depois de criar a tarefa, deixe desmarcada no aplicativo a opção <strong>Iniciar o agente com o Windows</strong>. A tarefa agendada substitui o atalho da pasta Inicializar e evita dois processos concorrentes.
+                    </span>
+                  </div>
+
+                  <ol style={s.guideList}>
+                    <li>Abra o PowerShell como Administrador no servidor do iLux.</li>
+                    <li>Execute a instalação abaixo e informe o mesmo usuário do Windows que acessa o Firebird e as pastas financeiras.</li>
+                    <li>Inicie a tarefa para testar sem reiniciar o servidor.</li>
+                    <li>Confirme o processo e acompanhe o arquivo <code>logs\client.log</code>.</li>
+                  </ol>
+
+                  {[
+                    ['Instalar no boot sem login', 'Set-Location "C:\\ILUX\\firebird-client-package"; powershell.exe -ExecutionPolicy Bypass -File ".\\install-scheduled-task.ps1"'],
+                    ['Verificar a tarefa', 'Get-ScheduledTask -TaskName "AgenteCRM iLux" -ErrorAction SilentlyContinue | Select-Object TaskName, State'],
+                    ['Testar agora', 'Start-ScheduledTask -TaskName "AgenteCRM iLux"'],
+                    ['Conferir a última execução', 'Get-ScheduledTaskInfo -TaskName "AgenteCRM iLux"'],
+                    ['Acompanhar o log', 'Get-Content "C:\\ILUX\\firebird-client-package\\logs\\client.log" -Tail 50'],
+                  ].map(([label, command]) => (
+                    <div key={label} style={s.commandBlock}>
+                      <span style={s.commandLabel}>{label}</span>
+                      <div style={s.commandRow}>
+                        <code style={s.commandCode}>{command}</code>
+                        <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <details style={s.agentMaintenanceDetails}>
+                    <summary style={s.agentMaintenanceSummary}>Manutenção: parar, abrir a interface e reiniciar</summary>
+                    <p style={{ ...s.hint, margin: '0.75rem 0' }}>
+                      Nesse modo a janela e o ícone não aparecem, pois o agente roda em uma sessão separada. Antes de abrir a interface manualmente, pare a tarefa e encerre qualquer processo restante.
+                    </p>
+                    {[
+                      ['Parar a tarefa', 'Stop-ScheduledTask -TaskName "AgenteCRM iLux"'],
+                      ['Encerrar processo restante', 'Get-Process -Name "FirebirdCRMClient" -ErrorAction SilentlyContinue | Stop-Process -Force'],
+                      ['Abrir a interface', 'Start-Process "C:\\ILUX\\firebird-client-package\\FirebirdCRMClient.exe"'],
+                      ['Iniciar novamente em segundo plano', 'Start-ScheduledTask -TaskName "AgenteCRM iLux"'],
+                    ].map(([label, command]) => (
+                      <div key={label} style={s.commandBlock}>
+                        <span style={s.commandLabel}>{label}</span>
+                        <div style={s.commandRow}>
+                          <code style={s.commandCode}>{command}</code>
+                          <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
+                        </div>
+                      </div>
+                    ))}
+                  </details>
+                </div>
+              )}
 
               <div style={s.integrationGuide}>
                 <strong style={s.integrationGuideTitle}>Quando o agente travar</strong>
@@ -1742,7 +1807,7 @@ export default function Settings() {
                   ['Iniciar o agente', 'Start-Process "C:\\ILUX\\firebird-client-package\\FirebirdCRMClient.exe"'],
                 ].map(([label, command]) => (
                   <div key={label} style={s.commandRow}>
-                    <code>{command}</code>
+                    <code style={s.commandCode}>{command}</code>
                     <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
                   </div>
                 ))}
@@ -1988,6 +2053,60 @@ const s = {
     fontSize: '0.92rem',
     marginBottom: '0.35rem',
   },
+  agentStartupGuide: {
+    padding: '1rem 1.1rem',
+    borderRadius: '14px',
+    background: 'var(--bg-base)',
+    border: '1px solid var(--accent-border)',
+  },
+  agentStartupHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '1rem',
+    flexWrap: 'wrap',
+  },
+  adminOnlyBadge: {
+    padding: '0.3rem 0.55rem',
+    borderRadius: '999px',
+    color: 'var(--accent)',
+    background: 'var(--accent-light)',
+    border: '1px solid var(--accent-border)',
+    fontSize: 'var(--text-xs)',
+    fontWeight: 800,
+    whiteSpace: 'nowrap',
+  },
+  agentStartupWarning: {
+    display: 'grid',
+    gap: '0.25rem',
+    marginTop: '0.9rem',
+    padding: '0.8rem 0.9rem',
+    borderRadius: '10px',
+    color: 'var(--warning-text)',
+    background: 'var(--warning-light)',
+    border: '1px solid var(--warning-border)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 1.5,
+  },
+  commandBlock: {
+    marginTop: '0.7rem',
+  },
+  commandLabel: {
+    color: 'var(--text-muted)',
+    fontSize: 'var(--text-xs)',
+    fontWeight: 800,
+  },
+  agentMaintenanceDetails: {
+    marginTop: '1rem',
+    paddingTop: '0.85rem',
+    borderTop: '1px solid var(--border-color)',
+    color: 'var(--text-main)',
+  },
+  agentMaintenanceSummary: {
+    cursor: 'pointer',
+    fontSize: 'var(--text-sm)',
+    fontWeight: 800,
+  },
   iconButton: {
     background: 'var(--bg-surface)',
     color: 'var(--text-main)',
@@ -2042,6 +2161,15 @@ const s = {
     borderRadius: '10px',
     background: 'var(--bg-surface)',
     border: '1px solid var(--border-color)',
+    overflow: 'hidden',
+  },
+  commandCode: {
+    minWidth: 0,
+    flex: 1,
+    overflowX: 'auto',
+    whiteSpace: 'nowrap',
+    color: 'var(--text-main)',
+    fontSize: 'var(--text-xs)',
   },
   copyCommandBtn: {
     marginLeft: 'auto',
