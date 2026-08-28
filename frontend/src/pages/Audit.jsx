@@ -19,7 +19,6 @@ import { getAuditEvents } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
 import EmptyState from '../components/ui/EmptyState';
-import { toast } from '../utils/toast';
 
 const PAGE_SIZE = 50;
 
@@ -58,7 +57,7 @@ function normalizePayload(payload) {
   const events = normalizeList(payload?.events || payload?.rows || payload?.logs || payload?.data);
   const rawPagination = payload?.pagination || {};
   const page = Number(rawPagination.page ?? payload?.page ?? 1) || 1;
-  const limit = Number(rawPagination.limit ?? payload?.limit ?? PAGE_SIZE) || PAGE_SIZE;
+  const limit = Number(rawPagination.limit ?? rawPagination.pageSize ?? payload?.limit ?? payload?.pageSize ?? PAGE_SIZE) || PAGE_SIZE;
   const total = Number(rawPagination.total ?? payload?.total ?? events.length) || 0;
   const totalPages = Number(rawPagination.totalPages ?? payload?.totalPages) || Math.max(1, Math.ceil(total / limit));
   const summary = payload?.summary && typeof payload.summary === 'object' ? payload.summary : {};
@@ -144,11 +143,14 @@ export default function Audit() {
   const load = useCallback(async (targetPage = page, signal) => {
     setLoading(true);
     setError('');
-    const params = { page: targetPage, limit: PAGE_SIZE };
+    const params = { page: targetPage, pageSize: PAGE_SIZE };
     Object.entries(appliedFilters).forEach(([key, value]) => {
       if (!String(value || '').trim()) return;
       if (key === 'from') params.from = `${value}T00:00:00.000Z`;
       else if (key === 'to') params.to = `${value}T23:59:59.999Z`;
+      else if (key === 'q') params.search = String(value).trim();
+      else if (key === 'actorId') params.userId = String(value).trim();
+      else if (key === 'resourceType') params.entityType = String(value).trim();
       else params[key] = String(value).trim();
     });
     try {
@@ -212,10 +214,10 @@ export default function Audit() {
         )}
       />
 
-      <section style={s.statGrid} aria-label="Resumo da auditoria">
+      <section style={s.statGrid} className="audit-stat-grid" aria-label="Resumo da auditoria">
         <Stat icon={<Activity size={19} />} label="Eventos no filtro" value={stats.total} />
-        <Stat icon={<CheckCircle2 size={19} />} label="Concluídos" value={stats.success} tone="success" />
-        <Stat icon={<AlertCircle size={19} />} label="Falhas ou negados" value={stats.failed} tone="danger" />
+        <Stat icon={<CheckCircle2 size={19} />} label="Sucessos nesta página" value={stats.success} tone="success" />
+        <Stat icon={<AlertCircle size={19} />} label="Falhas nesta página" value={stats.failed} tone="danger" />
         <Stat icon={<Clock3 size={19} />} label="Último evento" value={rows[0] ? formatDate(rows[0].createdAt || rows[0].timestamp) : '—'} compact />
       </section>
 
@@ -227,11 +229,11 @@ export default function Audit() {
           </div>
           <button type="button" onClick={clearFilters} style={s.clearButton} disabled={loading && !data}>Limpar filtros</button>
         </div>
-        <form onSubmit={applyFilters} style={s.filtersGrid}>
+        <form onSubmit={applyFilters} style={s.filtersGrid} className="audit-filters-grid">
           <label style={s.field}><span>Buscar</span><div className="input-icon" style={s.inputIcon}><Search size={16} /><input value={filters.q} onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Ação, recurso ou ID..." /></div></label>
-          <label style={s.field}><span>Usuário</span><div className="input-icon" style={s.inputIcon}><UserRound size={16} /><select value={filters.actorId} onChange={(event) => setFilters((current) => ({ ...current, actorId: event.target.value }))}><option value="">Todos os usuários</option>{actors.map((actor) => { const option = optionValue(actor); return option.value ? <option key={option.value} value={option.value}>{option.label}</option> : null; })}</select></div></label>
-          <label style={s.field}><span>Ação</span><select value={filters.action} onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value }))}><option value="">Todas as ações</option>{actions.map((item) => { const option = optionValue(item); return option.value ? <option key={option.value} value={option.value}>{option.label}</option> : null; })}</select></label>
-          <label style={s.field}><span>Recurso</span><select value={filters.resourceType} onChange={(event) => setFilters((current) => ({ ...current, resourceType: event.target.value }))}><option value="">Todos os recursos</option>{resources.map((item) => { const option = optionValue(item); return option.value ? <option key={option.value} value={option.value}>{option.label}</option> : null; })}</select></label>
+          <label style={s.field}><span>Usuário</span>{actors.length ? <div className="input-icon" style={s.inputIcon}><UserRound size={16} /><select value={filters.actorId} onChange={(event) => setFilters((current) => ({ ...current, actorId: event.target.value }))}><option value="">Todos os usuários</option>{actors.map((actor) => { const option = optionValue(actor); return option.value ? <option key={option.value} value={option.value}>{option.label}</option> : null; })}</select></div> : <div className="input-icon" style={s.inputIcon}><UserRound size={16} /><input value={filters.actorId} onChange={(event) => setFilters((current) => ({ ...current, actorId: event.target.value }))} placeholder="ID do usuário..." /></div>}</label>
+          <label style={s.field}><span>Ação</span><input value={filters.action} onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value }))} placeholder="Ex.: USER_UPDATE" /></label>
+          <label style={s.field}><span>Recurso</span><input value={filters.resourceType} onChange={(event) => setFilters((current) => ({ ...current, resourceType: event.target.value }))} placeholder="Ex.: user, ticket..." /></label>
           <label style={s.field}><span>Status</span><select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">Todos os status</option><option value="SUCCESS">Sucesso</option><option value="FAILED">Falhou</option><option value="DENIED">Negado</option><option value="PENDING">Pendente</option></select></label>
           <label style={s.field}><span>De</span><input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} /></label>
           <label style={s.field}><span>Até</span><input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} /></label>
@@ -247,8 +249,8 @@ export default function Audit() {
           <span style={s.privacyNote}>Segredos e credenciais são ocultados</span>
         </div>
         {loading && !data ? <div style={s.loading}><RefreshCw size={18} className="spin" /> Carregando eventos…</div> : rows.length === 0 ? <EmptyState icon={<Database size={28} />} title="Nenhum evento encontrado" description="Ajuste os filtros ou aguarde novas ações para consultar a auditoria." /> : (
-          <div style={s.tableWrap}>
-            <table style={s.table}>
+          <div style={s.tableWrap} className="audit-table-wrap">
+            <table style={s.table} className="audit-table">
               <thead><tr><th style={s.th}>Data e hora</th><th style={s.th}>Usuário</th><th style={s.th}>Ação</th><th style={s.th}>Recurso</th><th style={s.th}>Status</th><th style={{ ...s.th, textAlign: 'right' }}>Detalhes</th></tr></thead>
               <tbody>{rows.map((event) => {
                 const tone = statusTone(event.status);
