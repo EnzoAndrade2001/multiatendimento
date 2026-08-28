@@ -14,7 +14,7 @@ import time
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.5"
+DEFAULT_AGENT_VERSION = "1.0.6"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -245,6 +245,12 @@ class AppConfig:
     billing_auto_send_document_types: list[str] = field(default_factory=lambda: ["invoice", "statement", "boleto"])
     billing_auto_send_ledger_file: Path = field(default_factory=lambda: ROOT / "billing-auto-send-ledger.json")
     billing_auto_send_since_file: Path = field(default_factory=lambda: ROOT / "billing-auto-send-since.json")
+    # Quando um titulo volta "ignorado" (cliente sem opt-in / sem telefone),
+    # o agente registra no ledger com uma data de reavaliacao em vez de
+    # re-tentar a cada ciclo (~10 min). Sem isso, ~100 titulos sem opt-in
+    # viram milhares de POSTs/dia no backend. Zerado -> sem backoff (tenta
+    # sempre, comportamento antigo).
+    billing_skip_retry_hours: int = 24
     # Data (YYYY-MM-DD) a partir da qual um PDF passa a valer pro envio
     # automatico, pela data de modificacao do ARQUIVO (nao pela data de
     # emissao da cobranca) - documentos antigos ja arquivados nao devem ser
@@ -338,6 +344,7 @@ class AppConfig:
                 ROOT / "billing-auto-send-ledger.json",
             ),
             billing_auto_send_since=os.getenv("BILLING_AUTO_SEND_SINCE") or None,
+            billing_skip_retry_hours=env_int("BILLING_SKIP_RETRY_HOURS", 24),
         )
 
 
@@ -449,9 +456,28 @@ class BillingSendLedger:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
-                self.data = raw
+                self.data = self._prune(raw)
         except Exception as exc:
             logging.warning("Falha ao ler o controle de envios automaticos %s: %s", self.path, exc)
+
+    @staticmethod
+    def _prune(data: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Descarta entradas de "ignorado" nao reavaliadas ha 30 dias -- o
+        titulo quase certamente ja foi pago/baixado. Envios reais (sem
+        retryAfter) ficam para sempre, garantindo que nada seja reenviado.
+        """
+        cutoff = datetime.now() - timedelta(days=30)
+        kept: dict[str, dict[str, Any]] = {}
+        for key, entry in data.items():
+            retry_after = entry.get("retryAfter") if isinstance(entry, dict) else None
+            if retry_after:
+                try:
+                    if datetime.fromisoformat(retry_after) < cutoff:
+                        continue
+                except ValueError:
+                    pass
+            kept[key] = entry
+        return kept
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -464,14 +490,52 @@ class BillingSendLedger:
         return f"{receivable_id}:{combined_hash}"
 
     def already_sent(self, receivable_id: Any, combined_hash: str) -> bool:
+        """True se este pacote exato nao pode ser enviado agora.
+
+        Uma entrada de envio real / teste nao tem ``retryAfter`` e bloqueia
+        para sempre. Uma entrada de ``skipped`` (sem opt-in / sem telefone)
+        bloqueia apenas ate o ``retryAfter`` passar -- assim um opt-in
+        corrigido e reavaliado no ciclo seguinte a janela, e nao a cada
+        ~10 minutos.
+        """
         with self.lock:
-            return self.key(receivable_id, combined_hash) in self.data
+            entry = self.data.get(self.key(receivable_id, combined_hash))
+            if entry is None:
+                return False
+            retry_after = entry.get("retryAfter")
+            if not retry_after:
+                return True
+            try:
+                return datetime.now() < datetime.fromisoformat(retry_after)
+            except ValueError:
+                return True
 
     def record(self, receivable_id: Any, combined_hash: str, info: dict[str, Any]) -> None:
         with self.lock:
             self.data[self.key(receivable_id, combined_hash)] = {
                 **info,
                 "sentAt": datetime.now().isoformat(timespec="seconds"),
+            }
+            self._save()
+
+    def record_skip(
+        self,
+        receivable_id: Any,
+        combined_hash: str,
+        info: dict[str, Any],
+        retry_after: datetime,
+    ) -> None:
+        """Registra um pacote que o backend recusou enviar (sem opt-in / sem
+        telefone). Fica fora do caminho ate ``retry_after``, para os mesmos
+        titulos sem como enviar nao voltarem a ser POSTados a cada varredura.
+        Um ``record`` bem-sucedido depois sobrescreve e torna permanente.
+        """
+        with self.lock:
+            self.data[self.key(receivable_id, combined_hash)] = {
+                **info,
+                "skipped": True,
+                "skippedAt": datetime.now().isoformat(timespec="seconds"),
+                "retryAfter": retry_after.isoformat(timespec="seconds"),
             }
             self._save()
 
@@ -1919,8 +1983,7 @@ class FirebirdRepository:
         now = datetime.now()
         dt_inclusao = now.strftime("%Y-%m-%d")
         hr_inclusao = now.strftime("%H:%M")
-        
-        from datetime import timedelta
+
         data_prev_entrega = (now + timedelta(days=3)).strftime("%Y-%m-%d")
 
         status = "E"  # Aberto
@@ -2801,14 +2864,14 @@ def run_billing_automation(
     keyed by file content, not by folder location, so nothing is ever sent twice.
     """
     if not config.billing_auto_send_enabled:
-        return {"ready": 0, "sent": 0, "failed": 0}
+        return {"ready": 0, "sent": 0, "failed": 0, "skipped": 0}
 
     since_date = _resolve_billing_auto_send_since(config)
     min_mtime_ns = int(datetime.strptime(since_date, "%Y-%m-%d").timestamp() * 1_000_000_000)
     packages = repo.find_ready_billing_packages(
         config.billing_auto_send_document_types, ledger, min_mtime_ns=min_mtime_ns,
     )
-    sent = failed = 0
+    sent = failed = skipped = 0
     for package in packages:
         labels = ", ".join(
             DOCUMENT_LABELS.get(document["documentType"], document["documentType"])
@@ -2847,13 +2910,32 @@ def run_billing_automation(
                 )
             )
             if was_skipped:
-                logging.warning(
-                    "Envio automatico ignorado para %s (titulo #%s): %s. "
-                    "Nao foi gravado no ledger e podera ser tentado novamente.",
-                    who,
-                    package["receivableExternalId"],
-                    result_message or "contato sem permissao ou telefone valido",
-                )
+                skip_reason = result_message or "contato sem permissao ou telefone valido"
+                if config.billing_skip_retry_hours > 0:
+                    retry_after = datetime.now() + timedelta(hours=config.billing_skip_retry_hours)
+                    ledger.record_skip(
+                        package["receivableExternalId"],
+                        package["combinedHash"],
+                        {**ledger_info, "skipReason": skip_reason},
+                        retry_after,
+                    )
+                    logging.warning(
+                        "Envio automatico ignorado para %s (titulo #%s): %s. "
+                        "Nova tentativa so apos %s -- evita re-POSTar o mesmo titulo a cada ciclo.",
+                        who,
+                        package["receivableExternalId"],
+                        skip_reason,
+                        retry_after.strftime("%d/%m %H:%M"),
+                    )
+                else:
+                    logging.warning(
+                        "Envio automatico ignorado para %s (titulo #%s): %s. "
+                        "Backoff desativado (BILLING_SKIP_RETRY_HOURS=0); sera tentado no proximo ciclo.",
+                        who,
+                        package["receivableExternalId"],
+                        skip_reason,
+                    )
+                skipped += 1
                 continue
             logging.info("Envio automatico realizado: %s -- %s", description, result_message or "ok")
             ledger.record(package["receivableExternalId"], package["combinedHash"], ledger_info)
@@ -2861,7 +2943,7 @@ def run_billing_automation(
         except Exception as exc:
             failed += 1
             logging.error("Falha no envio automatico de %s: %s", description, exc)
-    return {"ready": len(packages), "sent": sent, "failed": failed}
+    return {"ready": len(packages), "sent": sent, "failed": failed, "skipped": skipped}
 
 
 def run_financial_document_monitor(
@@ -2903,9 +2985,11 @@ def run_financial_document_monitor(
             billing_stats = run_billing_automation(repo, crm, config, ledger)
             if billing_stats["ready"]:
                 logging.info(
-                    "Envio automatico de cobrancas: %s pronto(s), %s enviado(s)/testado(s), %s falha(s).",
+                    "Envio automatico de cobrancas: %s pronto(s), %s enviado(s)/testado(s), "
+                    "%s ignorado(s) sem opt-in, %s falha(s).",
                     billing_stats["ready"],
                     billing_stats["sent"],
+                    billing_stats.get("skipped", 0),
                     billing_stats["failed"],
                 )
         except Exception as exc:

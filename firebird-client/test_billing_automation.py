@@ -1,6 +1,7 @@
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,6 +37,43 @@ class BillingSendLedgerTest(unittest.TestCase):
 
             reloaded = BillingSendLedger(path)
             self.assertTrue(reloaded.already_sent(101, "hash-a"))
+
+    def test_skip_entry_blocks_only_until_retry_after(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ledger.json"
+            ledger = BillingSendLedger(path)
+
+            future = datetime.now() + timedelta(hours=24)
+            ledger.record_skip(202, "hash-s", {"customerName": "Sem opt-in"}, future)
+            self.assertTrue(ledger.already_sent(202, "hash-s"))
+
+            # Passada a janela, o pacote volta a ser elegível.
+            ledger.data[ledger.key(202, "hash-s")]["retryAfter"] = (
+                datetime.now() - timedelta(minutes=1)
+            ).isoformat(timespec="seconds")
+            self.assertFalse(ledger.already_sent(202, "hash-s"))
+
+            # Um envio real depois torna a entrada permanente.
+            ledger.record(202, "hash-s", {"customerName": "Sem opt-in"})
+            self.assertTrue(ledger.already_sent(202, "hash-s"))
+            self.assertNotIn("retryAfter", ledger.data[ledger.key(202, "hash-s")])
+
+    def test_reload_prunes_stale_skip_entries_but_keeps_real_sends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ledger.json"
+            ledger = BillingSendLedger(path)
+            ledger.record(1, "real", {})
+            ledger.record_skip(2, "fresh", {}, datetime.now() + timedelta(hours=24))
+            ledger.record_skip(3, "stale", {}, datetime.now() + timedelta(hours=24))
+            ledger.data[ledger.key(3, "stale")]["retryAfter"] = (
+                datetime.now() - timedelta(days=31)
+            ).isoformat(timespec="seconds")
+            ledger._save()
+
+            reloaded = BillingSendLedger(path)
+            self.assertIn(reloaded.key(1, "real"), reloaded.data)
+            self.assertIn(reloaded.key(2, "fresh"), reloaded.data)
+            self.assertNotIn(reloaded.key(3, "stale"), reloaded.data)
 
 
 class FindReadyBillingPackagesTest(unittest.TestCase):
@@ -174,7 +212,7 @@ class RunBillingAutomationTest(unittest.TestCase):
         with patch.object(crm, "send_billing_package") as send:
             stats = run_billing_automation(self.repo, crm, self.config, ledger)
         send.assert_not_called()
-        self.assertEqual(stats, {"ready": 0, "sent": 0, "failed": 0})
+        self.assertEqual(stats, {"ready": 0, "sent": 0, "failed": 0, "skipped": 0})
 
     def test_test_mode_never_calls_send_and_still_dedupes_via_ledger(self):
         self.config.billing_auto_send_test_mode = True
@@ -227,25 +265,67 @@ class RunBillingAutomationTest(unittest.TestCase):
         send.assert_called_once()
         self.assertEqual(stats_retry["sent"], 1)
 
-    def test_real_mode_does_not_record_a_skipped_send_so_it_retries_next_time(self):
+    # Compatibilidade com o backend antigo: antes do campo `skipped`, a
+    # resposta ainda era HTTP 200 e só trazia esta mensagem.
+    SKIPPED_RESPONSE = {
+        "success": True,
+        "message": "Envio automatico nao habilitado para este contato.",
+    }
+
+    def test_real_mode_skip_backs_off_instead_de_retentar_todo_ciclo(self):
         self.config.billing_auto_send_test_mode = False
+        self.config.billing_skip_retry_hours = 24
         ledger = BillingSendLedger(self.root / "ledger.json")
         crm = CRMClient(self.config)
-        # Compatibilidade com o backend antigo: antes do campo `skipped`, a
-        # resposta ainda era HTTP 200 e só trazia esta mensagem.
-        skipped_response = {
-            "success": True,
-            "message": "Envio automatico nao habilitado para este contato.",
-        }
         with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
-             patch.object(crm, "send_billing_package", return_value=skipped_response) as send:
+             patch.object(crm, "send_billing_package", return_value=self.SKIPPED_RESPONSE) as send:
             stats = run_billing_automation(self.repo, crm, self.config, ledger)
         send.assert_called_once()
         self.assertEqual(stats["sent"], 0)
         self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["skipped"], 1)
 
-        # Sem ledger para uma resposta ignorada, uma nova rodada tenta de novo
-        # quando o contato/opt-in for corrigido.
+        # Dentro da janela de backoff, o mesmo título nem chega a ser POSTado
+        # de novo -- era exatamente esse re-POST a cada ~10 min que inflava o
+        # relatório em milhares de linhas por dia.
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
+             patch.object(crm, "send_billing_package") as send_again:
+            stats_again = run_billing_automation(self.repo, crm, self.config, ledger)
+        send_again.assert_not_called()
+        self.assertEqual(stats_again["ready"], 0)
+
+    def test_real_mode_skip_retries_after_backoff_window(self):
+        self.config.billing_auto_send_test_mode = False
+        self.config.billing_skip_retry_hours = 24
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        crm = CRMClient(self.config)
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
+             patch.object(crm, "send_billing_package", return_value=self.SKIPPED_RESPONSE):
+            run_billing_automation(self.repo, crm, self.config, ledger)
+
+        # A janela expirou (opt-in do cliente foi corrigido nesse meio-tempo).
+        key = next(iter(ledger.data))
+        self.assertTrue(ledger.data[key]["skipped"])
+        ledger.data[key]["retryAfter"] = (datetime.now() - timedelta(minutes=1)).isoformat(timespec="seconds")
+
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
+             patch.object(crm, "send_billing_package", return_value={"success": True}) as send_retry:
+            stats_retry = run_billing_automation(self.repo, crm, self.config, ledger)
+        send_retry.assert_called_once()
+        self.assertEqual(stats_retry["sent"], 1)
+        # Envio real sobrescreve o skip -> vira permanente, nunca reenviado.
+        self.assertNotIn("retryAfter", ledger.data[key])
+
+    def test_billing_skip_retry_hours_zero_desliga_o_backoff(self):
+        self.config.billing_auto_send_test_mode = False
+        self.config.billing_skip_retry_hours = 0
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        crm = CRMClient(self.config)
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
+             patch.object(crm, "send_billing_package", return_value=self.SKIPPED_RESPONSE):
+            run_billing_automation(self.repo, crm, self.config, ledger)
+        self.assertEqual(ledger.data, {})
+
         with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
              patch.object(crm, "send_billing_package", return_value={"success": True}) as send_retry:
             stats_retry = run_billing_automation(self.repo, crm, self.config, ledger)
