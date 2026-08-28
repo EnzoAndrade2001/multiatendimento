@@ -173,6 +173,7 @@ export default function Settings() {
   const [editingTechnicalContact, setEditingTechnicalContact] = useState(null);
   const [technicalContactBusy, setTechnicalContactBusy] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [showAgentStartupGuide, setShowAgentStartupGuide] = useState(false);
   const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => !HIDDEN_TAB_INDEXES.has(index) && (!TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index])));
 
   useEffect(() => {
@@ -1739,62 +1740,16 @@ export default function Settings() {
                     <div>
                       <strong style={s.integrationGuideTitle}>Iniciar automaticamente, mesmo sem login</strong>
                       <p style={{ ...s.hint, margin: 0 }}>
-                        Este é o modo recomendado para servidores. O Agendador de Tarefas inicia o agente durante o boot do Windows, sem depender de alguém entrar no servidor.
+                        Configure o agente para iniciar durante o boot do Windows e consulte os comandos de manutenção.
                       </p>
                     </div>
-                    <span style={s.adminOnlyBadge}>Somente administradores</span>
-                  </div>
-
-                  <div style={s.agentStartupWarning}>
-                    <strong>Não use os dois modos juntos.</strong>
-                    <span>
-                      Depois de criar a tarefa, deixe desmarcada no aplicativo a opção <strong>Iniciar o agente com o Windows</strong>. A tarefa agendada substitui o atalho da pasta Inicializar e evita dois processos concorrentes.
-                    </span>
-                  </div>
-
-                  <ol style={s.guideList}>
-                    <li>Abra o PowerShell como Administrador no servidor do iLux.</li>
-                    <li>Execute a instalação abaixo e informe o mesmo usuário do Windows que acessa o Firebird e as pastas financeiras.</li>
-                    <li>Inicie a tarefa para testar sem reiniciar o servidor.</li>
-                    <li>Confirme o processo e acompanhe o arquivo <code>logs\client.log</code>.</li>
-                  </ol>
-
-                  {[
-                    ['Instalar no boot sem login', 'Set-Location "C:\\ILUX\\firebird-client-package"; powershell.exe -ExecutionPolicy Bypass -File ".\\install-scheduled-task.ps1"'],
-                    ['Verificar a tarefa', 'Get-ScheduledTask -TaskName "AgenteCRM iLux" -ErrorAction SilentlyContinue | Select-Object TaskName, State'],
-                    ['Testar agora', 'Start-ScheduledTask -TaskName "AgenteCRM iLux"'],
-                    ['Conferir a última execução', 'Get-ScheduledTaskInfo -TaskName "AgenteCRM iLux"'],
-                    ['Acompanhar o log', 'Get-Content "C:\\ILUX\\firebird-client-package\\logs\\client.log" -Tail 50'],
-                  ].map(([label, command]) => (
-                    <div key={label} style={s.commandBlock}>
-                      <span style={s.commandLabel}>{label}</span>
-                      <div style={s.commandRow}>
-                        <code style={s.commandCode}>{command}</code>
-                        <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
-                      </div>
+                    <div style={s.agentStartupActions}>
+                      <span style={s.adminOnlyBadge}>Somente administradores</span>
+                      <button type="button" style={s.iconButton} onClick={() => setShowAgentStartupGuide(true)}>
+                        Ver instruções
+                      </button>
                     </div>
-                  ))}
-
-                  <details style={s.agentMaintenanceDetails}>
-                    <summary style={s.agentMaintenanceSummary}>Manutenção: parar, abrir a interface e reiniciar</summary>
-                    <p style={{ ...s.hint, margin: '0.75rem 0' }}>
-                      Nesse modo a janela e o ícone não aparecem, pois o agente roda em uma sessão separada. Antes de abrir a interface manualmente, pare a tarefa e encerre qualquer processo restante.
-                    </p>
-                    {[
-                      ['Parar a tarefa', 'Stop-ScheduledTask -TaskName "AgenteCRM iLux"'],
-                      ['Encerrar processo restante', 'Get-Process -Name "FirebirdCRMClient" -ErrorAction SilentlyContinue | Stop-Process -Force'],
-                      ['Abrir a interface', 'Start-Process "C:\\ILUX\\firebird-client-package\\FirebirdCRMClient.exe"'],
-                      ['Iniciar novamente em segundo plano', 'Start-ScheduledTask -TaskName "AgenteCRM iLux"'],
-                    ].map(([label, command]) => (
-                      <div key={label} style={s.commandBlock}>
-                        <span style={s.commandLabel}>{label}</span>
-                        <div style={s.commandRow}>
-                          <code style={s.commandCode}>{command}</code>
-                          <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
-                        </div>
-                      </div>
-                    ))}
-                  </details>
+                  </div>
                 </div>
               )}
 
@@ -1821,6 +1776,73 @@ export default function Settings() {
             </div>
           </div>
         </div>
+      )}
+
+      {isAdmin && showAgentStartupGuide && (
+        <ModalShell
+          kicker="Agente Local"
+          title="Inicialização automática no Windows Server"
+          onClose={() => setShowAgentStartupGuide(false)}
+          maxWidth="52rem"
+          contentStyle={{ overflowY: 'auto' }}
+        >
+          <div style={s.agentStartupModalBody}>
+            <p style={{ ...s.hint, margin: 0 }}>
+              Este é o modo recomendado para servidores. O Agendador de Tarefas inicia o agente durante o boot do Windows, sem depender de alguém entrar no servidor.
+            </p>
+
+            <div style={s.agentStartupWarning}>
+              <strong>Não use os dois modos juntos.</strong>
+              <span>
+                Depois de criar a tarefa, deixe desmarcada no aplicativo a opção <strong>Iniciar o agente com o Windows</strong>. A tarefa agendada substitui o atalho da pasta Inicializar e evita dois processos concorrentes.
+              </span>
+            </div>
+
+            <ol style={s.guideList}>
+              <li>Abra o PowerShell como Administrador no servidor do iLux.</li>
+              <li>Execute a instalação abaixo e informe o mesmo usuário do Windows que acessa o Firebird e as pastas financeiras.</li>
+              <li>Inicie a tarefa para testar sem reiniciar o servidor.</li>
+              <li>Confirme o processo e acompanhe o arquivo <code>logs\client.log</code>.</li>
+            </ol>
+
+            {[
+              ['Instalar no boot sem login', 'Set-Location "C:\\ILUX\\firebird-client-package"; powershell.exe -ExecutionPolicy Bypass -File ".\\install-scheduled-task.ps1"'],
+              ['Verificar a tarefa', 'Get-ScheduledTask -TaskName "AgenteCRM iLux" -ErrorAction SilentlyContinue | Select-Object TaskName, State'],
+              ['Testar agora', 'Start-ScheduledTask -TaskName "AgenteCRM iLux"'],
+              ['Conferir a última execução', 'Get-ScheduledTaskInfo -TaskName "AgenteCRM iLux"'],
+              ['Acompanhar o log', 'Get-Content "C:\\ILUX\\firebird-client-package\\logs\\client.log" -Tail 50'],
+            ].map(([label, command]) => (
+              <div key={label} style={s.commandBlock}>
+                <span style={s.commandLabel}>{label}</span>
+                <div style={s.commandRow}>
+                  <code style={s.commandCode}>{command}</code>
+                  <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
+                </div>
+              </div>
+            ))}
+
+            <details style={s.agentMaintenanceDetails}>
+              <summary style={s.agentMaintenanceSummary}>Manutenção: parar, abrir a interface e reiniciar</summary>
+              <p style={{ ...s.hint, margin: '0.75rem 0' }}>
+                Nesse modo a janela e o ícone não aparecem, pois o agente roda em uma sessão separada. Antes de abrir a interface manualmente, pare a tarefa e encerre qualquer processo restante.
+              </p>
+              {[
+                ['Parar a tarefa', 'Stop-ScheduledTask -TaskName "AgenteCRM iLux"'],
+                ['Encerrar processo restante', 'Get-Process -Name "FirebirdCRMClient" -ErrorAction SilentlyContinue | Stop-Process -Force'],
+                ['Abrir a interface', 'Start-Process "C:\\ILUX\\firebird-client-package\\FirebirdCRMClient.exe"'],
+                ['Iniciar novamente em segundo plano', 'Start-ScheduledTask -TaskName "AgenteCRM iLux"'],
+              ].map(([label, command]) => (
+                <div key={label} style={s.commandBlock}>
+                  <span style={s.commandLabel}>{label}</span>
+                  <div style={s.commandRow}>
+                    <code style={s.commandCode}>{command}</code>
+                    <button type="button" style={s.copyCommandBtn} onClick={() => handleCopyAgentCommand(command, label)}>Copiar</button>
+                  </div>
+                </div>
+              ))}
+            </details>
+          </div>
+        </ModalShell>
       )}
 
       {promptPreview && (
@@ -2065,6 +2087,18 @@ const s = {
     alignItems: 'flex-start',
     gap: '1rem',
     flexWrap: 'wrap',
+  },
+  agentStartupActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.6rem',
+    flexWrap: 'wrap',
+  },
+  agentStartupModalBody: {
+    padding: 'var(--space-6)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.25rem',
   },
   adminOnlyBadge: {
     padding: '0.3rem 0.55rem',
