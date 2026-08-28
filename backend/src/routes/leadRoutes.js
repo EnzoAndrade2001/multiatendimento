@@ -6,6 +6,7 @@ const auth = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
 const leadController = require('../controllers/leadController');
 const { uploadsPath } = require('../utils/uploads');
+const auditEvent = require('../middlewares/auditEvent');
 
 const leadUpload = multer({
   storage: multer.diskStorage({
@@ -26,15 +27,15 @@ router.get('/instances', leadController.getLeadInstances);
 router.get('/audit', leadController.getLeadAudit);
 router.get('/campaigns', leadController.getLeadCampaigns);
 router.get('/:id/history', leadController.getLeadHistory);
-router.post('/:id/convert', leadController.convertLead);
-router.post('/upload', leadUpload.single('file'), (req, res) => {
+router.post('/:id/convert', auditEvent('LEAD_CONVERT', 'lead'), leadController.convertLead);
+router.post('/upload', leadUpload.single('file'), auditEvent('LEAD_UPLOAD', 'lead'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhuma imagem válida foi enviada.' });
   res.json({ url: `/uploads/${req.file.filename}`, filename: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size });
 });
-router.post('/search', leadController.searchLeads);
-router.post('/manual', leadController.createManualLeads);
-router.post('/send', leadController.sendToLeads);
-router.delete('/all', leadController.deleteAllLeads);
-router.delete('/:id', leadController.deleteLead);
+router.post('/search', auditEvent('LEAD_SEARCH', 'lead'), leadController.searchLeads);
+router.post('/manual', auditEvent('LEAD_CREATE_MANUAL', 'lead'), leadController.createManualLeads);
+router.post('/send', auditEvent('LEAD_SEND', 'lead'), leadController.sendToLeads);
+router.delete('/all', auditEvent('LEAD_DELETE_ALL', 'lead'), leadController.deleteAllLeads);
+router.delete('/:id', auditEvent('LEAD_DELETE', 'lead'), leadController.deleteLead);
 
 module.exports = router;

@@ -27,6 +27,7 @@ const PERMISSIONS = Object.freeze([
   'settings.agent.manage',
   'internal_chat.view',
   'privacy.manage',
+  'audit.view',
 ]);
 
 const ATTENDANT = [
@@ -40,7 +41,7 @@ const PROFILE_PERMISSIONS = Object.freeze({
   supervisor: [
     ...ATTENDANT, 'inbox.view_all', 'inbox.delete_message',
     'crm.financial.view', 'billing.view', 'campaigns.manage', 'leads.manage',
-    'revenue.view', 'teams.manage', 'settings.attendance.manage',
+    'revenue.view', 'teams.manage', 'settings.attendance.manage', 'audit.view',
   ],
   agent: ATTENDANT,
   financeiro: [

@@ -38,6 +38,7 @@ const integrationRoutes = require('./routes/integrations');
 const firebirdSyncRoutes = require('./routes/firebirdSync');
 const privacyRoutes = require('./routes/privacy');
 const mediaRoutes = require('./routes/media');
+const auditEventRoutes = require('./routes/auditEvents');
 
 const app = express();
 app.use('/api/report', require('./routes/report'));
@@ -127,6 +128,7 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/privacy', privacyRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/user-avatars', require('./routes/userAvatars'));
+app.use('/api/audit', auditEventRoutes);
 
 const jwt = require('jsonwebtoken');
 const prisma = require('./lib/prisma');

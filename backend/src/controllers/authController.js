@@ -2,6 +2,22 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { PERMISSIONS, PROFILE_PERMISSIONS, resolveUserAccess, resolveHomePage } = require('../auth/permissions');
+const { queueAuditEvent } = require('../services/auditEventService');
+
+function auditLogin(req, user, action, metadata = {}) {
+  if (!user?.tenantId) return;
+  queueAuditEvent({
+    req,
+    user: { userId: user.id || null, tenantId: user.tenantId },
+    tenantId: user.tenantId,
+  }, {
+    action,
+    resourceType: 'authentication',
+    resourceId: user.id || null,
+    status: action === 'AUTH_LOGIN_SUCCESS' ? 'SUCCESS' : 'FAILED',
+    metadata: { slugProvided: Boolean(req.body?.slug), ...metadata },
+  });
+}
 
 async function login(req, res) {
   const { email, password, slug } = req.body;
@@ -16,15 +32,18 @@ async function login(req, res) {
 
   // Se o login for feito via portal de empresa, validar se o usuário pertence a ela
   if (slug && user.tenant.slug !== slug) {
+    auditLogin(req, user, 'AUTH_LOGIN_FAILED', { reason: 'tenant_mismatch' });
     return res.status(401).json({ error: 'Este usuário não possui permissão para acessar esta empresa.' });
   }
 
   // Se for um usuário comum tentando login global (sem slug), bloquear se não for superadmin
   if (!slug && user.role !== 'superadmin') {
+    auditLogin(req, user, 'AUTH_LOGIN_FAILED', { reason: 'tenant_slug_required' });
     return res.status(401).json({ error: 'Por favor, utilize o link de acesso exclusivo da sua empresa.' });
   }
 
   const valid = await bcrypt.compare(password, user.password);
+  if (!valid) auditLogin(req, user, 'AUTH_LOGIN_FAILED', { reason: 'invalid_password' });
   if (!valid) return res.status(401).json({ error: 'Credenciais inválidas' });
 
   const token = jwt.sign(
@@ -34,6 +53,7 @@ async function login(req, res) {
   );
 
   const access = resolveUserAccess(user);
+  auditLogin(req, user, 'AUTH_LOGIN_SUCCESS');
   res.json({
     token,
     user: {

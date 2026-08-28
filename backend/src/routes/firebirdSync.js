@@ -4,6 +4,7 @@ const { sendBilling, autoSendBilling, logTestBilling, triggerBillingProcess, get
 const upload = require('../middlewares/upload');
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const auditEvent = require('../middlewares/auditEvent');
 
 router.post('/push', pushBatch);
 router.get('/pending-commands', getPendingCommands);
@@ -14,9 +15,9 @@ router.post('/ping', require('../controllers/firebirdSyncController').agentPing)
 router.post('/send-billing', upload.array('media'), sendBilling);
 router.post('/auto-send-billing', autoSendBilling);
 router.post('/log-test-billing', logTestBilling);
-router.post('/trigger-billing-process', authenticate, requirePermission('billing.reprocess'), triggerBillingProcess);
+router.post('/trigger-billing-process', authenticate, requirePermission('billing.reprocess'), auditEvent('BILLING_PROCESS_TRIGGER', 'billing'), triggerBillingProcess);
 router.get('/billing-logs', authenticate, requirePermission('billing.view'), getBillingLogs);
-router.post('/billing-settings', authenticate, requirePermission('billing.reprocess'), saveBillingSettings);
+router.post('/billing-settings', authenticate, requirePermission('billing.reprocess'), auditEvent('BILLING_SETTINGS_UPDATE', 'billing'), saveBillingSettings);
 router.get('/billing-reports', authenticate, requirePermission('billing.view'), getBillingDashboardStats);
 
 module.exports = router;

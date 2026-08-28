@@ -9,13 +9,14 @@ const {
   getAuditedTickets,
   getDrilldown
 } = require('../controllers/revenueController');
+const auditEvent = require('../middlewares/auditEvent');
 
 router.use(authenticate, requirePermission('revenue.view'));
 router.get('/stats', getRevenueDashboard);
 router.get('/benchmark', getBenchmark);
 router.get('/detective', getDetective);
 router.get('/audit', getAuditedTickets);
-router.post('/audit/:ticketId', auditTicket);
+router.post('/audit/:ticketId', auditEvent('TICKET_QUALITY_AUDIT', 'ticket', { resourceId: (req) => req.params.ticketId }), auditTicket);
 router.get('/drilldown/:type', getDrilldown);
 
 module.exports = router;
