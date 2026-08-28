@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 const PERIOD_OPTIONS = [
-  { value: 1, label: 'Hoje' },
+  { value: 'today', label: 'Hoje' },
   { value: 7, label: '7 dias' },
   { value: 30, label: '30 dias' },
 ];
@@ -120,7 +120,7 @@ function SortableHeader({ label, scope, sortKey, sortConfig, onSort }) {
 }
 
 export default function BillingReports() {
-  const [period, setPeriod] = useState(1);
+  const [period, setPeriod] = useState('today');
   const [customRange, setCustomRange] = useState(null);
   const [customRangeDraft, setCustomRangeDraft] = useState({ startDate: '', endDate: '' });
   const [customRangeOpen, setCustomRangeOpen] = useState(false);
@@ -319,8 +319,10 @@ export default function BillingReports() {
   }
 
   const { stats } = data;
-  const deliveryRate = stats?.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0;
-  const accountedTotal = (stats?.success || 0) + (stats?.skippedOptIn || 0) + (stats?.skippedNoContact || 0) + (stats?.failed || 0);
+  // Entrega = enviados / tentativas reais (quem tinha opt-in + telefone),
+  // calculado no backend. Cai para 0 quando não houve nenhuma tentativa real.
+  const deliveryRate = stats?.deliveryRate ?? 0;
+  const eligibleAttempts = stats?.eligibleAttempts ?? ((stats?.success || 0) + (stats?.failed || 0));
   const reportPeriodLabel = customRange
     ? `${formatDateOnly(customRange.startDate)} a ${formatDateOnly(customRange.endDate)}`
     : PERIOD_OPTIONS.find((option) => option.value === period)?.label || `${period} dias`;
@@ -433,7 +435,7 @@ export default function BillingReports() {
               <BarChart2 size={18} color="var(--accent)" />
             </div>
             <div style={s.kpiValue}>{stats?.total || 0}</div>
-            <div style={s.kpiSub}>Boletos lidos pelo robô</div>
+            <div style={s.kpiSub}>Registros no período — a maioria é checagem sem opt-in</div>
           </div>
 
           <div style={s.kpiCard}>
@@ -441,8 +443,8 @@ export default function BillingReports() {
               <span style={s.kpiTitle}>Taxa de Entrega</span>
               <CheckCircle2 size={18} color={STATUS_COLORS.SUCCESS} />
             </div>
-            <div style={{ ...s.kpiValue, color: STATUS_COLORS.SUCCESS }}>{deliveryRate}%</div>
-            <div style={s.kpiSub}>{stats?.success || 0} entregues com sucesso</div>
+            <div style={{ ...s.kpiValue, color: STATUS_COLORS.SUCCESS }}>{eligibleAttempts > 0 ? `${deliveryRate}%` : '—'}</div>
+            <div style={s.kpiSub}>{stats?.success || 0} de {eligibleAttempts} tentativas reais (com opt-in + telefone)</div>
           </div>
 
           <div style={s.kpiCard}>
@@ -478,7 +480,7 @@ export default function BillingReports() {
               <AlertTriangle size={18} color={STATUS_COLORS.FAILED} />
             </div>
             <div style={{ ...s.kpiValue, color: STATUS_COLORS.FAILED }}>{stats?.failed || 0}</div>
-            <div style={s.kpiSub}>{accountedTotal === (stats?.total || 0) ? 'Conferencia dos totais OK' : 'Requer conferencia dos totais'}</div>
+            <div style={s.kpiSub}>{eligibleAttempts > 0 ? `${stats?.failureRate ?? 0}% das tentativas reais falharam` : 'Nenhuma tentativa real no período'}</div>
           </div>
         </div>
 
@@ -588,7 +590,9 @@ export default function BillingReports() {
                   Reprocessar pendências
                 </button>
               )}
-              <span style={s.resultCount}>{activeTab === 'logs' ? `${sortedLogs.length} registros` : `${sortedCoverage.length} clientes`}</span>
+              <span style={s.resultCount}>{activeTab === 'logs'
+                ? (data.stats?.logsTruncated ? `${sortedLogs.length} de ${data.stats.total} registros` : `${sortedLogs.length} registros`)
+                : `${sortedCoverage.length} clientes`}</span>
             </div>
 
             {activeTab === 'coverage' && (

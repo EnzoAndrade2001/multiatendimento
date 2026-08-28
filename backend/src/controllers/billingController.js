@@ -411,6 +411,16 @@ async function autoSendBilling(req, res) {
       return res.json({ success: true, message: 'Já enviado hoje com sucesso.' });
     }
 
+    // O agente re-tenta títulos sem opt-in/telefone em todo ciclo (10 min).
+    // Não re-gravamos o mesmo SKIPPED se já houver um recente para este cliente
+    // — senão a tabela BillingLog cresce milhares de linhas de ruído por dia.
+    const skipRelogDays = Math.max(1, Number.parseInt(process.env.BILLING_SKIP_RELOG_DAYS, 10) || 7);
+    const skipRelogSince = new Date(Date.now() - skipRelogDays * 24 * 60 * 60 * 1000);
+    const recentSkip = await prisma.billingLog.findFirst({
+      where: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, status: 'SKIPPED', sentAt: { gte: skipRelogSince } },
+      select: { id: true },
+    });
+
     // Valida contato e opt-in antes de persistir/cachar os PDFs. Assim, uma
     // repeticao para um contato sem permissao nao passa pelo cache e nao gera
     // erro 500 antes de devolver skipped.
@@ -418,15 +428,19 @@ async function autoSendBilling(req, res) {
     const precheckContact = await findContactForBilling(tenant.id, crmCustomer, crmCustomer.cpfCnpj);
     const precheckIsSendToAll = String(sendPolicy).toLowerCase() === 'todos';
     if (!precheckContact) {
-      await prisma.billingLog.create({
-        data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: requestedFileNames, status: 'SKIPPED', errorMessage: 'Nenhum contato de WhatsApp valido cadastrado para este cliente.' },
-      });
+      if (!recentSkip) {
+        await prisma.billingLog.create({
+          data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: requestedFileNames, status: 'SKIPPED', errorMessage: 'Nenhum contato de WhatsApp valido cadastrado para este cliente.' },
+        });
+      }
       return res.json({ success: true, skipped: true, message: 'Documentos preparados, mas nao ha contato de WhatsApp valido para enviar automaticamente.' });
     }
     if (!precheckIsSendToAll && !precheckContact.enableWhatsAppBilling) {
-      await prisma.billingLog.create({
-        data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: requestedFileNames, status: 'SKIPPED', errorMessage: 'Opt-in de cobranca desativado para este contato.' },
-      });
+      if (!recentSkip) {
+        await prisma.billingLog.create({
+          data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: requestedFileNames, status: 'SKIPPED', errorMessage: 'Opt-in de cobranca desativado para este contato.' },
+        });
+      }
       return res.json({ success: true, skipped: true, message: 'Envio automatico nao habilitado para este contato.' });
     }
 
@@ -738,6 +752,14 @@ function resolveBillingDateRange(query = {}) {
     }
   }
 
+  // "Hoje" = da meia-noite ate agora, nao "ultimas 24h" (o antigo period=1
+  // pegava o dia inteiro de ontem quando aberto de madrugada).
+  if (String(query.period).toLowerCase() === 'today') {
+    const startDate = new Date();
+    startDate.setHours(0, 0, 0, 0);
+    return { startDate, endDate: new Date(), custom: false, period: 'today' };
+  }
+
   const parsedPeriod = Number.parseInt(query.period, 10);
   const period = Number.isFinite(parsedPeriod) && parsedPeriod > 0 ? Math.min(parsedPeriod, 365) : 30;
   const startDate = new Date();
@@ -751,58 +773,51 @@ async function getBillingDashboardStats(req, res) {
 
   try {
     const range = resolveBillingDateRange(req.query);
-
-    const logs = await prisma.billingLog.findMany({
-      where: { 
-        tenantId,
-        sentAt: {
-          gte: range.startDate,
-          ...(range.endDate ? { lte: range.endDate } : {}),
-        }
-      },
-      orderBy: { sentAt: 'desc' },
-      // A tela de relatórios não precisa carregar o PDF/nome do arquivo para
-      // calcular os indicadores ou exibir o log. Selecionar somente os campos
-      // usados evita payloads grandes e reduz o tempo de serialização.
-      select: {
-        id: true,
-        cpfCnpj: true,
-        clientName: true,
-        status: true,
-        errorMessage: true,
-        sentAt: true,
-      },
-    });
-
-    const operationalLogs = logs.filter((log) => log.status !== 'TEST');
-    const totalOptIn = await prisma.contact.count({
-      where: {
-        tenantId,
-        enableWhatsAppBilling: true
-      }
-    });
-
-    const stats = {
-      total: operationalLogs.length,
-      success: 0,
-      skippedOptIn: 0,
-      skippedNoContact: 0,
-      failed: 0,
-      test: logs.length - operationalLogs.length,
-      totalOptIn
+    const rangeWhere = {
+      tenantId,
+      sentAt: { gte: range.startDate, ...(range.endDate ? { lte: range.endDate } : {}) },
     };
 
-    operationalLogs.forEach(log => {
-      if (log.status === 'SUCCESS') stats.success++;
-      else if (log.status === 'FAILED') stats.failed++;
-      else if (log.status === 'SKIPPED') {
-        if (log.errorMessage && log.errorMessage.includes('Opt-in')) {
-          stats.skippedOptIn++;
-        } else {
-          stats.skippedNoContact++;
-        }
-      }
-    });
+    // Os indicadores saem de agregação no banco — nunca mais carregamos as
+    // dezenas de milhares de linhas de log só para contá-las. A tabela mostra
+    // apenas as mais recentes.
+    const LOG_TABLE_LIMIT = 300;
+    const [byStatus, skippedOptIn, recentLogs, operationalTotal] = await Promise.all([
+      prisma.billingLog.groupBy({ by: ['status'], where: rangeWhere, _count: { _all: true } }),
+      prisma.billingLog.count({ where: { ...rangeWhere, status: 'SKIPPED', errorMessage: { contains: 'Opt-in' } } }),
+      prisma.billingLog.findMany({
+        where: rangeWhere,
+        orderBy: { sentAt: 'desc' },
+        take: LOG_TABLE_LIMIT,
+        select: { id: true, cpfCnpj: true, clientName: true, status: true, errorMessage: true, sentAt: true },
+      }),
+      prisma.billingLog.count({ where: { ...rangeWhere, status: { not: 'TEST' } } }),
+    ]);
+
+    const countOf = (status) => byStatus.find((g) => g.status === status)?._count?._all || 0;
+    const success = countOf('SUCCESS');
+    const failed = countOf('FAILED');
+    const skippedTotal = countOf('SKIPPED');
+    const test = countOf('TEST');
+    const eligibleAttempts = success + failed; // teve opt-in + telefone; o resto nem chegou a tentar
+
+    const stats = {
+      total: operationalTotal,
+      success,
+      failed,
+      skippedOptIn,
+      skippedNoContact: skippedTotal - skippedOptIn,
+      test,
+      eligibleAttempts,
+      // Entrega = enviados / tentativas reais (não sobre o total de linhas de log).
+      deliveryRate: eligibleAttempts > 0 ? Math.round((success / eligibleAttempts) * 100) : null,
+      failureRate: eligibleAttempts > 0 ? Math.round((failed / eligibleAttempts) * 100) : null,
+      totalOptIn: 0,
+      logsShown: recentLogs.length,
+      logsTruncated: operationalTotal + test > recentLogs.length,
+    };
+
+    const operationalLogs = recentLogs.filter((log) => log.status !== 'TEST');
 
     const optInContacts = await prisma.contact.findMany({
       where: {
@@ -826,11 +841,26 @@ async function getBillingDashboardStats(req, res) {
       }
     });
 
-    const coverage = buildBillingCoverageReport(optInContacts, operationalLogs);
+    // Cobertura precisa do último log de cada cliente com opt-in — e esse log
+    // pode ser mais antigo que os 300 mostrados na tabela. Buscamos só os
+    // registros desses ~poucos CNPJs no período (conjunto pequeno).
+    const optInCnpjForms = [...new Set(
+      optInContacts.flatMap((contact) => [contact.cpfCnpj, contact.crmCustomer?.cpfCnpj])
+        .filter((value) => value && String(value).trim()),
+    )];
+    const coverageLogs = optInCnpjForms.length
+      ? await prisma.billingLog.findMany({
+        where: { ...rangeWhere, status: { not: 'TEST' }, cpfCnpj: { in: optInCnpjForms } },
+        orderBy: { sentAt: 'desc' },
+        select: { cpfCnpj: true, status: true, errorMessage: true, sentAt: true },
+      })
+      : [];
+
+    const coverage = buildBillingCoverageReport(optInContacts, coverageLogs);
     stats.totalOptIn = coverage.coverageSummary.expected;
     res.json({
       stats,
-      logs,
+      logs: recentLogs,
       ...coverage,
       period: {
         custom: range.custom,

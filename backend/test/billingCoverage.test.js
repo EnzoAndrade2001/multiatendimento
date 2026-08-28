@@ -41,6 +41,17 @@ test('aceita periodo personalizado e rejeita datas invertidas', () => {
   assert.equal(fallback.period, 7);
 });
 
+test('periodo "hoje" vai da meia-noite ate agora, nao ultimas 24h', () => {
+  const range = _private.resolveBillingDateRange({ period: 'today' });
+  assert.equal(range.custom, false);
+  assert.equal(range.period, 'today');
+  const now = new Date();
+  assert.equal(range.startDate.getHours(), 0);
+  assert.equal(range.startDate.getMinutes(), 0);
+  assert.equal(range.startDate.toDateString(), now.toDateString());
+  assert.ok(range.endDate <= new Date(Date.now() + 1000));
+});
+
 test('rejeita telefone curto do iLux e prioriza o contato WhatsApp válido', () => {
   assert.equal(_private.normalizeBillingPhone('05101'), '');
   assert.equal(_private.normalizeBillingPhone('5551999990001'), '5551999990001');
