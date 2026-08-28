@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.6"
+DEFAULT_AGENT_VERSION = "1.0.7"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -236,7 +236,7 @@ class AppConfig:
     billing_send_policy: str = "Somente Marcados"
     financial_document_folders: list[str] = field(default_factory=list)
     financial_document_index_file: Path = field(default_factory=lambda: ROOT / "financial-documents-index.json")
-    financial_document_scan_seconds: int = 600
+    financial_document_scan_seconds: int = 900
     # Envio automatico de cobranca pelo WhatsApp, construido sobre o indice de
     # documentos financeiros (substitui a antiga pasta "boletos_enviar" que
     # movia arquivos e identificava o cliente so pelo CNPJ solto no texto).
@@ -251,6 +251,13 @@ class AppConfig:
     # viram milhares de POSTs/dia no backend. Zerado -> sem backoff (tenta
     # sempre, comportamento antigo).
     billing_skip_retry_hours: int = 24
+    # Janela em que o envio automatico pode disparar (hora local, formato
+    # "HH-HH", fim exclusivo). Fora dela o indice ainda e atualizado, mas
+    # nada e enviado -- evita a cobranca rodar de madrugada e martelar a
+    # instancia. Vazio = sem restricao de hora. "Reprocessar pendencias"
+    # (clique manual) ignora a janela.
+    billing_auto_send_hours: str = "8-19"
+    billing_auto_send_weekdays_only: bool = True
     # Data (YYYY-MM-DD) a partir da qual um PDF passa a valer pro envio
     # automatico, pela data de modificacao do ARQUIVO (nao pela data de
     # emissao da cobranca) - documentos antigos ja arquivados nao devem ser
@@ -335,7 +342,7 @@ class AppConfig:
                 os.getenv("FINANCIAL_DOCUMENT_INDEX_FILE", "financial-documents-index.json"),
                 ROOT / "financial-documents-index.json",
             ),
-            financial_document_scan_seconds=env_int("FINANCIAL_DOCUMENT_SCAN_SECONDS", 600),
+            financial_document_scan_seconds=env_int("FINANCIAL_DOCUMENT_SCAN_SECONDS", 900),
             billing_auto_send_enabled=env_bool("BILLING_AUTO_SEND_ENABLED", False),
             billing_auto_send_test_mode=env_bool("BILLING_AUTO_SEND_TEST_MODE", True),
             billing_auto_send_document_types=env_folders("BILLING_AUTO_SEND_DOCUMENT_TYPES") or ["invoice", "statement", "boleto"],
@@ -345,6 +352,8 @@ class AppConfig:
             ),
             billing_auto_send_since=os.getenv("BILLING_AUTO_SEND_SINCE") or None,
             billing_skip_retry_hours=env_int("BILLING_SKIP_RETRY_HOURS", 24),
+            billing_auto_send_hours=os.getenv("BILLING_AUTO_SEND_HOURS", "8-19"),
+            billing_auto_send_weekdays_only=env_bool("BILLING_AUTO_SEND_WEEKDAYS_ONLY", True),
         )
 
 
@@ -2849,11 +2858,34 @@ def _resolve_billing_auto_send_since(config: AppConfig) -> str:
     return today
 
 
+def _within_billing_window(config: AppConfig, now: datetime | None = None) -> bool:
+    """True se o envio automatico pode disparar agora (hora local).
+
+    billing_auto_send_hours no formato "HH-HH" (fim exclusivo); vazio ou
+    invalido = sem restricao de hora. billing_auto_send_weekdays_only pula
+    sabado/domingo.
+    """
+    now = now or datetime.now()
+    if config.billing_auto_send_weekdays_only and now.weekday() >= 5:
+        return False
+    spec = (config.billing_auto_send_hours or "").strip()
+    if not spec:
+        return True
+    match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", spec)
+    if not match:
+        return True
+    start, end = int(match.group(1)), int(match.group(2))
+    if not (0 <= start < end <= 24):
+        return True
+    return start <= now.hour < end
+
+
 def run_billing_automation(
     repo: FirebirdRepository,
     crm: CRMClient,
     config: AppConfig,
     ledger: "BillingSendLedger",
+    force_window: bool = False,
 ) -> dict[str, int]:
     """One pass of the automatic WhatsApp billing send.
 
@@ -2862,9 +2894,20 @@ def run_billing_automation(
     financial document index, and sends (or, in test mode, only logs) the ones not sent
     before. Never touches the original PDFs; every send is recorded in the local ledger
     keyed by file content, not by folder location, so nothing is ever sent twice.
+
+    force_window=True (clique manual em "Reprocessar pendencias") ignora a
+    janela de horario.
     """
     if not config.billing_auto_send_enabled:
         return {"ready": 0, "sent": 0, "failed": 0, "skipped": 0}
+
+    if not force_window and not _within_billing_window(config):
+        logging.info(
+            "Envio automatico de cobrancas fora da janela (%s%s); indice atualizado, nada enviado.",
+            config.billing_auto_send_hours or "sem restricao de hora",
+            ", somente dias uteis" if config.billing_auto_send_weekdays_only else "",
+        )
+        return {"ready": 0, "sent": 0, "failed": 0, "skipped": 0, "outside_window": True}
 
     since_date = _resolve_billing_auto_send_since(config)
     min_mtime_ns = int(datetime.strptime(since_date, "%Y-%m-%d").timestamp() * 1_000_000_000)
@@ -2959,6 +3002,7 @@ def run_financial_document_monitor(
     # teste sem precisar reiniciar o agente. O arquivo de teste e separado do
     # de producao, entao desligar o modo teste descarta o ledger de teste e
     # re-avalia todos os pacotes que foram apenas simulados.
+    manual_trigger = False
     while stop_event is None or not stop_event.is_set():
         try:
             # Resolve o ledger correto com base no modo atual (pode mudar em tempo real)
@@ -2982,7 +3026,9 @@ def run_financial_document_monitor(
             logging.exception("Falha ao atualizar o indice de documentos financeiros: %s", exc)
 
         try:
-            billing_stats = run_billing_automation(repo, crm, config, ledger)
+            billing_stats = run_billing_automation(
+                repo, crm, config, ledger, force_window=manual_trigger,
+            )
             if billing_stats["ready"]:
                 logging.info(
                     "Envio automatico de cobrancas: %s pronto(s), %s enviado(s)/testado(s), "
@@ -2995,13 +3041,15 @@ def run_financial_document_monitor(
         except Exception as exc:
             logging.exception("Falha no envio automatico de cobrancas: %s", exc)
 
+        manual_trigger = False
         wait_seconds = max(60, config.financial_document_scan_seconds)
         if stop_event is not None and stop_event.is_set():
             return
         if billing_trigger_event is not None:
             # Um clique em "Reprocessar pendencias" interrompe a espera normal e
-            # inicia outra leitura assim que a rodada atual terminar.
-            billing_trigger_event.wait(wait_seconds)
+            # inicia outra leitura assim que a rodada atual terminar -- e essa
+            # rodada ignora a janela de horario (pedido explicito de um humano).
+            manual_trigger = billing_trigger_event.wait(wait_seconds)
             billing_trigger_event.clear()
         else:
             time.sleep(wait_seconds)

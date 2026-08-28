@@ -8,7 +8,14 @@ from unittest.mock import patch
 from reportlab.pdfgen import canvas
 
 import main as agent_main
-from main import AppConfig, BillingSendLedger, CRMClient, FirebirdRepository, run_billing_automation
+from main import (
+    AppConfig,
+    BillingSendLedger,
+    CRMClient,
+    FirebirdRepository,
+    _within_billing_window,
+    run_billing_automation,
+)
 
 
 CUSTOMER_CNPJ = "07.275.799/0001-78"
@@ -186,6 +193,11 @@ class RunBillingAutomationTest(unittest.TestCase):
             # Isolado do diretorio real do agente - sem isso, cada rodada de
             # teste leria/gravaria o arquivo de corte de data de verdade.
             billing_auto_send_since_file=self.root / "since.json",
+            # Sem janela de horario nos testes gerais desta classe (senao
+            # passariam/falhariam conforme a hora/dia em que rodam). Os testes
+            # de janela ficam em WithinBillingWindowTest.
+            billing_auto_send_hours="",
+            billing_auto_send_weekdays_only=False,
         )
         self.repo = FirebirdRepository(self.config)
         self.repo.scan_financial_documents()
@@ -331,6 +343,68 @@ class RunBillingAutomationTest(unittest.TestCase):
             stats_retry = run_billing_automation(self.repo, crm, self.config, ledger)
         send_retry.assert_called_once()
         self.assertEqual(stats_retry["sent"], 1)
+
+    def test_fora_da_janela_de_horario_nao_envia_nada(self):
+        self.config.billing_auto_send_test_mode = False
+        self.config.billing_auto_send_hours = "8-19"
+        self.config.billing_auto_send_weekdays_only = False
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        crm = CRMClient(self.config)
+        fake_now = datetime(2026, 8, 28, 3, 0, 0)  # 03:00 -> fora de 8-19
+        with patch("main.datetime") as fake_datetime, \
+             patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
+             patch.object(crm, "send_billing_package") as send:
+            fake_datetime.now.return_value = fake_now
+            fake_datetime.strptime = datetime.strptime
+            stats = run_billing_automation(self.repo, crm, self.config, ledger)
+        send.assert_not_called()
+        self.assertTrue(stats.get("outside_window"))
+        self.assertEqual(stats["ready"], 0)
+
+    def test_force_window_ignora_a_janela(self):
+        self.config.billing_auto_send_test_mode = False
+        self.config.billing_auto_send_hours = "8-19"
+        self.config.billing_auto_send_weekdays_only = False
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        crm = CRMClient(self.config)
+        fake_now = datetime(2026, 8, 28, 3, 0, 0)
+        with patch("main.datetime") as fake_datetime, \
+             patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
+             patch.object(crm, "send_billing_package", return_value={"success": True}) as send:
+            fake_datetime.now.return_value = fake_now
+            fake_datetime.strptime = datetime.strptime
+            stats = run_billing_automation(self.repo, crm, self.config, ledger, force_window=True)
+        send.assert_called_once()
+        self.assertEqual(stats["sent"], 1)
+
+
+class WithinBillingWindowTest(unittest.TestCase):
+    def _cfg(self, hours="8-19", weekdays_only=True):
+        return AppConfig(billing_auto_send_hours=hours, billing_auto_send_weekdays_only=weekdays_only)
+
+    def test_dentro_do_horario_em_dia_util(self):
+        # 2026-08-28 e uma sexta-feira.
+        self.assertTrue(_within_billing_window(self._cfg(), datetime(2026, 8, 28, 9, 0)))
+        self.assertTrue(_within_billing_window(self._cfg(), datetime(2026, 8, 28, 18, 59)))
+
+    def test_fora_do_horario(self):
+        self.assertFalse(_within_billing_window(self._cfg(), datetime(2026, 8, 28, 7, 59)))
+        self.assertFalse(_within_billing_window(self._cfg(), datetime(2026, 8, 28, 19, 0)))  # fim exclusivo
+        self.assertFalse(_within_billing_window(self._cfg(), datetime(2026, 8, 28, 2, 0)))
+
+    def test_fim_de_semana_bloqueia_quando_weekdays_only(self):
+        # 2026-08-29 sabado, 2026-08-30 domingo.
+        self.assertFalse(_within_billing_window(self._cfg(), datetime(2026, 8, 29, 10, 0)))
+        self.assertFalse(_within_billing_window(self._cfg(), datetime(2026, 8, 30, 10, 0)))
+        self.assertTrue(_within_billing_window(self._cfg(weekdays_only=False), datetime(2026, 8, 29, 10, 0)))
+
+    def test_sem_restricao_de_hora(self):
+        self.assertTrue(_within_billing_window(self._cfg(hours=""), datetime(2026, 8, 28, 3, 0)))
+        self.assertTrue(_within_billing_window(self._cfg(hours="  "), datetime(2026, 8, 28, 23, 0)))
+
+    def test_formato_invalido_nao_bloqueia(self):
+        self.assertTrue(_within_billing_window(self._cfg(hours="oito as seis"), datetime(2026, 8, 28, 3, 0)))
+        self.assertTrue(_within_billing_window(self._cfg(hours="19-8"), datetime(2026, 8, 28, 3, 0)))  # start>=end
 
 
 class ResolveBillingAutoSendSinceTest(unittest.TestCase):

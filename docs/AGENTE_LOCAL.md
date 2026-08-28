@@ -17,7 +17,7 @@ Configure no serviço:
 ```text
 FIREBIRD_AGENT_RELEASE_DIR=/data/agent-releases
 FIREBIRD_AGENT_FILE_NAME=FirebirdCRMClient.exe
-FIREBIRD_AGENT_VERSION=1.0.6
+FIREBIRD_AGENT_VERSION=1.0.7
 ```
 
 O volume não é apagado quando o backend recebe um novo deploy. A rota protegida `/api/settings/agent-download` só permite o download a usuários com `settings.agent.manage`.
