@@ -52,6 +52,30 @@ test('periodo "hoje" vai da meia-noite ate agora, nao ultimas 24h', () => {
   assert.ok(range.endDate <= new Date(Date.now() + 1000));
 });
 
+test('descreve a falha de envio automatico com uma frase util, nao o erro cru da lib', () => {
+  const { describeAutoSendFailure } = _private;
+
+  // Caso real: Evolution 400 quando a instancia esta reconectando e a checagem
+  // "existe no WhatsApp?" volta vazia no meio do envio.
+  const evoNumberRejected = {
+    message: 'Request failed with status code 400',
+    response: { data: { status: 400, error: 'Bad Request', response: { message: [{ jid: '5551999@s.whatsapp.net', exists: false, number: '5551999' }] } } },
+  };
+  const described = describeAutoSendFailure(evoNumberRejected);
+  assert.match(described, /WhatsApp recusou o numero 5551999/);
+  assert.match(described, /reconect/i);
+  assert.doesNotMatch(described, /status code 400/);
+
+  // Evolution devolvendo uma mensagem textual: repassa a mensagem.
+  assert.equal(
+    describeAutoSendFailure({ message: 'x', response: { data: { message: 'Instance not connected' } } }),
+    'Instance not connected',
+  );
+
+  // Erro comum (sem response HTTP): cai no proprio message.
+  assert.equal(describeAutoSendFailure(new Error('ECONNREFUSED')), 'ECONNREFUSED');
+});
+
 test('rejeita telefone curto do iLux e prioriza o contato WhatsApp válido', () => {
   assert.equal(_private.normalizeBillingPhone('05101'), '');
   assert.equal(_private.normalizeBillingPhone('5551999990001'), '5551999990001');

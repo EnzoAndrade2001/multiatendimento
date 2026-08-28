@@ -328,7 +328,8 @@ async function sendBilling(req, res) {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('[sendBilling] erro:', err.message);
+    const failureDetail = describeAutoSendFailure(err);
+    console.error('[sendBilling] erro:', failureDetail, '| raw:', err.message);
     // Tenta registrar o erro no banco se tivermos o tenant
     if (tenantSlug) {
       try {
@@ -340,7 +341,7 @@ async function sendBilling(req, res) {
               cpfCnpj,
               fileName: files.map(f => f.originalname).join(', '),
               status: 'FAILED',
-              errorMessage: err.message
+              errorMessage: failureDetail
             }
           });
         }
@@ -352,6 +353,22 @@ async function sendBilling(req, res) {
   }
 }
 
+// Traduz o erro cru de um envio automatico numa frase util pro relatorio.
+// O caso mais comum e a Evolution devolver 400 com
+// { response: { message: [ { number, exists: false } ] } } quando a instancia
+// esta reconectando e a checagem "existe no WhatsApp?" volta vazia no meio do
+// envio -- o numero costuma ser valido, so o socket estava instavel.
+function describeAutoSendFailure(err) {
+  const payload = err?.response?.data;
+  const rejected = Array.isArray(payload?.response?.message) ? payload.response.message : null;
+  const numberCheck = rejected?.find((item) => item && typeof item === 'object' && 'exists' in item);
+  if (numberCheck && numberCheck.exists === false) {
+    return `WhatsApp recusou o numero ${numberCheck.number || 's/ numero'} no momento do envio `
+      + '(instancia Evolution pode ter caido/reconectado; o numero costuma ser valido).';
+  }
+  return evolutionService.getEvolutionErrorDetail(err);
+}
+
 async function autoSendBilling(req, res) {
   // Chamado pelo agente (nao por um usuario logado) quando o indice de
   // Documentos financeiros encontra, sem ambiguidade, um pacote completo para
@@ -359,6 +376,11 @@ async function autoSendBilling(req, res) {
   // identificado com precisao pelo proprio agente (CNPJ + numero + datas +
   // valor), aqui so falta checar o opt-in e entregar pelo WhatsApp.
   const { tenantSlug, receivableExternalId, sendPolicy, documents } = req.body || {};
+  // Preenchidos assim que o cliente e resolvido, para o log de FALHA no catch
+  // conseguir dizer QUEM falhou (antes gravava cpfCnpj vazio -> o relatorio de
+  // cobertura nao conseguia ligar a falha ao cliente).
+  let failureCpfCnpj = '';
+  let failureClientName = null;
 
   try {
     if (!tenantSlug) return res.status(400).json({ error: 'tenantSlug é obrigatório.' });
@@ -393,6 +415,8 @@ async function autoSendBilling(req, res) {
       return res.status(404).json({ error: 'Cliente do CRM não encontrado para este título.' });
     }
     const customerName = crmCustomer.fantasyName || crmCustomer.name;
+    failureCpfCnpj = crmCustomer.cpfCnpj || '';
+    failureClientName = customerName;
 
     // Proteção contra envio duplicado caso o ledger do agente seja apagado (evita spam no mesmo dia)
     const startOfDay = new Date();
@@ -581,7 +605,8 @@ async function autoSendBilling(req, res) {
 
     return res.json({ success: true, message: `Enviado automaticamente para ${customerName} (${phone}).` });
   } catch (err) {
-    console.error('[autoSendBilling] erro:', err.message);
+    const failureDetail = describeAutoSendFailure(err);
+    console.error('[autoSendBilling] erro:', failureDetail, '| raw:', err.message);
     try {
       if (tenantSlug) {
         const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
@@ -589,10 +614,11 @@ async function autoSendBilling(req, res) {
           await prisma.billingLog.create({
             data: {
               tenantId: tenant.id,
-              cpfCnpj: '',
+              cpfCnpj: failureCpfCnpj,
+              clientName: failureClientName,
               fileName: (documents || []).map((document) => document.fileName).join(', '),
               status: 'FAILED',
-              errorMessage: err.message,
+              errorMessage: failureDetail,
             },
           });
         }
@@ -907,5 +933,6 @@ module.exports = {
     getBillingContactPhone,
     selectBillingContact,
     resolveBillingDateRange,
+    describeAutoSendFailure,
   }
 };

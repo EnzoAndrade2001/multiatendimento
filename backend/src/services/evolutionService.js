@@ -574,5 +574,6 @@ module.exports = {
   sendText, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
   getQrCode, getConnectionState, setWebhook, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
   normalizePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
-  findChats, findMessages, findConversationJidsByMessageIds
+  findChats, findMessages, findConversationJidsByMessageIds,
+  getEvolutionErrorDetail
 };
