@@ -117,6 +117,8 @@ export const acceptPrivacyPolicy = (data) => api.post('/privacy/acceptance', dat
 export const searchPrivacySubjects = (params) => api.get('/privacy/admin/subjects', { params });
 export const exportPrivacySubject = (source, id) => api.get(`/privacy/admin/subjects/${encodeURIComponent(source)}/${encodeURIComponent(id)}/export`, { responseType: 'blob' });
 export const anonymizePrivacySubject = (source, id, data) => api.post(`/privacy/admin/subjects/${encodeURIComponent(source)}/${encodeURIComponent(id)}/anonymize`, data);
+// Auditoria central de ações do tenant (restrita a usuários com audit.view).
+export const getAuditEvents = (params = {}, signal) => api.get('/audit/events', { params, signal });
 
 // Instance
 export const getInstances = () => api.get('/instance/list');
