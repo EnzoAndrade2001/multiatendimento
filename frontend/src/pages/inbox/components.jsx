@@ -2265,6 +2265,7 @@ export const MessageComposer = React.memo(function MessageComposer({
   const fileInputRef = useRef(null);
   const textInputRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const wasSendingRef = useRef(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
 
   useEffect(() => {
@@ -2288,6 +2289,18 @@ export const MessageComposer = React.memo(function MessageComposer({
     input.style.height = `${Math.min(Math.max(contentHeight, minHeight), maxHeight)}px`;
     input.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
   }, [text, isMobile]);
+
+  // O campo permanece montado durante o envio. Quando a requisição termina,
+  // devolvemos o foco ao textarea para o atendente continuar digitando sem
+  // precisar clicar novamente (inclusive após envio de anexo ou nota).
+  useEffect(() => {
+    const wasSending = wasSendingRef.current;
+    wasSendingRef.current = sendingMessage;
+    if (!wasSending || sendingMessage || isDisconnected || isRecording) return undefined;
+
+    const frame = requestAnimationFrame(() => textInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [sendingMessage, isDisconnected, isRecording]);
 
   function appendFiles(incomingFiles, sourceLabel = 'anexos') {
     const rejectedFiles = [];
@@ -2427,26 +2440,7 @@ export const MessageComposer = React.memo(function MessageComposer({
           </div>
         ) : null}
 
-        {sendingMessage ? (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 'var(--space-3)',
-              padding: 'var(--space-5)',
-              background: 'var(--bg-surface)',
-              borderTop: '1px solid var(--border-color)',
-              color: 'var(--text-muted)',
-              fontWeight: 700,
-            }}
-          >
-            <LoaderCircle size={18} className="spin" />
-            {isNote ? 'Salvando nota interna...' : 'Enviando mensagem...'}
-          </div>
-        ) : isDisconnected && !isNote ? (
+        {isDisconnected && !isNote ? (
           <div style={{
             display: 'flex',
             flexDirection: 'row',
@@ -2487,6 +2481,17 @@ export const MessageComposer = React.memo(function MessageComposer({
           </div>
         ) : (
           <>
+            {sendingMessage ? (
+              <div
+                role="status"
+                aria-live="polite"
+                style={styles.sendingStatus}
+              >
+                <LoaderCircle size={15} className="spin" />
+                {isNote ? 'Salvando nota interna...' : 'Enviando mensagem...'}
+                <span style={styles.sendingStatusHint}>Você pode continuar digitando.</span>
+              </div>
+            ) : null}
             <div style={{ ...styles.composerShell, gap: isMobile ? '0.55rem' : styles.composerShell.gap, padding: isMobile ? '0.55rem' : styles.composerShell.padding }}>
               {!isNote && (
                 <button type="button" style={{ ...styles.attachBtn, width: isMobile ? '42px' : styles.attachBtn.width, height: isMobile ? '42px' : styles.attachBtn.height }} onClick={() => fileInputRef.current?.click()} title="Adicionar anexo" aria-label="Adicionar anexo">
