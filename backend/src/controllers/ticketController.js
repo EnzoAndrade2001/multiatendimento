@@ -1,6 +1,6 @@
 const prisma = require('../lib/prisma');
 const historyService = require('../services/historyService');
-const geminiService = require('../services/geminiService');
+const geminiService = require('../services/aiService');
 const evolutionService = require('../services/evolutionService');
 const ticketSessionService = require('../services/ticketSessionService');
 const path = require('path');
@@ -612,7 +612,7 @@ async function assign(req, res) {
     (async () => {
        try {
          const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: ticket.tenantId } });
-         if (settings?.geminiKey && settings?.botEnabled) {
+         if (geminiService.hasConfiguredProvider(settings) && settings?.botEnabled) {
             const history = await prisma.message.findMany({
               where: { ticketId: ticket.id },
               orderBy: { createdAt: 'asc' },
@@ -620,7 +620,7 @@ async function assign(req, res) {
             });
             const recentHistory = getRecentConversation(history, 24, 30);
             if (recentHistory.length >= 5) {
-               const summary = await geminiService.generateTransferSummary(settings.geminiKey, recentHistory);
+               const summary = await geminiService.generateTransferSummary(settings, recentHistory);
                if (summary) {
                   await historyService.logEvent({
                     ticketId: ticket.id,
@@ -754,7 +754,7 @@ async function resolve(req, res) {
   if (settings?.geminiKey) {
     (async () => {
       try {
-        const geminiService = require('../services/geminiService');
+        const geminiService = require('../services/aiService');
         const history = await prisma.message.findMany({
           where: { ticketId: id },
           orderBy: { createdAt: 'asc' },
@@ -768,7 +768,7 @@ async function resolve(req, res) {
         const tagNames = officialTags.map(t => t.name);
 
         // 2. Pedir para a IA escolher apenas entre as oficiais
-        const newTags = await geminiService.generateTags(settings.geminiKey, history, tagNames);
+        const newTags = await geminiService.generateTags(settings, history, tagNames);
         
         if (newTags && newTags.length > 0) {
           console.log(`[autoTags] tags sugeridas: ${newTags.join(', ')}`);
@@ -1100,13 +1100,13 @@ async function sendMediaMessage(req, res) {
     if (mediaType === 'audio' && settings?.geminiKey) {
       (async () => {
         try {
-          const geminiService = require('../services/geminiService');
+          const geminiService = require('../services/aiService');
           const { mediaPath } = require('../utils/uploads');
           // Usa path.resolve para evitar problemas de caminho relativo no background
           const audioPath = path.resolve(mediaPath, path.basename(mediaUrl));
           if (!fs.existsSync(audioPath)) return;
           const audioBase64 = (await fs.promises.readFile(audioPath)).toString('base64');
-          const transcription = await geminiService.transcribeAudio(settings.geminiKey, audioBase64, 'audio/ogg');
+          const transcription = await geminiService.transcribeAudio(settings, audioBase64, 'audio/ogg');
           if (transcription) {
             const updated = await prisma.message.update({ where: { id: message.id }, data: { transcription } });
             if (io) io.to(req.user.tenantId).emit('message_updated', { ticketId: id, message: updated });
@@ -1218,9 +1218,9 @@ async function summarize(req, res) {
   if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado' });
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
-  if (!settings?.geminiKey) return res.status(400).json({ error: 'IA não configurada para este tenant' });
+  if (!geminiService.hasConfiguredProvider(settings)) return res.status(400).json({ error: 'IA não configurada para este tenant' });
 
-  const geminiService = require('../services/geminiService');
+  const geminiService = require('../services/aiService');
   const history = getRecentConversation(ticket.messages, 24, 50);
   const prompt = `Resuma apenas a conversa mais recente, considerando no maximo as ultimas 24 horas de atendimento com ${ticket.contact.name || ticket.contact.phone}. Identifique o problema principal e o estado atual da resolucao. Seja conciso e use topicos.`;
   
@@ -1228,7 +1228,7 @@ async function summarize(req, res) {
     if (history.length === 0) {
       return res.json({ summary: 'Nao ha mensagens recentes nas ultimas 24 horas para resumir.' });
     }
-    const summary = await geminiService.summarize(settings.geminiKey, 'Você é um supervisor de atendimento. Gere resumos executivos.', history, prompt);
+    const summary = await geminiService.summarize(settings, 'Você é um supervisor de atendimento. Gere resumos executivos.', history, prompt);
     res.json({ summary });
   } catch (err) {
     console.error('[summarize] erro:', err.message);

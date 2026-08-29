@@ -2,11 +2,14 @@ const { hasPermission } = require('./permissions');
 
 const SECRET_PLACEHOLDER = '********';
 const SECRET_SETTINGS_FIELDS = new Set([
-  'evolutionKey', 'geminiKey', 'serpApiKey', 'firebirdApiKey', 'firebirdClientToken',
+  'evolutionKey', 'geminiKey', 'openaiKey', 'anthropicKey', 'serpApiKey', 'firebirdApiKey', 'firebirdClientToken',
 ]);
 
 const SETTINGS_FIELDS = Object.freeze({
-  'settings.bot.manage': ['botEnabled', 'geminiKey', 'botName', 'systemPrompt', 'transferKeyword'],
+  'settings.bot.manage': [
+    'botEnabled', 'aiProvider', 'aiModel', 'geminiKey', 'openaiKey', 'anthropicKey',
+    'botName', 'systemPrompt', 'transferKeyword',
+  ],
   'settings.attendance.manage': [
     'outOfOfficeMessage', 'ratingEnabled', 'ratingMessage', 'notificationPhone',
     'serviceOrderManagerCopyEnabled', 'serviceOrderManagerPhone', 'serviceOrderManagerInstanceId',

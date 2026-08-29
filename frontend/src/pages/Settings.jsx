@@ -5,6 +5,7 @@ import {
   getSettings,
   getInstances,
   saveSettings,
+  testAiProvider,
   updateProfile,
   uploadProfileAvatar,
   removeProfileAvatar,
@@ -96,8 +97,12 @@ export default function Settings() {
   });
   const [form, setForm] = useState({
     botEnabled: false,
+    aiProvider: 'gemini',
+    aiModel: '',
     botName: '',
     geminiKey: '',
+    openaiKey: '',
+    anthropicKey: '',
     webhookUrl: '',
     systemPrompt: '',
     transferKeyword: 'atendente',
@@ -145,6 +150,7 @@ export default function Settings() {
   const [hours, setHours] = useState([]);
   const [instances, setInstances] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [testingAi, setTestingAi] = useState(false);
   const [, setSaved] = useState(false);
   const [, setSaveError] = useState('');
   const [profile, setProfile] = useState({ name: '', email: '', password: '', avatarUrl: '' });
@@ -357,6 +363,25 @@ export default function Settings() {
       toast.error(err.response?.data?.error || 'Erro ao salvar perfil');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTestAi() {
+    if (testingAi) return;
+    setTestingAi(true);
+    try {
+      const { data } = await testAiProvider({
+        aiProvider: form.aiProvider,
+        aiModel: form.aiModel,
+        geminiKey: form.geminiKey,
+        openaiKey: form.openaiKey,
+        anthropicKey: form.anthropicKey,
+      });
+      toast.success(`Conexão com ${data.provider} validada em ${data.latencyMs} ms.`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível validar o provedor de IA.');
+    } finally {
+      setTestingAi(false);
     }
   }
 
@@ -827,15 +852,46 @@ export default function Settings() {
               </div>
 
               <div style={s.field}>
-                <label style={s.label}>Chave Gemini (IA)</label>
+                <label style={s.label}>Provedor da IA de atendimento</label>
+                <select style={s.input} value={form.aiProvider || 'gemini'} onChange={(e) => setForm({ ...form, aiProvider: e.target.value })}>
+                  <option value="gemini">Google Gemini (padrão atual)</option>
+                  <option value="openai">OpenAI / GPT</option>
+                  <option value="anthropic">Anthropic / Claude</option>
+                </select>
+                <p style={s.hint}>A escolha vale para respostas, resumos e classificações. Pode ser alterada sem afetar o histórico.</p>
+              </div>
+
+              {form.aiProvider !== 'gemini' && (
+                <div style={s.field}>
+                  <label style={s.label}>Modelo do provedor</label>
+                  <input style={s.input} value={form.aiModel || ''} onChange={(e) => setForm({ ...form, aiModel: e.target.value })} placeholder={form.aiProvider === 'openai' ? 'Ex.: gpt-5-mini' : 'Ex.: claude-sonnet-4-6'} />
+                  <p style={s.hint}>Informe exatamente um modelo habilitado na sua conta.</p>
+                </div>
+              )}
+
+              <div style={s.field}>
+                <label style={s.label}>{form.aiProvider === 'openai' ? 'Chave da OpenAI' : form.aiProvider === 'anthropic' ? 'Chave da Anthropic' : 'Chave Gemini'}</label>
                 <input
                   style={s.input}
                   type="password"
-                  value={form.geminiKey}
-                  onChange={(e) => setForm({ ...form, geminiKey: e.target.value })}
-                  placeholder="AIza..."
+                  autoComplete="new-password"
+                  value={form.aiProvider === 'openai' ? (form.openaiKey || '') : form.aiProvider === 'anthropic' ? (form.anthropicKey || '') : (form.geminiKey || '')}
+                  onChange={(e) => setForm({ ...form, [form.aiProvider === 'openai' ? 'openaiKey' : form.aiProvider === 'anthropic' ? 'anthropicKey' : 'geminiKey']: e.target.value })}
+                  placeholder={form.aiProvider === 'openai' ? 'sk-...' : form.aiProvider === 'anthropic' ? 'sk-ant-...' : 'AIza...'}
                 />
               </div>
+
+              {form.aiProvider !== 'gemini' && (
+                <div style={s.field}>
+                  <label style={s.label}>Gemini para RAG e mídia (recomendado)</label>
+                  <input style={s.input} type="password" autoComplete="new-password" value={form.geminiKey || ''} onChange={(e) => setForm({ ...form, geminiKey: e.target.value })} placeholder="AIza..." />
+                  <p style={s.hint}>Manuais, busca vetorial, áudio e imagens continuam no Gemini para preservar a base já indexada. A conversa usa o provedor escolhido acima.</p>
+                </div>
+              )}
+
+              <button type="button" style={{ ...s.saveBtn, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={handleTestAi} disabled={testingAi}>
+                {testingAi ? 'Testando provedor...' : 'Testar provedor de IA'}
+              </button>
 
               <div style={s.field}>
                 <label style={s.label}>Chave SerpAPI (Prospecção de Leads)</label>

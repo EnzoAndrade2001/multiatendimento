@@ -34,7 +34,7 @@ async function list(req, res) {
         const state = data?.instance?.state || data?.state || 'close';
         
         let phoneStr = inst.phone;
-        if (state === 'open' && !phoneStr) {
+        if (state === 'open' && !phoneStr && inst.provider !== 'evolution_official') {
           try {
             const info = await evolution.fetchInstanceInfo(evolutionUrl, evolutionKey, inst.instanceName);
             const owner = info?.ownerJid || info?.owner || info?.instance?.owner || info?.number;
@@ -68,6 +68,19 @@ async function list(req, res) {
 async function create(req, res) {
   try {
     const { name } = req.body;
+    const provider = req.body.provider === 'evolution_official' ? 'evolution_official' : 'evolution_qr';
+    const officialPhone = provider === 'evolution_official'
+      ? evolution.normalizePhoneNumber(req.body.officialPhone || '')
+      : null;
+    const officialPhoneId = provider === 'evolution_official' ? String(req.body.officialPhoneId || '').trim() : null;
+    const officialBusinessId = provider === 'evolution_official' ? String(req.body.officialBusinessId || '').trim() : null;
+    const officialAccessToken = provider === 'evolution_official' ? String(req.body.officialAccessToken || '').trim() : null;
+
+    if (provider === 'evolution_official' && (officialPhone.length < 12 || !officialPhoneId || !officialAccessToken)) {
+      return res.status(400).json({
+        error: 'Na API oficial, informe o WhatsApp, o ID do telefone da Meta e o token permanente.',
+      });
+    }
     if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
 
     // Verifica limite do plano
@@ -87,14 +100,18 @@ async function create(req, res) {
     // Cria na Evolution
     console.log(`[instanceController] Criando instância "${instanceName}" na Evolution...`);
     try {
-      await evolution.createInstance(evolutionUrl, evolutionKey, instanceName);
+      await evolution.createInstance(evolutionUrl, evolutionKey, instanceName, {
+        provider,
+        phoneNumberId: officialPhoneId,
+        businessId: officialBusinessId,
+        accessToken: officialAccessToken,
+      });
     } catch (err) {
-      const responseData = err.response?.data;
       if (evolution.isInstanceAlreadyInUse(err)) {
         console.log(`[instanceController] Instância "${instanceName}" já existe na Evolution. Prosseguindo com o vínculo no banco de dados.`);
       } else {
-        console.error(`[instanceController] Erro ao criar na Evolution:`, responseData || err.message);
-        const errorMsg = responseData?.message || err.message;
+        const errorMsg = evolution.getEvolutionErrorDetail(err);
+        console.error(`[instanceController] Erro ao criar na Evolution: ${errorMsg}`);
         return res.status(400).json({ error: `Erro na Evolution API: ${errorMsg}` });
       }
     }
@@ -104,7 +121,11 @@ async function create(req, res) {
       data: {
         tenantId: req.user.tenantId,
         instanceName,
-        status: 'disconnected'
+        status: 'disconnected',
+        provider,
+        phone: officialPhone,
+        officialPhoneId,
+        officialBusinessId: officialBusinessId || null,
       }
     });
 
@@ -124,6 +145,9 @@ async function getQrCode(req, res) {
   try {
     const { id } = req.params;
     const inst = await prisma.waInstance.findFirst({ where: { id, tenantId: req.user.tenantId } });
+    if (inst?.provider === 'evolution_official') {
+      return res.status(409).json({ error: 'Conexões oficiais não utilizam QR Code.' });
+    }
     if (!inst) return res.status(404).json({ error: 'Instância não encontrada' });
 
     const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);
@@ -142,6 +166,9 @@ async function repair(req, res) {
   try {
     const { id } = req.params;
     const inst = await prisma.waInstance.findFirst({ where: { id, tenantId: req.user.tenantId } });
+    if (inst?.provider === 'evolution_official') {
+      return res.status(409).json({ error: 'A conexão oficial usa credenciais da Meta e não possui sessão QR para recriar.' });
+    }
     if (!inst) return res.status(404).json({ error: 'Instancia nao encontrada' });
 
     const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);

@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const crmController = require('./crmController');
-const { generateText } = require('../services/geminiService');
+const aiService = require('../services/aiService');
+const { generateText } = aiService;
 
 const SENTINELA_SYNC_STALE_AFTER_MINUTES = 15;
 
@@ -624,8 +625,8 @@ async function getDetective(req, res) {
 
     let aiDiagnosis = '';
 
-    if (!settings?.geminiKey) {
-      aiDiagnosis = '**Chave do Gemini não configurada.** Vá em Ajustes > iLux Sentinela para cadastrar sua chave e liberar o diagnóstico automático por inteligência artificial.';
+    if (!aiService.hasConfiguredProvider(settings)) {
+      aiDiagnosis = '**Provedor de IA não configurado.** Vá em Ajustes para selecionar e testar Gemini, OpenAI ou Claude.';
     } else {
       try {
         const prompt = `Você é o Detetive IA do iLux Sentinela, um analista operacional de suporte e inteligência de receita especialista em locação de impressoras.
@@ -641,7 +642,7 @@ async function getDetective(req, res) {
 
         Diagnóstico:`;
 
-        aiDiagnosis = await generateText(settings.geminiKey, prompt, {
+        aiDiagnosis = await generateText(settings, prompt, {
           profile: 'chat',
           maxOutputTokens: 1400,
         });
@@ -743,8 +744,8 @@ async function auditTicket(req, res) {
       where: { tenantId }
     });
 
-    if (!settings?.geminiKey) {
-      return res.status(400).json({ error: 'Chave do Gemini não configurada em Ajustes.' });
+    if (!aiService.hasConfiguredProvider(settings)) {
+      return res.status(400).json({ error: 'Provedor de IA não configurado em Ajustes.' });
     }
 
     const ticket = await prisma.ticket.findFirst({
@@ -792,7 +793,7 @@ async function auditTicket(req, res) {
 
     JSON de retorno:`;
 
-    let responseText = await generateText(settings.geminiKey, prompt, {
+    let responseText = await generateText(settings, prompt, {
       profile: 'chat',
       maxOutputTokens: 2400,
       json: true,

@@ -328,13 +328,26 @@ async function setWebhook(url, key, instanceName, webhookUrl) {
   return data;
 }
 
-async function createInstance(url, key, instanceName) {
-  const client = getClient(url, key);
-  const { data } = await client.post('/instance/create', {
+function buildCreateInstancePayload(instanceName, options = {}) {
+  const provider = options.provider === 'evolution_official' ? 'WHATSAPP-BUSINESS' : 'WHATSAPP-BAILEYS';
+  const payload = {
     instanceName,
-    qrcode: true,
-    integration: 'WHATSAPP-BAILEYS',
-  });
+    qrcode: provider === 'WHATSAPP-BAILEYS',
+    integration: provider,
+  };
+  if (provider === 'WHATSAPP-BUSINESS') {
+    payload.number = options.phoneNumberId;
+    payload.token = options.accessToken;
+    const businessId = options.businessId || options.businessAccountId;
+    if (businessId) payload.businessId = businessId;
+  }
+  return payload;
+}
+
+async function createInstance(url, key, instanceName, options = {}) {
+  const client = getClient(url, key);
+  const payload = buildCreateInstancePayload(instanceName, options);
+  const { data } = await client.post('/instance/create', payload);
   return data;
 }
 
@@ -575,5 +588,6 @@ module.exports = {
   getQrCode, getConnectionState, setWebhook, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
   normalizePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findMessages, findConversationJidsByMessageIds,
-  getEvolutionErrorDetail
+  getEvolutionErrorDetail,
+  __testing: { buildCreateInstancePayload }
 };

@@ -2,7 +2,7 @@ const prisma = require('../lib/prisma');
 const path = require('path');
 const fs = require('fs');
 const evolutionService = require('../services/evolutionService');
-const geminiService = require('../services/geminiService');
+const geminiService = require('../services/aiService');
 const businessHourService = require('../services/businessHourService');
 const botPromptService = require('../services/botPromptService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
@@ -630,7 +630,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
           if (fs.existsSync(fullPath)) {
             const audioBase64 = (await fs.promises.readFile(fullPath)).toString('base64');
             const mimeType = mediaUrl.endsWith('.mp3') ? 'audio/mp3' : 'audio/ogg';
-            transcription = await geminiService.transcribeAudio(tenant.settings.geminiKey, audioBase64, mimeType);
+            transcription = await geminiService.transcribeAudio(tenant.settings, audioBase64, mimeType);
           }
         } catch (err) { console.error('[transcription] erro:', err.message); }
       }
@@ -642,7 +642,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
             const mimeType = mediaUrl.endsWith('.png') ? 'image/png' : 'image/jpeg';
             console.log('[vision] analisando imagem...');
             transcription = await geminiService.analyzeImage(
-              tenant.settings.geminiKey,
+              tenant.settings,
               imgBase64,
               mimeType,
               'Você está analisando uma foto enviada em um atendimento técnico de impressora. Descreva apenas o que é visível na impressão e destaque defeitos como sombra, repetição, manchas, desalinhamento, falha de cor, faixa, borrado ou marcas. Responda em português, de forma objetiva, em até 3 frases.'
@@ -690,7 +690,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
     console.warn('[socket] aviso: objeto io não inicializado no webhookController');
   }
 
-  if (!isHistorical && ticket.status === 'bot' && useBotForInstance && tenant.settings?.geminiKey && !fromMe) {
+  if (!isHistorical && ticket.status === 'bot' && useBotForInstance && geminiService.hasConfiguredProvider(tenant.settings) && !fromMe) {
     console.log(`[bot] Iniciando debounce para ticket ${ticket.id} (12s)...`);
     if (pendingReplies[ticket.id]) {
       clearTimeout(pendingReplies[ticket.id]);
@@ -834,7 +834,7 @@ async function handleAutoTagging(tenant, ticket, contact) {
       take: 10
     });
     
-    const tags = await geminiService.generateTags(tenant.settings.geminiKey, history);
+    const tags = await geminiService.generateTags(tenant.settings, history);
     if (tags.length > 0) {
       console.log(`[webhook] auto-tags para ${require('../utils/privacy').maskPhone(contact.phone)}:`, tags);
       await prisma.contact.update({
@@ -1048,8 +1048,10 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
 
   console.log(`[bot] Ticket ${ticket.id} | Turno atual normalizado:\n${currentUserTurn}`);
 
-  const generatedReply = await geminiService.chat(settings.geminiKey, finalPrompt, reversedHistory, currentUserTurn, { returnMetadata: true });
-  const responseModel = typeof generatedReply === 'object' ? generatedReply.model : null;
+  const generatedReply = await geminiService.chat(settings, finalPrompt, reversedHistory, currentUserTurn, { returnMetadata: true });
+  const responseModel = typeof generatedReply === 'object'
+    ? [generatedReply.provider, generatedReply.model].filter(Boolean).join(':') || null
+    : null;
   let botReply = typeof generatedReply === 'object' ? generatedReply.text : generatedReply;
 
   const responseAudit = classifyResponseOrigin({
@@ -1074,7 +1076,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   // EXTRAÇÃO DE MEMÓRIA DE LONGO PRAZO (Background Task)
   if (!actorContext && shouldExtractClientMemory(currentUserTurn)) {
     const extractionHistory = [...reversedHistory, { fromMe: false, body: currentUserTurn }];
-    geminiService.extractClientInfo(settings.geminiKey, extractionHistory, contact.notes)
+    geminiService.extractClientInfo(settings, extractionHistory, contact.notes)
       .then(async (result) => {
         if (result) {
           const updateData = {};

@@ -3,6 +3,7 @@ const { normalizePhoneNumber } = require('../services/evolutionService');
 const botPromptService = require('../services/botPromptService');
 const { filterSettingsOutput } = require('../auth/settingsAccess');
 const { getLatestCompanyProfile, getPendingCompanyRequest, getLatestCompanyRequest, requestCompanySync } = require('../services/companyProfileService');
+const aiService = require('../services/aiService');
 
 async function getSettings(req, res) {
   const [settings, firebirdCompany, pendingCompanyRequest, latestCompanyRequest] = await Promise.all([
@@ -51,9 +52,31 @@ async function syncCompanyFromFirebird(req, res) {
   res.status(result.alreadyQueued ? 200 : 202).json({ ok: true, ...result });
 }
 
+async function testAiProvider(req, res) {
+  try {
+    const current = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
+    const requested = req.body || {};
+    const secretValue = (field) => {
+      const value = requested[field];
+      return value && value !== '********' ? value : current?.[field];
+    };
+    const result = await aiService.testProvider({
+      ...current,
+      aiProvider: requested.aiProvider || current?.aiProvider || 'gemini',
+      aiModel: requested.aiModel !== undefined ? requested.aiModel : current?.aiModel,
+      geminiKey: secretValue('geminiKey'),
+      openaiKey: secretValue('openaiKey'),
+      anthropicKey: secretValue('anthropicKey'),
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.error?.message || err.response?.data?.error || err.message });
+  }
+}
+
 async function saveSettings(req, res) {
   const { 
-    botEnabled, geminiKey, botName, systemPrompt, transferKeyword, 
+    botEnabled, aiProvider, aiModel, geminiKey, openaiKey, anthropicKey, botName, systemPrompt, transferKeyword,
     evolutionUrl, evolutionKey, webhookUrl, outOfOfficeMessage,
     ratingEnabled, ratingMessage, notificationPhone,
     serviceOrderManagerCopyEnabled, serviceOrderManagerPhone, serviceOrderManagerInstanceId,
@@ -108,7 +131,11 @@ async function saveSettings(req, res) {
     where: { tenantId: req.user.tenantId },
     update: { 
       botEnabled, 
+      aiProvider,
+      aiModel: aiModel === undefined ? undefined : (aiModel || null),
       geminiKey,
+      openaiKey,
+      anthropicKey,
       botName,
       botSystemPrompt: systemPrompt,
       botTransferWord: transferKeyword,
@@ -151,7 +178,11 @@ async function saveSettings(req, res) {
     create: {
       tenantId: req.user.tenantId, 
       botEnabled, 
+      aiProvider: aiProvider || 'gemini',
+      aiModel: aiModel || null,
       geminiKey,
+      openaiKey,
+      anthropicKey,
       botName,
       botSystemPrompt: systemPrompt,
       botTransferWord: transferKeyword,
@@ -256,4 +287,4 @@ async function uploadLogo(req, res) {
   res.json({ url });
 }
 
-module.exports = { getSettings, saveSettings, syncCompanyFromFirebird, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };
+module.exports = { getSettings, saveSettings, testAiProvider, syncCompanyFromFirebird, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };

@@ -99,6 +99,7 @@ export const getAgentInfo = () => api.get('/settings/agent-info', {
 });
 export const downloadAgent = () => api.get('/settings/agent-download', { responseType: 'blob', timeout: 120000 });
 export const saveSettings = (data) => api.post('/settings', data);
+export const testAiProvider = (data) => api.post('/settings/ai/test', data);
 export const syncCompanyFromFirebird = () => api.post('/settings/company/sync');
 export const getSystemPromptPreview = (systemPrompt) => api.post('/settings/system-prompt-preview', { systemPrompt });
 export const getBusinessHours = () => api.get('/settings/business-hours');
@@ -123,7 +124,7 @@ export const getAuditEvents = (params = {}, signal) => api.get('/audit/events', 
 // Instance
 export const getInstances = () => api.get('/instance/list');
 export const getInstanceQrCode = (id) => api.get(`/instance/qrcode/${id}`);
-export const createInstance = (name) => api.post('/instance/create', { name });
+export const createInstance = (payload) => api.post('/instance/create', typeof payload === 'string' ? { name: payload } : payload);
 export const repairInstance = (id) => api.post(`/instance/${id}/repair`);
 export const deleteInstance = (id) => api.delete(`/instance/${id}`);
 

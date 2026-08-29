@@ -13,6 +13,8 @@ export default function Connections() {
   const [modal, setModal] = useState(null); // 'new' | 'qrcode'
   const [selectedInst, setSelectedInst] = useState(null);
   const [name, setName] = useState('');
+  const [provider, setProvider] = useState('evolution_qr');
+  const [officialForm, setOfficialForm] = useState({ officialPhone: '', officialPhoneId: '', officialBusinessId: '', officialAccessToken: '' });
   const [qrcode, setQrcode] = useState(null);
   const [qrError, setQrError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -48,10 +50,16 @@ export default function Connections() {
     if (saving) return;
     setSaving(true);
     try {
-      const { data } = await createInstance(name);
-      setModal('qrcode');
-      setSelectedInst(data);
-      loadQr(data.id);
+      const { data } = await createInstance({ name, provider, ...officialForm });
+      if (provider === 'evolution_qr') {
+        setModal('qrcode');
+        setSelectedInst(data);
+        loadQr(data.id);
+      } else {
+        setModal(null);
+        toast.success('Conexão oficial adicionada. A Evolution fará a comunicação com a Meta.');
+        load();
+      }
     } catch (err) {
       const msg = err.response?.data?.error || 'Erro ao criar conexao';
       toast.error(msg);
@@ -117,7 +125,7 @@ export default function Connections() {
         kicker="Canais"
         title="Conexões WhatsApp"
         subtitle="Gerencie números, setores e o estado de cada canal em um único lugar."
-        actions={<ActionButton onClick={() => { setName(''); setModal('new'); }}><Plus size={18} /> Nova conexão</ActionButton>}
+        actions={<ActionButton onClick={() => { setName(''); setProvider('evolution_qr'); setOfficialForm({ officialPhone: '', officialPhoneId: '', officialBusinessId: '', officialAccessToken: '' }); setModal('new'); }}><Plus size={18} /> Nova conexão</ActionButton>}
         compact
       />
 
@@ -127,6 +135,7 @@ export default function Connections() {
         <div style={s.grid}>
           {instances.map(inst => {
             const isConnected = inst.status === 'connected';
+            const isOfficial = inst.provider === 'evolution_official';
             const label = inst.instanceName.split('_').pop().toUpperCase();
 
             return (
@@ -157,6 +166,7 @@ export default function Connections() {
                 </div>
 
                 <div style={s.cardMeta}>
+                  <span style={s.providerPill}>{isOfficial ? 'API oficial' : 'QR Code'}</span>
                   <span style={{ ...s.statusPill, color: isConnected ? 'var(--success)' : 'var(--warning)' }}>
                     <span style={{ ...s.statusDot, background: isConnected ? 'var(--success)' : 'var(--warning)' }} />
                     {isConnected ? 'Sessao ativa' : 'Aguardando pareamento'}
@@ -169,6 +179,8 @@ export default function Connections() {
                       <Smartphone size={16} />
                       Pronto para uso
                     </div>
+                  ) : isOfficial ? (
+                    <div style={s.officialBox}>Credenciais oficiais registradas. Atualize para consultar o estado na Evolution.</div>
                   ) : (
                     <div style={s.disconnectedActions}>
                       <button style={s.qrBtn} onClick={() => { setSelectedInst(inst); setModal('qrcode'); loadQr(inst.id); }}>
@@ -205,6 +217,23 @@ export default function Connections() {
                 <label style={s.label}>Nome da conexao</label>
                 <input style={s.input} value={name} onChange={e => setName(e.target.value)} required placeholder="Ex: Financeiro" />
               </div>
+              <div style={{ ...s.field, marginTop: '1rem' }}>
+                <label style={s.label}>Tipo de conexão</label>
+                <select style={s.input} value={provider} onChange={e => setProvider(e.target.value)}>
+                  <option value="evolution_qr">WhatsApp por QR Code (atual)</option>
+                  <option value="evolution_official">WhatsApp API oficial via Evolution</option>
+                </select>
+                <span style={s.helpText}>{provider === 'evolution_qr' ? 'Mantém exatamente o funcionamento atual por QR Code.' : 'Adiciona um número oficial da Meta sem alterar as conexões por QR existentes.'}</span>
+              </div>
+              {provider === 'evolution_official' && (
+                <div style={s.officialFields}>
+                  <div style={s.field}><label style={s.label}>WhatsApp com país e DDD</label><input style={s.input} value={officialForm.officialPhone} onChange={e => setOfficialForm({ ...officialForm, officialPhone: e.target.value })} required placeholder="5551999999999" /></div>
+                  <div style={s.field}><label style={s.label}>ID do telefone na Meta</label><input style={s.input} value={officialForm.officialPhoneId} onChange={e => setOfficialForm({ ...officialForm, officialPhoneId: e.target.value })} required placeholder="Phone Number ID" /></div>
+                  <div style={s.field}><label style={s.label}>ID da conta comercial (opcional)</label><input style={s.input} value={officialForm.officialBusinessId} onChange={e => setOfficialForm({ ...officialForm, officialBusinessId: e.target.value })} placeholder="WhatsApp Business Account ID" /></div>
+                  <div style={s.field}><label style={s.label}>Token permanente da Meta</label><input type="password" autoComplete="new-password" style={s.input} value={officialForm.officialAccessToken} onChange={e => setOfficialForm({ ...officialForm, officialAccessToken: e.target.value })} required placeholder="Token do usuário do sistema" /></div>
+                  <span style={s.helpText}>O token é enviado à Evolution apenas durante a criação e não fica gravado no CRM. Mensagens iniciadas pela empresa fora da janela de atendimento exigem template previamente aprovado pela Meta.</span>
+                </div>
+              )}
               <div style={s.modalFooter}>
                 <button type="button" style={s.cancelBtn} onClick={() => setModal(null)}>Cancelar</button>
                 <button type="submit" style={s.saveBtn} disabled={saving}>{saving ? 'Criando...' : 'Criar conexao'}</button>
@@ -299,7 +328,8 @@ const s = {
     flexShrink: 0
   },
   deleteBtnBusy: { opacity: 0.5, cursor: 'not-allowed' },
-  cardMeta: { display: 'flex' },
+  cardMeta: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' },
+  providerPill: { display: 'inline-flex', alignItems: 'center', padding: '6px 10px', borderRadius: '999px', background: 'var(--accent-light)', border: '1px solid var(--accent-border)', color: 'var(--accent)', fontSize: 'var(--text-xs)', fontWeight: 800, textTransform: 'uppercase' },
   statusPill: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -357,6 +387,7 @@ const s = {
     fontSize: '0.9rem',
     fontWeight: 800
   },
+  officialBox: { color: 'var(--text-muted)', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', padding: '0.85rem', borderRadius: '12px', fontSize: '0.86rem', lineHeight: 1.45 },
   empty: { padding: '4rem', textAlign: 'center', color: 'var(--text-muted)', gridColumn: '1 / -1' },
   emptyCard: {
     gridColumn: '1 / -1',
@@ -382,7 +413,9 @@ const s = {
     background: 'var(--bg-surface)',
     borderRadius: '24px',
     width: '100%',
-    maxWidth: '420px',
+    maxWidth: '560px',
+    maxHeight: 'calc(100vh - 2rem)',
+    overflowY: 'auto',
     border: '1px solid var(--border-color)',
     boxShadow: 'var(--shadow-lg)'
   },
@@ -406,6 +439,8 @@ const s = {
   },
   form: { padding: '1.75rem' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.55rem' },
+  officialFields: { display: 'grid', gap: '1rem', marginTop: '1rem', padding: '1rem', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '14px' },
+  helpText: { color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.45 },
   label: { fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' },
   input: {
     background: 'var(--bg-panel)',

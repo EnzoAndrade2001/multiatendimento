@@ -2,7 +2,8 @@ const prisma = require('../lib/prisma');
 const pdfmake = require('pdfmake');
 const path = require('path');
 const fs = require('fs');
-const { draftServiceOrder } = require('../services/geminiService');
+const aiService = require('../services/aiService');
+const { draftServiceOrder } = aiService;
 const { renderOfficialOsTemplate } = require('../templates/officialOsTemplate');
 const { getLatestCompanyProfile } = require('../services/companyProfileService');
 
@@ -1697,7 +1698,7 @@ async function draftOS(req, res) {
 
   try {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-    if (!settings || !settings.geminiKey) return res.status(400).json({ error: 'Chave do Gemini não configurada' });
+    if (!settings || !aiService.hasConfiguredProvider(settings)) return res.status(400).json({ error: 'Provedor de IA não configurado' });
 
     const contact = await prisma.contact.findUnique({ where: { id: contactId } });
     if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
@@ -1726,7 +1727,7 @@ async function draftOS(req, res) {
     // As mensagens vêm desc, o history espera asc (antigas primeiro)
     const history = messages.reverse();
 
-    const draft = await draftServiceOrder(settings.geminiKey, history, equipments);
+    const draft = await draftServiceOrder(settings, history, equipments);
     res.json(draft);
   } catch (err) {
     console.error('[draftOS]', err);

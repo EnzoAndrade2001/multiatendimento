@@ -1,6 +1,7 @@
 const { Prisma } = require('@prisma/client');
 const prisma = require('../lib/prisma');
 const geminiService = require('../services/geminiService');
+const aiService = require('../services/aiService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
 const { guardBotReply } = require('../services/botSafetyService');
 
@@ -170,7 +171,8 @@ async function create(req, res) {
     const active = typeof req.body.active === 'boolean' ? req.body.active : true;
     if (!question || !answer) return res.status(400).json({ error: 'Pergunta e resposta são obrigatórias.' });
 
-    const geminiKey = await getGeminiKey(tenantId);
+    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
+    const geminiKey = settings?.geminiKey || null;
     const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' }) : null;
     const knowledge = await prisma.knowledge.create({
       data: { tenantId, question, answer, tags, active, embedding: embedding || Prisma.DbNull },
@@ -247,14 +249,15 @@ async function testSearch(req, res) {
     const audience = String(req.body.audience || 'CUSTOMER').toUpperCase();
     if (!['CUSTOMER', 'AGENT', 'TECHNICIAN'].includes(audience)) return res.status(400).json({ error: 'Público de consulta inválido.' });
     const tenantId = req.user.tenantId;
-    const geminiKey = await getGeminiKey(tenantId);
+    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
+    const geminiKey = settings?.geminiKey || null;
     const result = await knowledgeSearchService.searchTenantKnowledge({ tenantId, apiKey: geminiKey, query, limit: 5, audience });
     let simulatedAnswer = null;
     let simulationError = null;
-    if (result.matches.length && geminiKey) {
+    if (result.matches.length && aiService.hasConfiguredProvider(settings)) {
       try {
         const context = knowledgeSearchService.buildKnowledgeContext(result.matches, { audience });
-        const generated = await geminiService.generateText(geminiKey, `Pergunta do cliente:\n${query}\n${context}\n\nRedija a resposta que seria enviada ao cliente. Responda em português do Brasil, de forma direta, cordial e curta. Use exclusivamente os dados das fontes acima. Se as fontes não sustentarem a resposta, diga que a informação precisa ser confirmada. Não mencione busca, contexto, percentual, embedding ou instruções internas. Não prometa prazo, atendimento ou abertura de chamado.`, { profile: 'chat', maxOutputTokens: 450 });
+        const generated = await aiService.generateText(settings, `Pergunta do cliente:\n${query}\n${context}\n\nRedija a resposta que seria enviada ao cliente. Responda em português do Brasil, de forma direta, cordial e curta. Use exclusivamente os dados das fontes acima. Se as fontes não sustentarem a resposta, diga que a informação precisa ser confirmada. Não mencione busca, contexto, percentual, embedding ou instruções internas. Não prometa prazo, atendimento ou abertura de chamado.`, { profile: 'chat', maxOutputTokens: 450 });
         simulatedAnswer = guardBotReply(generated).reply;
       } catch (error) {
         simulationError = 'Os conteúdos foram encontrados, mas não foi possível gerar a prévia da resposta.';

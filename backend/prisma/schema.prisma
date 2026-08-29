@@ -68,6 +68,10 @@ model TenantSettings {
   evolutionUrl                   String?
   evolutionKey                   String?
   geminiKey                      String?
+  aiProvider                     String  @default("gemini")
+  aiModel                        String?
+  openaiKey                      String?
+  anthropicKey                   String?
   botEnabled                     Boolean @default(false)
   botName                        String? @default("LCD Bot")
   botSystemPrompt                String? @db.Text
@@ -202,6 +206,9 @@ model WaInstance {
   phone              String?
   status             String              @default("disconnected")
   qrCode             String?
+  provider           String              @default("evolution_qr")
+  officialPhoneId    String?
+  officialBusinessId String?
   contacts           Contact[]
   tickets            Ticket[]
   campaigns          Campaign[]
