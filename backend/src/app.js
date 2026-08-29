@@ -39,6 +39,8 @@ const firebirdSyncRoutes = require('./routes/firebirdSync');
 const privacyRoutes = require('./routes/privacy');
 const mediaRoutes = require('./routes/media');
 const auditEventRoutes = require('./routes/auditEvents');
+const printGuardRoutes = require('./routes/printGuard');
+const telemetryRoutes = require('./routes/telemetry');
 
 const app = express();
 app.use('/api/report', require('./routes/report'));
@@ -68,7 +70,17 @@ setIoManagerCopy(io);
 setIoBillingDocuments(io);
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5174', credentials: true }));
-app.use(express.json({ limit: '100mb' }));
+// Preserva os bytes exatos apenas para webhooks PrintGuard assinados. A
+// assinatura é calculada sobre `${timestamp}.${rawBody}` e não sobre um JSON
+// reserializado; as demais rotas continuam usando o parser normalmente.
+app.use(express.json({
+  limit: '100mb',
+  verify(req, _res, buf) {
+    if (req.headers['x-printguard-signature'] || req.path === '/api/integrations/printguard/webhook') {
+      req.rawBody = Buffer.from(buf);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 app.use((req, res, next) => {
   const startedAt = Date.now();
@@ -129,6 +141,8 @@ app.use('/api/privacy', privacyRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/user-avatars', require('./routes/userAvatars'));
 app.use('/api/audit', auditEventRoutes);
+app.use('/api/integrations/printguard', printGuardRoutes);
+app.use('/api/telemetry', telemetryRoutes);
 
 const jwt = require('jsonwebtoken');
 const prisma = require('./lib/prisma');

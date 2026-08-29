@@ -59,6 +59,9 @@ model Tenant {
   campaigns                  Campaign[]
   campaignRecipients         CampaignRecipient[]
   campaignTemplates          CampaignTemplate[]
+  printGuardConnections      PrintGuardConnection[]
+  printGuardBindings         PrintGuardBinding[]
+  printGuardTelemetryEvents  PrintGuardTelemetryEvent[]
 }
 
 model TenantSettings {
@@ -1130,4 +1133,82 @@ model CampaignTemplate {
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, active, category])
+}
+
+// Integração opcional com o PrintGuard. Segredos são armazenados apenas como
+// ciphertext AES-GCM (o valor em claro nunca é devolvido à API/UI).
+model PrintGuardConnection {
+  id                String   @id @default(cuid())
+  tenantId          String
+  name              String
+  baseUrl            String
+  externalId         String?
+  organization       Json?
+  accessTokenCipher  String?  @db.Text
+  webhookSecretCipher String? @db.Text
+  status             String   @default("INACTIVE") // INACTIVE, PENDING, CONNECTED, ERROR
+  lastTestAt         DateTime?
+  lastConnectedAt    DateTime?
+  lastCursor         String?
+  lastError          String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bindings PrintGuardBinding[]
+  events   PrintGuardTelemetryEvent[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, status])
+}
+
+// Relações são deliberadamente guardadas pelos IDs externos/locais. O vínculo
+// só é considerado válido quando o resolvedor encontra uma correspondência
+// inequívoca no CRM; nunca fazemos associação por nome parcial.
+model PrintGuardBinding {
+  id           String   @id @default(cuid())
+  tenantId     String
+  connectionId String
+  customerCode String?
+  serialNumber String?
+  customerId   String?
+  equipmentId  String?
+  state        String   @default("UNMATCHED") // MATCHED, UNMATCHED, AMBIGUOUS
+  lastSeenAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection PrintGuardConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerCode])
+  @@index([tenantId, serialNumber])
+  @@index([connectionId, state])
+}
+
+model PrintGuardTelemetryEvent {
+  id              String   @id @default(cuid())
+  tenantId        String
+  connectionId    String
+  externalEventId String
+  eventType       String
+  occurredAt      DateTime?
+  customerCode    String?
+  serialNumber    String?
+  payload         Json?
+  state           String   @default("RECEIVED") // RECEIVED, MONITORING, IGNORED, APPROVED, ERROR
+  bindingId       String?
+  ticketId        String?
+  serviceOrderId  String?
+  errorCode       String?
+  errorMessage    String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection PrintGuardConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalEventId])
+  @@index([tenantId, state, createdAt])
+  @@index([tenantId, customerCode, serialNumber])
 }
