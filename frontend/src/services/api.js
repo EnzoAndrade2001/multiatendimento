@@ -121,6 +121,20 @@ export const anonymizePrivacySubject = (source, id, data) => api.post(`/privacy/
 // Auditoria central de ações do tenant (restrita a usuários com audit.view).
 export const getAuditEvents = (params = {}, signal) => api.get('/audit/events', { params, signal });
 
+// PrintGuard / Telemetria. Os helpers ficam isolados para permitir que o
+// contrato nativo seja ajustado sem espalhar URLs pela interface.
+export const getPrintGuardStatus = () => api.get('/integrations/printguard');
+export const createPrintGuardPairing = (data = {}) => api.post('/integrations/printguard/pairing', data);
+export const testPrintGuardConnection = () => api.post('/integrations/printguard/test');
+export const disconnectPrintGuard = () => api.post('/integrations/printguard/disconnect');
+export const getPrintGuardMetrics = () => api.get('/integrations/printguard/metrics');
+
+/** @param {Record<string, string|number|boolean>} params */
+export const getTelemetryQueue = (params = {}, signal) => api.get('/telemetry/queue', { params, signal });
+export const ignoreTelemetryEvent = (eventId) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/ignore`);
+export const monitorTelemetryEvent = (eventId) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/monitor`);
+export const approveTelemetryEvent = (eventId, data = {}) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/approve`, data);
+
 // Instance
 export const getInstances = () => api.get('/instance/list');
 export const getInstanceQrCode = (id) => api.get(`/instance/qrcode/${id}`);

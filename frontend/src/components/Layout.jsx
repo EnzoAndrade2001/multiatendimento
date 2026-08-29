@@ -26,6 +26,7 @@ import {
   X,
   BarChart2,
   ClipboardCheck,
+  Activity,
 } from 'lucide-react';
 import { getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
@@ -305,6 +306,7 @@ export default function Layout() {
     { to: '/revenue', icon: <Coins size={18} />, label: 'iLux Sentinela', permission: 'revenue.view', roles: ['admin', 'superadmin'] },
     { to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', roles: ['admin', 'superadmin'] },
+    { to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
     { to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/superadmin', icon: <ShieldCheck size={18} />, label: 'Painel Admin', roles: ['superadmin'] },
   ], [setIsChatOpen]);

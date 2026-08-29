@@ -38,18 +38,19 @@ import Teams from './Teams';
 import ModalShell from '../components/ui/ModalShell';
 import { usePermissions } from '../auth/PermissionContext';
 import UserAvatar from '../components/ui/UserAvatar';
+import PrintGuardSettings from './PrintGuardSettings';
 
-const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'iLux Sentinela', 'Minha conta', 'Agente Local'];
+const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'iLux Sentinela', 'Minha conta', 'Agente Local', 'PrintGuard'];
 const TAB_PERMISSIONS = [
   'settings.bot.manage', 'settings.attendance.manage', 'users.manage', 'teams.manage',
   'settings.company.manage', 'quick_responses.manage', 'tags.manage', 'revenue.view',
-  null, 'settings.agent.manage',
+  null, 'settings.agent.manage', 'connections.manage',
 ];
 const TAB_GROUPS = [
   { label: 'Automação', indexes: [0, 1, 6] },
   { label: 'Equipe', indexes: [2, 3] },
   { label: 'Negócio', indexes: [4, 7] },
-  { label: 'Sistema', indexes: [8, 9] },
+  { label: 'Sistema', indexes: [8, 9, 10] },
 ];
 // Respostas rápidas possui uma área própria em Operação. Mantemos o índice
 // interno 5 para compatibilidade com links antigos, mas não o exibimos no
@@ -92,6 +93,7 @@ export default function Settings() {
   const [tab, setTab] = useState(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
     if (requestedTab === 'account') return 8;
+    if (requestedTab === 'printguard') return 10;
     const firstAllowed = TAB_PERMISSIONS.findIndex((permission, index) => !HIDDEN_TAB_INDEXES.has(index) && (!permission || can(permission)));
     return firstAllowed >= 0 ? firstAllowed : 8;
   });
@@ -1858,6 +1860,8 @@ export default function Settings() {
           </div>
         </div>
       )}
+
+      {tab === 10 && <PrintGuardSettings />}
 
       {isAdmin && showAgentStartupGuide && (
         <ModalShell
