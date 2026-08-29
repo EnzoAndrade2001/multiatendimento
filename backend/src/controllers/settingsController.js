@@ -94,8 +94,12 @@ async function saveSettings(req, res) {
     firebirdLastSyncStatus,
     firebirdLastSyncError,
     kpiContractValue, kpiServiceValue, kpiSlaLimitHours, kpiReincidentThreshold,
-    billingMessageTemplate
+    billingMessageTemplate, billingInstanceId
   } = req.body;
+
+  const parsedBillingInstanceId = billingInstanceId === undefined
+    ? undefined
+    : (billingInstanceId || null);
 
   const parsedContractValue = kpiContractValue !== undefined && kpiContractValue !== '' ? parseFloat(kpiContractValue) : null;
   const parsedServiceValue = kpiServiceValue !== undefined && kpiServiceValue !== '' ? parseFloat(kpiServiceValue) : null;
@@ -173,7 +177,8 @@ async function saveSettings(req, res) {
       kpiServiceValue: parsedServiceValue,
       kpiSlaLimitHours: parsedSlaLimitHours,
       kpiReincidentThreshold: parsedReincidentThreshold,
-      billingMessageTemplate
+      billingMessageTemplate,
+      billingInstanceId: parsedBillingInstanceId
     },
     create: {
       tenantId: req.user.tenantId, 
@@ -220,7 +225,8 @@ async function saveSettings(req, res) {
       kpiServiceValue: parsedServiceValue,
       kpiSlaLimitHours: parsedSlaLimitHours,
       kpiReincidentThreshold: parsedReincidentThreshold,
-      billingMessageTemplate
+      billingMessageTemplate,
+      billingInstanceId: parsedBillingInstanceId
     },
   });
 

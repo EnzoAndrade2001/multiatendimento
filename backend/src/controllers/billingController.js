@@ -56,6 +56,22 @@ function normalizeBillingPhone(value) {
   return digits;
 }
 
+// Instancia de saida das cobrancas. Prioriza a configurada em
+// TenantSettings.billingInstanceId; senao, a primeira conectada; senao, a
+// primeira da lista (comportamento antigo).
+function resolveBillingInstance(tenant) {
+  const instances = (tenant?.instances || []).filter((i) => !String(i.instanceName || '').startsWith('DELETED_'));
+  const configuredId = tenant?.settings?.billingInstanceId;
+  if (configuredId) {
+    const configured = instances.find((i) => i.id === configuredId);
+    if (configured) return configured;
+    console.warn(`[billing] billingInstanceId ${configuredId} nao encontrado no tenant; usando fallback.`);
+  }
+  return instances.find((i) => ['connected', 'open', 'online'].includes(String(i.status || '').toLowerCase()))
+    || instances[0]
+    || null;
+}
+
 function getBillingContactPhone(contact) {
   for (const candidate of [contact?.whatsapp, contact?.whatsappJid, contact?.phone]) {
     const normalized = normalizeBillingPhone(candidate);
@@ -224,7 +240,8 @@ async function sendBilling(req, res) {
 
     const evolutionUrl = tenant.settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
     const evolutionKey = tenant.settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
-    let instanceName = tenant.instances.find(item => String(item.status).toLowerCase() === 'connected')?.instanceName || tenant.instances[0]?.instanceName;
+    const billingInstance = resolveBillingInstance(tenant);
+    const instanceName = billingInstance?.instanceName;
 
     if (!evolutionUrl || !evolutionKey || !instanceName) {
       throw new Error('Integração com WhatsApp não configurada ou sem instâncias conectadas.');
@@ -262,7 +279,7 @@ async function sendBilling(req, res) {
       ticket = await prisma.ticket.create({
         data: {
           tenantId: tenant.id,
-          instanceId: tenant.instances.find(i => i.instanceName === instanceName)?.id || tenant.instances[0]?.id,
+          instanceId: billingInstance?.id || tenant.instances[0]?.id,
           contactId: contact.id,
           status: 'open'
         }
@@ -542,7 +559,8 @@ async function autoSendBilling(req, res) {
 
     const evolutionUrl = tenant.settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
     const evolutionKey = tenant.settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
-    const instanceName = tenant.instances.find((item) => String(item.status).toLowerCase() === 'connected')?.instanceName || tenant.instances[0]?.instanceName;
+    const billingInstance = resolveBillingInstance(tenant);
+    const instanceName = billingInstance?.instanceName;
     if (!evolutionUrl || !evolutionKey || !instanceName) {
       throw new Error('Integração com WhatsApp não configurada ou sem instâncias conectadas.');
     }
@@ -569,7 +587,7 @@ async function autoSendBilling(req, res) {
       ticket = await prisma.ticket.create({
         data: {
           tenantId: tenant.id,
-          instanceId: tenant.instances.find((item) => item.instanceName === instanceName)?.id || tenant.instances[0]?.id,
+          instanceId: billingInstance?.id || tenant.instances[0]?.id,
           contactId: contact.id,
           status: 'open',
         },
@@ -924,12 +942,15 @@ async function getBillingDashboardStats(req, res) {
 
 async function saveBillingSettings(req, res) {
   const { tenantId } = req.user;
-  const { billingMessageTemplate } = req.body;
+  const { billingMessageTemplate, billingInstanceId } = req.body;
 
   try {
     await prisma.tenantSettings.update({
       where: { tenantId },
-      data: { billingMessageTemplate }
+      data: {
+        ...(billingMessageTemplate !== undefined ? { billingMessageTemplate } : {}),
+        ...(billingInstanceId !== undefined ? { billingInstanceId: billingInstanceId || null } : {}),
+      }
     });
     res.json({ ok: true });
   } catch (err) {
@@ -955,5 +976,6 @@ module.exports = {
     selectBillingContact,
     resolveBillingDateRange,
     describeAutoSendFailure,
+    resolveBillingInstance,
   }
 };

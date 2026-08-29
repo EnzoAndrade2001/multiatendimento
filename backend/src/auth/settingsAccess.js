@@ -13,7 +13,7 @@ const SETTINGS_FIELDS = Object.freeze({
   'settings.attendance.manage': [
     'outOfOfficeMessage', 'ratingEnabled', 'ratingMessage', 'notificationPhone',
     'serviceOrderManagerCopyEnabled', 'serviceOrderManagerPhone', 'serviceOrderManagerInstanceId',
-    'billingMessageTemplate',
+    'billingMessageTemplate', 'billingInstanceId',
   ],
   'settings.company.manage': [
     'companyName', 'companyCnpj', 'companyIE', 'companyAddress', 'companyBairro',

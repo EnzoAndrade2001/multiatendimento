@@ -82,6 +82,7 @@ model TenantSettings {
   serviceOrderManagerCopyEnabled Boolean @default(false)
   serviceOrderManagerPhone       String?
   serviceOrderManagerInstanceId  String?
+  billingInstanceId              String?
   ratingEnabled                  Boolean @default(false)
   ratingMessage                  String? @default("Como você avalia nosso atendimento de 1 a 5?") @db.Text
 

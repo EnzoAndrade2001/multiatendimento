@@ -143,6 +143,7 @@ export default function Settings() {
     kpiSlaLimitHours: 24,
     kpiReincidentThreshold: 2,
     billingMessageTemplate: '',
+    billingInstanceId: '',
   });
   const [agentInfo, setAgentInfo] = useState(null);
   const [agentInfoLoading, setAgentInfoLoading] = useState(false);
@@ -1731,6 +1732,30 @@ export default function Settings() {
                       placeholder="Olá! Seguem em anexo sua fatura, boleto e demonstrativo deste mês. Se tiver qualquer dúvida, estamos à disposição."
                     />
                     <p style={s.hint}>Mensagem enviada junto aos PDFs de cobrança.</p>
+                  </div>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Instância de saída da cobrança</label>
+                    <select
+                      style={s.input}
+                      value={form.billingInstanceId || ''}
+                      onChange={(e) => setForm({ ...form, billingInstanceId: e.target.value })}
+                    >
+                      <option value="">Automática (primeira conectada)</option>
+                      {instances.map((instance) => {
+                        const connected = instance.status === 'connected' || instance.state === 'open';
+                        const official = instance.provider === 'evolution_official';
+                        return (
+                          <option key={instance.id} value={instance.id}>
+                            {instance.instanceName}{official ? ' · Oficial' : ' · QR'} — {connected ? 'Conectada' : 'Desconectada'}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <p style={s.hint}>
+                      Fixe uma instância para as cobranças não saírem por um número errado. Deixe em "Automática" para o comportamento atual.
+                      Cobrança por instância <strong>oficial</strong> exige o cliente ter enviado mensagem nas últimas 24h ou um template de utilidade aprovado pela Meta.
+                    </p>
                   </div>
 
               <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
