@@ -235,6 +235,21 @@ async function sendBilling(req, res) {
       throw new Error('Telefone do cliente inválido ou não cadastrado.');
     }
 
+    // Opt-out do cliente vence até o modo "enviar para todos".
+    if (contact.whatsappOptOutAt) {
+      await prisma.billingLog.create({
+        data: {
+          tenantId: tenant.id,
+          cpfCnpj,
+          clientName: contact.name,
+          fileName: files.map(f => f.originalname).join(', '),
+          status: 'SKIPPED',
+          errorMessage: 'Contato optou por não receber mensagens no WhatsApp (opt-out).',
+        },
+      });
+      return res.json({ success: true, skipped: true, message: 'Contato optou por não receber mensagens no WhatsApp.' });
+    }
+
     // Busca ou abre um ticket para o cliente
     let ticket = await prisma.ticket.findFirst({
       where: {
@@ -537,6 +552,12 @@ async function autoSendBilling(req, res) {
         data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SKIPPED', errorMessage: 'Telefone do contato inválido ou não cadastrado para WhatsApp.' },
       });
       return res.json({ success: true, skipped: true, message: 'Documentos preparados, mas o telefone do contato não é válido para WhatsApp.' });
+    }
+    if (contact.whatsappOptOutAt) {
+      await prisma.billingLog.create({
+        data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SKIPPED', errorMessage: 'Contato optou por não receber mensagens no WhatsApp (opt-out).' },
+      });
+      return res.json({ success: true, skipped: true, message: 'Contato optou por não receber mensagens no WhatsApp.' });
     }
 
     // Busca ou abre uma conversa para o cliente -- precisa funcionar mesmo com

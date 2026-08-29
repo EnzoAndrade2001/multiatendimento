@@ -140,6 +140,15 @@ async function processCampaign(campaignId) {
       await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'FAILED', lastError: 'Instância de saída ou Evolution API não configurada.' } });
       return;
     }
+    // Campanha é sempre mensagem proativa. Na API oficial isso exige template
+    // aprovado pela Meta — ainda não suportado por aqui, então falha fechado.
+    if (campaign.instance?.provider === 'evolution_official') {
+      await prisma.campaign.update({
+        where: { id: campaign.id },
+        data: { status: 'FAILED', lastError: 'Campanhas em instância oficial (API Meta) exigem template aprovado e ainda não são suportadas. Use uma conexão QR Code.' },
+      });
+      return;
+    }
     // Um processo anterior pode ter sido interrompido entre a reserva do
     // destinatário e o envio. Após um reinício, devolve reservas antigas à
     // fila; reservas recentes continuam protegidas contra duplicação.
@@ -163,6 +172,15 @@ async function processCampaign(campaignId) {
           await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'COMPLETED', completedAt: new Date() } });
         }
         break;
+      }
+      if (recipient.contact?.whatsappOptOutAt) {
+        await prisma.campaignRecipient.update({
+          where: { id: recipient.id },
+          data: { status: 'SKIPPED', reason: 'opt_out', errorMessage: 'Contato optou por não receber mensagens.' },
+        });
+        await recompute(campaign.id);
+        await emitProgress(campaign.id, campaign.tenantId);
+        continue;
       }
       try {
         let result;

@@ -2261,6 +2261,16 @@ export const MessageComposer = React.memo(function MessageComposer({
   onReconnect,
   sendingMessage,
   onQuickResponseUse,
+  instances,
+  outboundInstanceId,
+  setOutboundInstanceId,
+  outboundOptions,
+  outboundOptionsLoading,
+  officialTemplateKey,
+  setOfficialTemplateKey,
+  officialTemplateValues,
+  setOfficialTemplateValues,
+  onReactivateConsent,
 }) {
   const fileInputRef = useRef(null);
   const textInputRef = useRef(null);
@@ -2358,6 +2368,24 @@ export const MessageComposer = React.memo(function MessageComposer({
     toast.success(imageFiles.length === 1 ? 'Imagem colada no envio' : `${imageFiles.length} imagens coladas no envio`);
   }
 
+  const showInstancePicker = (instances || []).filter((i) => !String(i.instanceName || '').startsWith('DELETED_')).length > 1
+    || outboundOptions?.mode === 'official';
+  const selectedTemplate = (outboundOptions?.templates || []).find(
+    (tpl) => `${tpl.name}|${tpl.language}` === officialTemplateKey
+  ) || null;
+  const templatePreview = selectedTemplate
+    ? String((selectedTemplate.components || []).find((c) => String(c?.type).toUpperCase() === 'BODY')?.text || '')
+        .replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => (officialTemplateValues?.[Number(n) - 1] || `{{${n}}}`))
+    : '';
+  const outboundBannerBase = {
+    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+    padding: '5px 10px', borderRadius: 'var(--radius-sm)', fontSize: '0.74rem', fontWeight: 600,
+  };
+  const outboundFieldStyle = {
+    padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+    background: 'var(--bg-panel)', color: 'var(--text-primary)', fontSize: '0.8rem', maxWidth: '100%',
+  };
+
   function insertEmoji(emoji) {
     const input = textInputRef.current;
     const start = input?.selectionStart ?? text.length;
@@ -2423,6 +2451,98 @@ export const MessageComposer = React.memo(function MessageComposer({
             Nota Interna (Privado)
           </button>
         </div>
+
+        {!isNote && (showInstancePicker || outboundOptions?.optedOut || outboundOptions?.mode === 'official') ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            {showInstancePicker ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)' }}>ENVIAR POR</span>
+                <select
+                  value={outboundInstanceId || ''}
+                  onChange={(event) => setOutboundInstanceId?.(event.target.value)}
+                  style={outboundFieldStyle}
+                >
+                  <option value="">Selecione a instância…</option>
+                  {(instances || [])
+                    .filter((item) => !String(item.instanceName || '').startsWith('DELETED_'))
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {(item.instanceName || item.id).replace(/^[a-z0-9]+_/i, '')}
+                        {item.provider === 'evolution_official' ? ' · Oficial' : ' · QR'}
+                      </option>
+                    ))}
+                </select>
+                {outboundOptionsLoading ? (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>validando…</span>
+                ) : null}
+              </div>
+            ) : null}
+
+            {outboundOptions?.optedOut ? (
+              <div style={{ ...outboundBannerBase, background: 'var(--danger-light, #fdecec)', color: 'var(--danger, #b42318)', border: '1px solid var(--danger-border, #f3b9b3)' }}>
+                <span style={{ flex: '1 1 220px', minWidth: 0 }}>⛔ Este contato pediu para não receber mensagens (opt-out).</span>
+                {onReactivateConsent ? (
+                  <button
+                    type="button"
+                    onClick={onReactivateConsent}
+                    style={{ ...outboundFieldStyle, cursor: 'pointer', fontWeight: 700, borderColor: 'currentColor' }}
+                  >
+                    Reativar consentimento
+                  </button>
+                ) : null}
+              </div>
+            ) : outboundOptions?.mode === 'official' ? (
+              outboundOptions.window?.open ? (
+                <div style={{ ...outboundBannerBase, background: 'var(--success-light, #e7f6ec)', color: 'var(--success, #1a7f37)', border: '1px solid var(--success-border, #b7e0c4)' }}>
+                  ● Janela de 24h aberta
+                  {outboundOptions.window?.expiresAt
+                    ? ` até ${new Date(outboundOptions.window.expiresAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                    : ''} — texto livre liberado.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ ...outboundBannerBase, background: 'var(--warning-light, #fef6e7)', color: 'var(--warning, #9a6700)', border: '1px solid var(--warning-border, #f3dca6)' }}>
+                    ⚠ Janela de 24h encerrada. Só um template aprovado pela Meta pode ser enviado.
+                  </div>
+                  <select
+                    value={officialTemplateKey || ''}
+                    onChange={(event) => { setOfficialTemplateKey?.(event.target.value); setOfficialTemplateValues?.([]); }}
+                    style={outboundFieldStyle}
+                  >
+                    <option value="">Selecione um template…</option>
+                    {(outboundOptions.templates || []).map((tpl) => (
+                      <option key={`${tpl.name}|${tpl.language}`} value={`${tpl.name}|${tpl.language}`}>
+                        {tpl.name} ({tpl.language}) · {tpl.category}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedTemplate && selectedTemplate.variableCount > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {Array.from({ length: selectedTemplate.variableCount }).map((_, idx) => (
+                        <input
+                          key={idx}
+                          placeholder={`Variável {{${idx + 1}}}`}
+                          value={officialTemplateValues?.[idx] || ''}
+                          onChange={(event) => {
+                            const next = [...(officialTemplateValues || [])];
+                            next[idx] = event.target.value;
+                            setOfficialTemplateValues?.(next);
+                          }}
+                          style={outboundFieldStyle}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  {selectedTemplate ? (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', background: 'var(--bg-surface)', borderRadius: 'var(--radius-sm)', padding: '6px 8px' }}>
+                      {templatePreview || '(template sem corpo de texto)'}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            ) : null}
+          </div>
+        ) : null}
 
         {replyingTo ? (
           <div style={styles.replyBanner}>

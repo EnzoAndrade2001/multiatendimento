@@ -3,6 +3,7 @@ const historyService = require('../services/historyService');
 const geminiService = require('../services/aiService');
 const evolutionService = require('../services/evolutionService');
 const ticketSessionService = require('../services/ticketSessionService');
+const whatsappComplianceService = require('../services/whatsappComplianceService');
 const path = require('path');
 const fs = require('fs');
 const { hasPermission } = require('../auth/permissions');
@@ -790,7 +791,7 @@ async function resolve(req, res) {
 
 async function sendMessage(req, res) {
   const { id } = req.params;
-  const { body, quotedMsgId } = req.body;
+  const { body, quotedMsgId, instanceId, template } = req.body;
 
   try {
     const ticket = await prisma.ticket.findFirst({
@@ -798,6 +799,13 @@ async function sendMessage(req, res) {
       include: { contact: true, instance: true },
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado' });
+
+    const outbound = await whatsappComplianceService.authorizeOutbound({
+      tenantId: req.user.tenantId,
+      ticket,
+      instanceId,
+      templateSelection: template,
+    });
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
     const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
@@ -810,7 +818,8 @@ async function sendMessage(req, res) {
     const evolutionService = require('../services/evolutionService');
     const agent = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (!agent) return res.status(400).json({ error: 'Usuário/Agente não encontrado' });
-    const finalBody = `*${agent.name}*\n${body}`;
+    const messageBody = outbound.mode === 'template' ? outbound.renderedBody : body;
+    const finalBody = `*${agent.name}*\n${messageBody}`;
     
     // Normaliza o número: se tiver 10 ou 11 dígitos, adiciona 55
     const phone = normalizeSendTarget(
@@ -821,7 +830,7 @@ async function sendMessage(req, res) {
 
     let quotedMsgBody = null;
     let quotedObj = null;
-    if (quotedMsgId) {
+    if (quotedMsgId && outbound.instance.id === ticket.instanceId) {
       const quoted = await prisma.message.findFirst({ where: { externalId: quotedMsgId } });
       if (quoted) {
         quotedMsgBody = quoted.body || (quoted.mediaType === 'image' ? '📷 Foto' : (quoted.mediaType === 'video' ? '🎥 Vídeo' : (quoted.mediaType === 'audio' ? '🎤 Áudio' : (quoted.mediaType === 'document' ? '📎 Documento' : 'Mensagem'))));
@@ -834,9 +843,20 @@ async function sendMessage(req, res) {
     const { result, instance: usedInstance } = await sendWithInstanceFallback({
       tenantId: req.user.tenantId,
       ticketId: id,
-      preferredInstanceId: ticket.instanceId || ticket.contact?.instanceId,
+      preferredInstanceId: outbound.instance.id,
       strictPreferred: true,
       send: (instance) => {
+        if (outbound.mode === 'template') {
+          const components = outbound.templateValues.length ? [{
+            type: 'body',
+            parameters: outbound.templateValues.map((text) => ({ type: 'text', text })),
+          }] : [];
+          return evolutionService.sendTemplate(evolutionUrl, evolutionKey, instance.instanceName, phone, {
+            name: outbound.template.name,
+            language: outbound.template.language,
+            components,
+          });
+        }
         return evolutionService.sendText(evolutionUrl, evolutionKey, instance.instanceName, phone, finalBody, quotedObj);
       },
     });
@@ -878,16 +898,33 @@ async function sendMessage(req, res) {
     }
 
     const message = await prisma.message.create({
-      data: { ticketId: id, agentId: req.user.userId, body, fromMe: true, externalId, quotedMsgId, quotedMsgBody },
+      data: { ticketId: id, agentId: req.user.userId, body: messageBody, fromMe: true, externalId, quotedMsgId, quotedMsgBody },
     });
 
     // Atualiza lastMessageAt para ordenação da lista
-    await prisma.ticket.update({ where: { id }, data: { lastMessageAt: new Date() } });
+    await prisma.ticket.update({ where: { id }, data: { lastMessageAt: new Date(), instanceId: usedInstance.id } });
     if (usedInstance.id !== ticket.instanceId && io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
     res.json(message);
   } catch (err) {
     console.error('[sendMessage] erro:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Falha ao enviar mensagem: ' + (err.response?.data?.message || err.message) });
+    res.status(err.status || 500).json({
+      error: 'Falha ao enviar mensagem: ' + (err.response?.data?.message || err.message),
+      code: err.code,
+      window: err.window,
+    });
+  }
+}
+
+async function getOutboundOptions(req, res) {
+  try {
+    const options = await whatsappComplianceService.getOutboundOptions({
+      tenantId: req.user.tenantId,
+      ticketId: req.params.id,
+      instanceId: req.query.instanceId,
+    });
+    res.json(options);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 }
 
@@ -896,6 +933,7 @@ async function sendMediaMessage(req, res) {
   const file = req.file;
   const caption = req.body.caption || '';
   const quotedMsgId = req.body.quotedMsgId;
+  const instanceId = req.body.instanceId;
 
   if (!file) return res.status(400).json({ error: 'Arquivo obrigatório' });
 
@@ -905,6 +943,13 @@ async function sendMediaMessage(req, res) {
       include: { contact: true, instance: true },
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado' });
+
+    const outbound = await whatsappComplianceService.authorizeOutbound({
+      tenantId: req.user.tenantId,
+      ticket,
+      instanceId,
+      media: true,
+    });
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
     const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
@@ -971,7 +1016,7 @@ async function sendMediaMessage(req, res) {
       // Anexos devem permanecer na instancia da conversa. Se o ticket antigo
       // nao tiver instancia, usamos apenas a instancia atualmente vinculada ao contato;
       // nunca alternamos silenciosamente para outro numero do tenant.
-      preferredInstanceId: ticket.instanceId || ticket.contact?.instanceId,
+      preferredInstanceId: outbound.instance.id,
       strictPreferred: true,
       send: async (instance) => {
         let lastError;
@@ -1094,7 +1139,7 @@ async function sendMediaMessage(req, res) {
     });
 
     // Atualiza lastMessageAt para ordenação da lista
-    await prisma.ticket.update({ where: { id }, data: { lastMessageAt: new Date() } });
+    await prisma.ticket.update({ where: { id }, data: { lastMessageAt: new Date(), instanceId: usedInstance.id } });
     if (usedInstance.id !== ticket.instanceId && io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
 
     if (mediaType === 'audio' && settings?.geminiKey) {
@@ -1120,7 +1165,11 @@ async function sendMediaMessage(req, res) {
     res.json(message);
   } catch (err) {
     console.error('[sendMediaMessage] erro:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Falha ao enviar mídia: ' + (err.response?.data?.message || err.message) });
+    res.status(err.status || 500).json({
+      error: 'Falha ao enviar mídia: ' + (err.response?.data?.message || err.message),
+      code: err.code,
+      window: err.window,
+    });
   }
 }
 
@@ -1564,4 +1613,4 @@ async function createNote(req, res) {
   }
 }
 
-module.exports = { list, getMessages, assign, resolve, update, sendMessage, sendMediaMessage, deleteMessage, reopen, summarize, linkContact, forwardMessage, createNote, setIo };
+module.exports = { list, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, deleteMessage, reopen, summarize, linkContact, forwardMessage, createNote, setIo };

@@ -21,6 +21,8 @@ import api, {
   forwardMessage,
   createTicketNote,
   updateTicketPreferences,
+  getTicketOutboundOptions,
+  updateContact,
 } from '../services/api';
 import { toast } from '../utils/toast';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -105,6 +107,11 @@ export default function Inbox() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [outboundInstanceId, setOutboundInstanceId] = useState('');
+  const [outboundOptions, setOutboundOptions] = useState(null);
+  const [outboundOptionsLoading, setOutboundOptionsLoading] = useState(false);
+  const [officialTemplateKey, setOfficialTemplateKey] = useState('');
+  const [officialTemplateValues, setOfficialTemplateValues] = useState([]);
   const [view, setView] = useState('list'); // 'list' or 'chat'
   const [updateTrigger, setUpdateTrigger] = useState(0); // Forca atualizacao de componentes filhos
   const [replyingTo, setReplyingTo] = useState(null);
@@ -191,6 +198,14 @@ export default function Inbox() {
   }
 
   async function startRecording() {
+    if (!outboundInstanceId) {
+      toast.error('Selecione a instância de saída antes de gravar.');
+      return;
+    }
+    if (outboundOptions?.mode === 'official' && !outboundOptions?.window?.open) {
+      toast.error('A janela oficial de 24 horas está encerrada. Áudio livre não pode ser enviado.');
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       toast.error('Seu navegador nao oferece suporte a gravacao de audio.');
       return;
@@ -212,7 +227,7 @@ export default function Inbox() {
             : 'audio/webm';
         const blob = new Blob(chunks, { type: mimeType });
         try {
-          await sendAudioMessage(selectedId, blob);
+          await sendAudioMessage(selectedId, blob, null, { instanceId: outboundInstanceId });
           loadMessages({ background: true });
         } catch (e) { toast.error('Erro ao enviar áudio: ' + (e.response?.data?.error || e.message)); }
         stream.getTracks().forEach(t => t.stop());
@@ -436,6 +451,28 @@ export default function Inbox() {
       return;
     }
 
+    if (!outboundInstanceId) {
+      toast.error('Selecione a instância de saída antes de enviar.');
+      return;
+    }
+
+    const officialClosed = outboundOptions?.mode === 'official' && !outboundOptions?.window?.open;
+    const selectedTemplate = outboundOptions?.templates?.find(
+      (item) => `${item.name}|${item.language}` === officialTemplateKey
+    );
+    if (officialClosed && !selectedTemplate) {
+      toast.error('Selecione um template oficial aprovado pela Meta.');
+      return;
+    }
+    if (officialClosed && officialTemplateValues.some((value) => !String(value || '').trim())) {
+      toast.error('Preencha todas as variáveis do template oficial.');
+      return;
+    }
+    if (officialClosed && files.length > 0) {
+      toast.error('Fora da janela de 24 horas, anexos exigem um template oficial de mídia aprovado.');
+      return;
+    }
+
     if (files.length > 0) {
       const currentFiles = [...files];
       const currentText = text;
@@ -451,7 +488,7 @@ export default function Inbox() {
         try {
           for (let i = 0; i < currentFiles.length; i++) {
             try {
-              await sendMediaMessage(selectedId, currentFiles[i], i === 0 ? currentText : '', qId);
+              await sendMediaMessage(selectedId, currentFiles[i], i === 0 ? currentText : '', qId, { instanceId: outboundInstanceId });
               if (i < currentFiles.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, 350));
               }
@@ -475,13 +512,17 @@ export default function Inbox() {
       })();
       return;
     } else {
-      await doSend(text, null);
+      await doSend(text, null, officialClosed && selectedTemplate ? {
+        name: selectedTemplate.name,
+        language: selectedTemplate.language,
+        values: officialTemplateValues,
+      } : null);
       sendLockRef.current = false;
       setSendingMessage(false);
     }
   }
 
-  async function doSend(body, attachment) {
+  async function doSend(body, attachment, template = null) {
     const tId = selectedId;
     const qId = replyingTo?.externalId;
     const previousReply = replyingTo;
@@ -490,9 +531,9 @@ export default function Inbox() {
     setReplyingTo(null);
     try {
       if (attachment) {
-        await sendMediaMessage(tId, attachment, body, qId);
+        await sendMediaMessage(tId, attachment, body, qId, { instanceId: outboundInstanceId });
       } else {
-        await sendMessage(tId, body, qId);
+        await sendMessage(tId, body, qId, { instanceId: outboundInstanceId, template });
       }
       loadMessages({ background: true });
     } catch (e) {
@@ -599,6 +640,51 @@ export default function Inbox() {
     () => tickets.find(t => t.id === selectedId),
     [tickets, selectedId]
   );
+
+  useEffect(() => {
+    // Pré-seleciona a instância da própria conversa: no dia a dia (e em QR) o
+    // atendente não precisa escolher nada. Só troca se quiser mudar de número.
+    const connected = (instances || []).find((item) => ['connected', 'open', 'online'].includes(String(item.state || item.status || '').toLowerCase()));
+    setOutboundInstanceId(selectedTicket?.instanceId || connected?.id || (instances || [])[0]?.id || '');
+    setOutboundOptions(null);
+    setOfficialTemplateKey('');
+    setOfficialTemplateValues([]);
+  }, [selectedId, selectedTicket?.instanceId, instances]);
+
+  const handleReactivateConsent = useCallback(async () => {
+    const contactId = selectedTicket?.contact?.id;
+    if (!contactId) return;
+    try {
+      await updateContact(contactId, { whatsappOptOutAt: null });
+      toast.success('Consentimento reativado para este contato.');
+      if (selectedId && outboundInstanceId) {
+        const { data } = await getTicketOutboundOptions(selectedId, outboundInstanceId);
+        setOutboundOptions(data);
+      }
+    } catch (error) {
+      toast.error('Falha ao reativar: ' + (error.response?.data?.error || error.message));
+    }
+  }, [selectedTicket?.contact?.id, selectedId, outboundInstanceId]);
+
+  useEffect(() => {
+    if (!selectedId || !outboundInstanceId) {
+      setOutboundOptions(null);
+      return undefined;
+    }
+    let active = true;
+    setOutboundOptionsLoading(true);
+    setOfficialTemplateKey('');
+    setOfficialTemplateValues([]);
+    getTicketOutboundOptions(selectedId, outboundInstanceId)
+      .then(({ data }) => { if (active) setOutboundOptions(data); })
+      .catch((error) => {
+        if (!active) return;
+        setOutboundOptions(null);
+        toast.error(error.response?.data?.error || 'Não foi possível validar a instância selecionada.');
+      })
+      .finally(() => { if (active) setOutboundOptionsLoading(false); });
+    return () => { active = false; };
+  }, [selectedId, outboundInstanceId]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -825,6 +911,16 @@ export default function Inbox() {
                 onReconnect={onReconnect}
                 sendingMessage={sendingMessage}
                 onQuickResponseUse={registerQuickResponseUse}
+                instances={instances}
+                outboundInstanceId={outboundInstanceId}
+                setOutboundInstanceId={setOutboundInstanceId}
+                outboundOptions={outboundOptions}
+                outboundOptionsLoading={outboundOptionsLoading}
+                officialTemplateKey={officialTemplateKey}
+                setOfficialTemplateKey={setOfficialTemplateKey}
+                officialTemplateValues={officialTemplateValues}
+                setOfficialTemplateValues={setOfficialTemplateValues}
+                onReactivateConsent={handleReactivateConsent}
               />
             </InboxSectionErrorBoundary>
           </>
@@ -1000,7 +1096,9 @@ export default function Inbox() {
             try {
               await sendMessage(
                 ticketId,
-                `Sua O.S. foi aberta com sucesso.\n*Número da O.S.: ${os.externalId}*`
+                `Sua O.S. foi aberta com sucesso.\n*Número da O.S.: ${os.externalId}*`,
+                null,
+                { instanceId: outboundInstanceId }
               );
               toast.success('Mensagem com o número da O.S. enviada ao cliente!');
             } catch (e) {

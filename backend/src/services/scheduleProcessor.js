@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const prisma = require('../lib/prisma');
 const evolutionService = require('./evolutionService');
+const whatsappComplianceService = require('./whatsappComplianceService');
 const billingDocuments = require('./billingDocumentService');
 
 async function processScheduledMessages() {
@@ -30,6 +31,16 @@ async function processScheduledMessages() {
         const instance = msg.tenant.instances[0]; // Pega a primeira instância ativa
 
         if (settings && instance && settings.evolutionUrl && settings.evolutionKey) {
+          const gate = await whatsappComplianceService.canAutomatedSend({
+            tenantId: msg.tenant.id,
+            contactId: msg.contactId,
+            instance,
+          });
+          if (!gate.allowed) {
+            console.warn(`[schedule] mensagem ${msg.id} não enviada (${gate.code}).`);
+            await prisma.scheduledMessage.update({ where: { id: msg.id }, data: { processed: true } });
+            continue;
+          }
           await evolutionService.sendText(
             settings.evolutionUrl,
             settings.evolutionKey,

@@ -141,7 +141,8 @@ export const importContacts = (formData) => api.post('/contacts/import', formDat
 // Tickets
 export const getTickets = (status, mine = false, filters = {}) => api.get('/tickets', { params: { status, mine, ...filters } });
 export const getMessages = (ticketId, params = {}) => api.get(`/tickets/${ticketId}/messages`, { params });
-export const sendMessage = (ticketId, body, quotedMsgId = null) => api.post(`/tickets/${ticketId}/messages`, { body, quotedMsgId });
+export const getTicketOutboundOptions = (ticketId, instanceId) => api.get(`/tickets/${ticketId}/outbound-options`, { params: { instanceId } });
+export const sendMessage = (ticketId, body, quotedMsgId = null, options = {}) => api.post(`/tickets/${ticketId}/messages`, { body, quotedMsgId, ...options });
 export const deleteMessage = (ticketId, messageId) => api.delete(`/tickets/${ticketId}/messages/${messageId}`);
 export const assignTicket = (ticketId, agentId, teamId) => api.patch(`/tickets/${ticketId}/assign`, { agentId, teamId });
 export const resolveTicket = (ticketId) => api.patch(`/tickets/${ticketId}/resolve`);
@@ -151,17 +152,19 @@ export const createTicketNote = (ticketId, body) => api.post(`/tickets/${ticketI
 export const updateTicket = (id, data) => api.patch(`/tickets/${id}`, data);
 export const updateTicketPreferences = (id, data) => api.patch(`/tickets/${id}/preferences`, data);
 export const reopenTicket = (contactId, instanceId) => api.post('/tickets/reopen', { contactId, instanceId });
-export const sendMediaMessage = (ticketId, file, caption = '', quotedMsgId = null) => {
+export const sendMediaMessage = (ticketId, file, caption = '', quotedMsgId = null, options = {}) => {
   const form = new FormData();
   form.append('file', file);
   form.append('caption', caption);
   if (quotedMsgId) form.append('quotedMsgId', quotedMsgId);
+  if (options.instanceId) form.append('instanceId', options.instanceId);
   return api.post(`/tickets/${ticketId}/media`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
-export const sendAudioMessage = (ticketId, blob, quotedMsgId = null) => {
+export const sendAudioMessage = (ticketId, blob, quotedMsgId = null, options = {}) => {
   const form = new FormData();
   form.append('file', blob, 'recording.mp3');
   if (quotedMsgId) form.append('quotedMsgId', quotedMsgId);
+  if (options.instanceId) form.append('instanceId', options.instanceId);
   return api.post(`/tickets/${ticketId}/media`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
 export const forwardMessage = (ticketId, messageId, contactId) => api.post(`/tickets/${ticketId}/forward`, { messageId, contactId });

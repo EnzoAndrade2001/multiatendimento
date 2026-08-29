@@ -344,6 +344,24 @@ function buildCreateInstancePayload(instanceName, options = {}) {
   return payload;
 }
 
+async function findTemplates(url, key, instanceName) {
+  const client = getClient(url, key);
+  const { data } = await client.get(`/template/find/${instanceName}`);
+  return data;
+}
+
+async function sendTemplate(url, key, instanceName, phone, { name, language = 'pt_BR', components = [] }) {
+  const client = getClient(url, key);
+  const payload = {
+    number: normalizePhoneNumber(phone),
+    name,
+    language,
+    components,
+  };
+  const { data } = await client.post(`/message/sendTemplate/${instanceName}`, payload);
+  return ensureAccepted(data, 'sendTemplate');
+}
+
 async function createInstance(url, key, instanceName, options = {}) {
   const client = getClient(url, key);
   const payload = buildCreateInstancePayload(instanceName, options);
@@ -414,6 +432,22 @@ function isGroupJid(value) {
   return typeof value === 'string' && value.trim().toLowerCase().endsWith('@g.us');
 }
 
+// A Cloud API do WhatsApp devolve números de celular do Brasil sem o 9º dígito
+// (ex.: 555186876737), enquanto os cadastros costumam ter o 9 (5551986876737).
+// Gera as duas formas para casar contato e evitar duplicidade.
+function brazilNinthDigitVariants(digits) {
+  const match = String(digits || '').match(/^55(\d{2})(\d{8,9})$/);
+  if (!match) return [];
+  const [, ddd, subscriber] = match;
+  if (subscriber.length === 8 && /^[6-9]/.test(subscriber)) {
+    return [`55${ddd}9${subscriber}`];
+  }
+  if (subscriber.length === 9 && subscriber.startsWith('9')) {
+    return [`55${ddd}${subscriber.slice(1)}`];
+  }
+  return [];
+}
+
 function buildPhoneLookupCandidates(phone) {
   if (isGroupJid(String(phone || ''))) {
     return [normalizePhoneNumber(phone)];
@@ -435,11 +469,18 @@ function buildPhoneLookupCandidates(phone) {
     candidates.add(rawDigits.slice(2));
   }
 
-  if (normalized.startsWith('55')) {
-    const localDigits = normalized.slice(2);
-    candidates.add(localDigits);
-    candidates.add(`0${localDigits}`);
-    candidates.add(`550${localDigits}`);
+  const brVariants = [normalized, rawDigits].flatMap(brazilNinthDigitVariants);
+  for (const variant of brVariants) {
+    candidates.add(variant);
+  }
+
+  for (const value of [normalized, ...brVariants]) {
+    if (value && value.startsWith('55')) {
+      const localDigits = value.slice(2);
+      candidates.add(localDigits);
+      candidates.add(`0${localDigits}`);
+      candidates.add(`550${localDigits}`);
+    }
   }
 
   return Array.from(candidates).filter(Boolean);
@@ -584,7 +625,7 @@ async function findConversationJidsByMessageIds(url, key, instanceName, messageI
 }
 
 module.exports = {
-  sendText, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
+  sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
   getQrCode, getConnectionState, setWebhook, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
   normalizePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findMessages, findConversationJidsByMessageIds,

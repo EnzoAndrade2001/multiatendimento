@@ -8,6 +8,7 @@ const botPromptService = require('../services/botPromptService');
 const knowledgeSearchService = require('../services/knowledgeSearchService');
 const technicalAssistantService = require('../services/technicalAssistantService');
 const ticketSessionService = require('../services/ticketSessionService');
+const whatsappComplianceService = require('../services/whatsappComplianceService');
 const { classifyResponseOrigin } = require('../services/aiResponseAuditService');
 const {
   guardBotReply,
@@ -454,6 +455,14 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
       .catch(() => {});
   }
 
+  // --- Opt-out: cliente pediu para parar de receber mensagens ---
+  let optOutJustNow = false;
+  if (!isHistorical && !fromMe && !isGroup && whatsappComplianceService.isOptOutMessage(body)) {
+    const alreadyOptedOut = Boolean(contact.whatsappOptOutAt);
+    contact = (await whatsappComplianceService.registerOptOut({ tenantId: tenant.id, contactId: contact.id })) || contact;
+    optOutJustNow = !alreadyOptedOut;
+  }
+
   // --- Lógica de Avaliação de Atendimento (CSAT) ---
   const bodyTrim = (body || '').trim();
   const isRating = /^[1-5]$/.test(bodyTrim);
@@ -478,7 +487,10 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
         }
       });
       
-      await evolutionService.sendText(tenant.settings.evolutionUrl, tenant.settings.evolutionKey, instance, phone, "Obrigado por sua avaliação! 🙏 Sua nota é muito importante para nós.");
+      const csatGate = await whatsappComplianceService.canAutomatedSend({ tenantId: tenant.id, contactId: contact.id, instance: waInstance });
+      if (csatGate.allowed) {
+        await evolutionService.sendText(tenant.settings.evolutionUrl, tenant.settings.evolutionKey, instance, phone, "Obrigado por sua avaliação! 🙏 Sua nota é muito importante para nós.");
+      }
       return;
     }
   }
@@ -552,6 +564,21 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
   }
 
+  if (optOutJustNow) {
+    try {
+      await prisma.ticketEvent.create({
+        data: { ticketId: ticket.id, tenantId: tenant.id, type: 'whatsapp_opt_out' },
+      });
+    } catch (err) {
+      console.error('[opt-out] falha ao registrar evento:', err.message);
+    }
+    if (ticket.status === 'bot') {
+      ticket = await prisma.ticket.update({ where: { id: ticket.id }, data: { status: 'pending' } });
+    }
+    if (io) io.to(tenant.id).emit('ticket_updated', { ticketId: ticket.id, status: ticket.status });
+    console.log(`[opt-out] contato ${require('../utils/privacy').maskPhone(phone)} optou por não receber mensagens.`);
+  }
+
   const message = await prisma.message.create({
     data: {
       ticketId: ticket.id,
@@ -592,16 +619,19 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
        
        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
        if (!lastOooEvent || lastOooEvent.createdAt < fourHoursAgo) {
-          await evolutionService.sendText(
-            tenant.settings.evolutionUrl,
-            tenant.settings.evolutionKey,
-            instance,
-            phone,
-            tenant.settings.outOfOfficeMessage
-          );
-          await prisma.ticketEvent.create({
-            data: { ticketId: ticket.id, tenantId: tenant.id, type: 'ooo_message' }
-          });
+          const oooGate = await whatsappComplianceService.canAutomatedSend({ tenantId: tenant.id, contactId: contact.id, instance: waInstance });
+          if (oooGate.allowed) {
+            await evolutionService.sendText(
+              tenant.settings.evolutionUrl,
+              tenant.settings.evolutionKey,
+              instance,
+              phone,
+              tenant.settings.outOfOfficeMessage
+            );
+            await prisma.ticketEvent.create({
+              data: { ticketId: ticket.id, tenantId: tenant.id, type: 'ooo_message' }
+            });
+          }
        }
     }
   }
@@ -850,6 +880,31 @@ async function handleAutoTagging(tenant, ticket, contact) {
 
 async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, incomingMessage) {
   const settings = tenant.settings;
+
+  // Trava de conformidade: o bot nunca envia texto livre para contato em opt-out
+  // nem para instância oficial com a janela de 24 horas encerrada.
+  const botGate = await whatsappComplianceService.canAutomatedSend({ tenantId: tenant.id, contactId: contact.id, instance: waInstance });
+  if (!botGate.allowed) {
+    console.warn(`[bot] resposta automática bloqueada (${botGate.code}) no ticket ${ticket.id}`);
+    try {
+      await prisma.ticketEvent.create({
+        data: {
+          ticketId: ticket.id,
+          tenantId: tenant.id,
+          type: 'bot_send_blocked',
+          payload: JSON.stringify({ code: botGate.code, reason: botGate.reason }),
+        },
+      });
+    } catch (err) {
+      console.error('[bot] falha ao registrar bloqueio:', err.message);
+    }
+    if (botGate.code === 'OFFICIAL_WINDOW_CLOSED' && ticket.status === 'bot') {
+      await prisma.ticket.update({ where: { id: ticket.id }, data: { status: 'pending' } });
+      if (io) io.to(tenant.id).emit('ticket_updated', { ticketId: ticket.id, status: 'pending' });
+    }
+    return;
+  }
+
   const transferWord = settings.botTransferWord || 'humano';
   let actorContext = null;
   try {

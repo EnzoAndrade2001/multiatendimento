@@ -123,6 +123,18 @@ async function updateContact(req, res) {
       ...(whatsappOptOutAt !== undefined && { whatsappOptOutAt: whatsappOptOutAt ? new Date(whatsappOptOutAt) : null }),
     },
   });
+
+  // Trilha LGPD: mudança de opt-out do WhatsApp feita manualmente pelo atendente.
+  if (whatsappOptOutAt !== undefined && Boolean(contact.whatsappOptOutAt) !== Boolean(whatsappOptOutAt)) {
+    const { recordPrivacyAudit } = require('../services/privacyAuditService');
+    await recordPrivacyAudit(req, {
+      action: whatsappOptOutAt ? 'WHATSAPP_OPT_OUT' : 'WHATSAPP_CONSENT_REACTIVATED',
+      resourceType: 'contact',
+      resourceId: id,
+      metadata: { via: 'agent_manual' },
+    });
+  }
+
   res.json(updated);
 }
 
