@@ -20,6 +20,7 @@ export default function Connections() {
   const [saving, setSaving] = useState(false);
   const [repairingId, setRepairingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [showOfficialGuide, setShowOfficialGuide] = useState(false);
 
   useEffect(() => {
     load();
@@ -231,6 +232,50 @@ export default function Connections() {
               </div>
               {provider === 'evolution_official' && (
                 <div style={s.officialFields}>
+                  <button
+                    type="button"
+                    style={s.guideToggle}
+                    onClick={() => setShowOfficialGuide((v) => !v)}
+                    aria-expanded={showOfficialGuide}
+                  >
+                    {showOfficialGuide ? '▾' : '▸'} Não sei onde pegar esses dados — ver o passo a passo na Meta
+                  </button>
+                  {showOfficialGuide && (
+                    <div style={s.guideBox}>
+                      <p style={s.guideIntro}>
+                        É o mesmo procedimento que o suporte faz. Ao final você terá 3 valores para colar abaixo:
+                        <strong> ID do telefone</strong>, <strong>ID da conta comercial</strong> e o <strong>token permanente</strong>.
+                      </p>
+                      <div style={s.guideSectionTitle}>Antes de começar</div>
+                      <ul style={s.guideList}>
+                        <li>Um número de telefone que <strong>não esteja</strong> em uso no WhatsApp nem no WhatsApp Business (app). Ele vai receber um código por SMS ou ligação.</li>
+                        <li>Uma conta no <a style={s.guideLink} href="https://business.facebook.com" target="_blank" rel="noopener noreferrer">Gerenciador de Negócios da Meta</a> com um Portfólio de Negócios da sua empresa.</li>
+                      </ul>
+                      <div style={s.guideSectionTitle}>Passo a passo</div>
+                      <ol style={s.guideOrderedList}>
+                        <li>Acesse <a style={s.guideLink} href="https://developers.facebook.com/apps" target="_blank" rel="noopener noreferrer">developers.facebook.com/apps</a> → <strong>Criar app</strong> → tipo <strong>Empresa</strong> → associe ao <strong>Portfólio de Negócios</strong> da sua empresa.</li>
+                        <li>No app, adicione o produto <strong>WhatsApp</strong>.</li>
+                        <li>Em <strong>WhatsApp → Configuração da API</strong>: adicione seu <strong>número real</strong> (não o de teste) e confirme com o <strong>código</strong> recebido por SMS/ligação.</li>
+                        <li>Nessa mesma tela, copie o <strong>ID do número de telefone (Phone Number ID)</strong> e o <strong>ID da conta do WhatsApp Business (WABA ID)</strong>.</li>
+                        <li>Defina o <strong>nome de exibição</strong> do número (o que o cliente vê). A Meta revisa.</li>
+                        <li>
+                          Gere o <strong>token permanente</strong>:
+                          <ul style={s.guideList}>
+                            <li><a style={s.guideLink} href="https://business.facebook.com/settings" target="_blank" rel="noopener noreferrer">business.facebook.com/settings</a> → <strong>Usuários → Usuários do sistema</strong> → <strong>Adicionar</strong> → função <strong>Administrador</strong>.</li>
+                            <li><strong>Adicionar ativos</strong> → marque o <strong>app</strong> e a <strong>conta do WhatsApp</strong>, com <strong>Controle total</strong>.</li>
+                            <li><strong>Gerar novo token</strong> → app = o seu app → expiração <strong>Nunca</strong> → permissões <strong>whatsapp_business_messaging</strong> e <strong>whatsapp_business_management</strong> → <strong>Gerar</strong>.</li>
+                            <li><strong>Copie na hora</strong> — o token só aparece uma vez.</li>
+                          </ul>
+                        </li>
+                        <li>Volte aqui, preencha os campos abaixo e clique em <strong>Criar conexão</strong>.</li>
+                      </ol>
+                      <p style={s.guideNote}>
+                        Depois disso o CRM já inscreve o app na conta do WhatsApp e configura o webhook automaticamente.
+                        A verificação da empresa na Meta só é necessária para passar dos limites iniciais (250 conversas/dia).
+                        Se preferir, o suporte faz esse processo com você por acesso remoto.
+                      </p>
+                    </div>
+                  )}
                   <div style={s.field}><label style={s.label}>WhatsApp com país e DDD</label><input style={s.input} value={officialForm.officialPhone} onChange={e => setOfficialForm({ ...officialForm, officialPhone: e.target.value })} required placeholder="5551999999999" /></div>
                   <div style={s.field}><label style={s.label}>ID do telefone na Meta</label><input style={s.input} value={officialForm.officialPhoneId} onChange={e => setOfficialForm({ ...officialForm, officialPhoneId: e.target.value })} required placeholder="Phone Number ID" /></div>
                   <div style={s.field}><label style={s.label}>ID da conta comercial (opcional)</label><input style={s.input} value={officialForm.officialBusinessId} onChange={e => setOfficialForm({ ...officialForm, officialBusinessId: e.target.value })} placeholder="WhatsApp Business Account ID" /></div>
@@ -445,6 +490,14 @@ const s = {
   field: { display: 'flex', flexDirection: 'column', gap: '0.55rem' },
   officialFields: { display: 'grid', gap: '1rem', marginTop: '1rem', padding: '1rem', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '14px' },
   helpText: { color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.45 },
+  guideToggle: { alignSelf: 'flex-start', background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 'var(--text-xs)', fontWeight: 800, cursor: 'pointer', padding: 0, textAlign: 'left' },
+  guideBox: { background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '0.9rem 1rem', maxHeight: '340px', overflowY: 'auto', fontSize: 'var(--text-xs)', color: 'var(--text-main)', lineHeight: 1.55 },
+  guideIntro: { margin: '0 0 0.75rem', color: 'var(--text-muted)' },
+  guideSectionTitle: { fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', margin: '0.75rem 0 0.35rem', fontSize: '0.7rem' },
+  guideList: { margin: '0.25rem 0', paddingLeft: '1.1rem', display: 'grid', gap: '0.3rem' },
+  guideOrderedList: { margin: '0.25rem 0', paddingLeft: '1.2rem', display: 'grid', gap: '0.45rem' },
+  guideLink: { color: 'var(--accent)', fontWeight: 700, textDecoration: 'underline' },
+  guideNote: { margin: '0.75rem 0 0', color: 'var(--text-muted)', fontStyle: 'italic' },
   label: { fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' },
   input: {
     background: 'var(--bg-panel)',
