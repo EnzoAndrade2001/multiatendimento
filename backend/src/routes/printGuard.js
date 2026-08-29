@@ -14,5 +14,6 @@ router.post('/test', requirePermission('connections.manage', 'settings.agent.man
 router.post('/disconnect', requirePermission('connections.manage', 'settings.agent.manage'), auditEvent('PRINTGUARD_DISCONNECT', 'printguard_connection'), controller.disconnect);
 router.get('/metrics', requirePermission('telemetry.view'), controller.getMetrics);
 router.post('/sync', requirePermission('telemetry.view'), auditEvent('PRINTGUARD_SYNC', 'printguard_connection'), controller.sync);
+router.get('/:resource', requirePermission('telemetry.view'), controller.remotePage);
 
 module.exports = router;

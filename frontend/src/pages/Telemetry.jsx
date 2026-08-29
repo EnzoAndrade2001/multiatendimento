@@ -16,7 +16,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import {
+import api, {
   approveTelemetryEvent,
   getTelemetryQueue,
   ignoreTelemetryEvent,
@@ -37,6 +37,8 @@ const STATUS_LABELS = {
   APPROVED: 'Aprovado',
   RESOLVED: 'Resolvido',
   CLOSED: 'Fechado',
+  RECEIVED: 'Recebido',
+  ERROR: 'Erro',
 };
 const SEVERITY_LABELS = { CRITICAL: 'Crítico', HIGH: 'Alto', MEDIUM: 'Médio', LOW: 'Baixo', INFO: 'Informativo' };
 
@@ -109,6 +111,7 @@ function toneForSeverity(value) {
 function toneForStatus(value) {
   if (['RESOLVED', 'CLOSED', 'APPROVED'].includes(value)) return 'success';
   if (['IGNORED'].includes(value)) return 'muted';
+  if (value === 'ERROR') return 'danger';
   if (['MONITORING', 'OPEN', 'NEW'].includes(value)) return 'warning';
   return 'neutral';
 }
@@ -123,14 +126,40 @@ export default function Telemetry() {
   const [selected, setSelected] = useState(null);
   const [working, setWorking] = useState('');
   const [notice, setNotice] = useState('');
+  const [osTypes, setOsTypes] = useState([]);
+  const [approval, setApproval] = useState({ cdOstp: '', defect: '' });
+
+  useEffect(() => {
+    let active = true;
+    api.get('/os/types')
+      .then((response) => { if (active) setOsTypes(Array.isArray(response.data) ? response.data : []); })
+      .catch(() => { if (active) setOsTypes([]); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setApproval({ cdOstp: '', defect: selected.message || selected.description || '' });
+  }, [selected?.id, selected?.eventId]);
 
   const load = useCallback(async (targetPage = page, signal) => {
     setLoading(true);
     setError('');
-    const params = { page: targetPage, pageSize: PAGE_SIZE };
+    // The API accepts offset/limit while newer deployments also understand
+    // page/pageSize. Sending both keeps the screen compatible during a
+    // rolling deploy and makes the offset deterministic for older agents.
+    const params = {
+      page: targetPage,
+      pageSize: PAGE_SIZE,
+      limit: PAGE_SIZE,
+      offset: Math.max(0, (targetPage - 1) * PAGE_SIZE),
+    };
     Object.entries(appliedFilters).forEach(([key, value]) => {
       if (!String(value || '').trim()) return;
-      if (key === 'q') params.search = String(value).trim();
+      if (key === 'q') {
+        params.q = String(value).trim();
+        params.search = params.q;
+      }
       else if (key === 'type') params.type = String(value).trim();
       else if (key === 'from') params.from = `${value}T00:00:00.000Z`;
       else if (key === 'to') params.to = `${value}T23:59:59.999Z`;
@@ -173,12 +202,15 @@ export default function Telemetry() {
     try {
       if (action === 'ignore') await ignoreTelemetryEvent(id);
       if (action === 'monitor') await monitorTelemetryEvent(id);
-      if (action === 'approve') await approveTelemetryEvent(id, { openServiceOrder: true });
+      if (action === 'approve') {
+        if (!approval.cdOstp) throw new Error('Selecione o tipo de O.S. antes de aprovar.');
+        await approveTelemetryEvent(id, { cdOstp: approval.cdOstp, defect: approval.defect });
+      }
       setNotice(action === 'ignore' ? 'Evento ignorado.' : action === 'monitor' ? 'Evento enviado para monitoramento.' : 'Evento aprovado; a abertura da O.S. foi solicitada.');
       setSelected(null);
       await load(page);
     } catch (requestError) {
-      setError(requestError?.response?.data?.error || 'Não foi possível concluir esta ação.');
+      setError(requestError?.response?.data?.error || requestError?.message || 'Não foi possível concluir esta ação.');
     } finally {
       setWorking('');
     }
@@ -233,19 +265,44 @@ export default function Telemetry() {
         <div style={styles.pagination}><span>{pagination.total ? `Página ${pagination.page} de ${pagination.totalPages}` : 'Página 1'}</span><div style={styles.paginationActions}><button type="button" style={styles.pageButton} disabled={loading || !pagination.hasPrevious} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /> Anterior</button><button type="button" style={styles.pageButton} disabled={loading || !pagination.hasNext} onClick={() => setPage((current) => current + 1)}>Próxima <ChevronRight size={16} /></button></div></div>
       </section>
 
-      {selected ? <TelemetryDetails event={selected} working={working} onAction={runAction} onClose={() => setSelected(null)} /> : null}
+      {selected ? <TelemetryDetails event={selected} working={working} onAction={runAction} onClose={() => setSelected(null)} osTypes={osTypes} approval={approval} onApprovalChange={setApproval} /> : null}
     </main>
   );
 }
 
 function Stat({ icon, label, value, tone = 'default' }) { return <div style={styles.statCard}><span style={{ ...styles.statIcon, ...(styles[`${tone}Icon`] || {}) }}>{icon}</span><span style={styles.statBody}><small>{label}</small><strong>{Number(value || 0).toLocaleString('pt-BR')}</strong></span></div>; }
 
-function TelemetryDetails({ event, working, onAction, onClose }) {
+function TelemetryDetails({ event, working, onAction, onClose, osTypes, approval, onApprovalChange }) {
   const id = event?.id || event?.eventId;
   const severityTone = toneForSeverity(event.severity);
   const statusTone = toneForStatus(event.status);
   const metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : null;
-  return <aside style={styles.drawer} role="dialog" aria-modal="true" aria-labelledby="telemetry-detail-title"><header style={styles.drawerHeader}><div><p style={styles.kicker}>Detalhe da ocorrência</p><h2 id="telemetry-detail-title" style={styles.drawerTitle}>{labelize(event.type)}</h2><span style={styles.drawerDate}>{dateLabel(event.createdAt || event.timestamp)}</span></div><button type="button" style={styles.closeButton} onClick={onClose} aria-label="Fechar"><X size={18} /></button></header><div style={styles.drawerBody}><div style={styles.badgeRow}><span style={{ ...styles.badge, ...(styles[`${severityTone}Badge`] || {}) }}>{SEVERITY_LABELS[event.severity] || labelize(event.severity)}</span><span style={{ ...styles.badge, ...(styles[`${statusTone}Badge`] || {}) }}>{STATUS_LABELS[event.status] || labelize(event.status)}</span></div><Detail label="Cliente" value={displayCustomer(event.customer)} /><Detail label="Equipamento" value={displayEquipment(event.equipment)} /><Detail label="Leitura" value={displayMeasurement(event.measurement)} />{event.message || event.description ? <div style={styles.messageBox}>{event.message || event.description}</div> : null}{metadata ? <details style={styles.meta}><summary>Contexto técnico</summary><pre>{JSON.stringify(metadata, null, 2)}</pre></details> : null}</div><footer style={styles.drawerFooter}><button type="button" style={styles.drawerAction} onClick={() => onAction('ignore', event)} disabled={!id || Boolean(working)}><XCircle size={15} /> Ignorar</button><button type="button" style={styles.drawerAction} onClick={() => onAction('monitor', event)} disabled={!id || Boolean(working)}><MonitorCog size={15} /> Monitorar</button><ActionButton onClick={() => onAction('approve', event)} loading={working === `approve:${id}`} disabled={!id || Boolean(working && working !== `approve:${id}`)}><Check size={15} /> Aprovar / abrir O.S.</ActionButton></footer></aside>;
+  return (
+    <aside style={styles.drawer} role="dialog" aria-modal="true" aria-labelledby="telemetry-detail-title">
+      <header style={styles.drawerHeader}>
+        <div><p style={styles.kicker}>Detalhe da ocorrência</p><h2 id="telemetry-detail-title" style={styles.drawerTitle}>{labelize(event.type)}</h2><span style={styles.drawerDate}>{dateLabel(event.createdAt || event.timestamp)}</span></div>
+        <button type="button" style={styles.closeButton} onClick={onClose} aria-label="Fechar"><X size={18} /></button>
+      </header>
+      <div style={styles.drawerBody}>
+        <div style={styles.badgeRow}><span style={{ ...styles.badge, ...(styles[`${severityTone}Badge`] || {}) }}>{SEVERITY_LABELS[event.severity] || labelize(event.severity)}</span><span style={{ ...styles.badge, ...(styles[`${statusTone}Badge`] || {}) }}>{STATUS_LABELS[event.status] || labelize(event.status)}</span></div>
+        <Detail label="Cliente" value={displayCustomer(event.customer)} />
+        <Detail label="Equipamento" value={displayEquipment(event.equipment)} />
+        <Detail label="Leitura" value={displayMeasurement(event.measurement)} />
+        {event.message || event.description ? <div style={styles.messageBox}>{event.message || event.description}</div> : null}
+        {metadata ? <details style={styles.meta}><summary>Contexto técnico</summary><pre>{JSON.stringify(metadata, null, 2)}</pre></details> : null}
+        <section style={styles.approvalBox}>
+          <strong>Abertura de O.S. no iLux</strong>
+          <label style={styles.field}><span>Tipo de O.S. obrigatório</span><select value={approval.cdOstp} onChange={(changeEvent) => onApprovalChange((current) => ({ ...current, cdOstp: changeEvent.target.value }))}><option value="">Selecione...</option>{osTypes.map((type) => <option key={type.code} value={type.code}>{type.name} ({type.code})</option>)}</select></label>
+          <label style={styles.field}><span>Defeito / motivo</span><textarea style={styles.textarea} value={approval.defect} onChange={(changeEvent) => onApprovalChange((current) => ({ ...current, defect: changeEvent.target.value }))} placeholder="Se vazio, será usada a descrição da telemetria." /></label>
+        </section>
+      </div>
+      <footer style={styles.drawerFooter}>
+        <button type="button" style={styles.drawerAction} onClick={() => onAction('ignore', event)} disabled={!id || Boolean(working)}><XCircle size={15} /> Ignorar</button>
+        <button type="button" style={styles.drawerAction} onClick={() => onAction('monitor', event)} disabled={!id || Boolean(working)}><MonitorCog size={15} /> Monitorar</button>
+        <ActionButton onClick={() => onAction('approve', event)} loading={working === `approve:${id}`} disabled={!id || !approval.cdOstp || Boolean(working && working !== `approve:${id}`)}><Check size={15} /> Aprovar / abrir O.S.</ActionButton>
+      </footer>
+    </aside>
+  );
 }
 
 function Detail({ label, value }) { return <div style={styles.detail}><span>{label}</span><strong title={value}>{value}</strong></div>; }
@@ -283,6 +340,5 @@ const styles = {
   filtersGrid: { display: 'grid', gridTemplateColumns: 'minmax(14rem, 1.7fr) minmax(12rem, 1.2fr) repeat(2, minmax(9rem, 1fr)) repeat(2, minmax(8rem, .75fr)) auto', alignItems: 'end', gap: 'var(--space-3)' },
   field: { display: 'grid', gap: '.4rem', minWidth: 0, color: 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: 800 }, inputIcon: { display: 'flex', alignItems: 'center', gap: '.45rem', minWidth: 0, padding: '0 .7rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-muted)' }, filterAction: { display: 'flex', justifyContent: 'flex-end' },
   tableWrap: { overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }, table: { width: '100%', borderCollapse: 'collapse', minWidth: 850 }, th: { padding: '.7rem .8rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-muted)', textAlign: 'left', fontSize: 'var(--text-xs)', fontWeight: 800, whiteSpace: 'nowrap' }, td: { padding: '.8rem .8rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: 'var(--text-sm)', verticalAlign: 'middle' }, muted: { display: 'block', marginTop: '.2rem', color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }, measurement: { color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }, badge: { display: 'inline-flex', alignItems: 'center', borderRadius: 999, padding: '.28rem .5rem', fontSize: 'var(--text-xs)', fontWeight: 800, whiteSpace: 'nowrap' }, successBadge: { color: 'var(--success-text, var(--success))', background: 'var(--success-light)' }, dangerBadge: { color: 'var(--danger-text, var(--danger))', background: 'var(--danger-light)' }, warningBadge: { color: 'var(--warning-text, var(--warning))', background: 'var(--warning-light)' }, mutedBadge: { color: 'var(--text-muted)', background: 'var(--bg-surface)' }, neutralBadge: { color: 'var(--text-muted)', background: 'var(--bg-surface)' }, detailButton: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', padding: '.45rem .6rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer', font: 'inherit', fontSize: 'var(--text-xs)', fontWeight: 800 }, loading: { minHeight: '15rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '.5rem', color: 'var(--text-muted)', fontWeight: 700 }, pagination: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginTop: 'var(--space-4)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }, paginationActions: { display: 'flex', gap: '.45rem' }, pageButton: { display: 'inline-flex', alignItems: 'center', gap: '.25rem', minHeight: 36, padding: '.4rem .6rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-main)', cursor: 'pointer', font: 'inherit', fontSize: 'var(--text-xs)', fontWeight: 800 },
-  drawer: { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 1000, display: 'flex', flexDirection: 'column', width: 'min(32rem, 100%)', borderLeft: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-main)', boxShadow: '-18px 0 45px rgba(0,0,0,.22)' }, drawerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', padding: 'var(--space-5)', borderBottom: '1px solid var(--border-color)' }, drawerTitle: { margin: 0, color: 'var(--text-main)', fontSize: 'var(--text-xl)', fontWeight: 800 }, drawerDate: { display: 'block', marginTop: '.35rem', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }, closeButton: { display: 'grid', placeItems: 'center', width: 36, height: 36, border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }, drawerBody: { flex: 1, overflowY: 'auto', padding: 'var(--space-5)' }, badgeRow: { display: 'flex', gap: '.45rem', marginBottom: 'var(--space-5)', flexWrap: 'wrap' }, detail: { display: 'grid', gap: '.3rem', padding: '.75rem 0', borderBottom: '1px solid var(--border-color)' }, messageBox: { marginTop: 'var(--space-4)', padding: '.8rem', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.5 }, meta: { marginTop: 'var(--space-4)', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }, drawerFooter: { display: 'flex', alignItems: 'center', gap: '.5rem', padding: 'var(--space-4) var(--space-5)', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }, drawerAction: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', minHeight: 38, padding: '.45rem .65rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-main)', cursor: 'pointer', font: 'inherit', fontSize: 'var(--text-xs)', fontWeight: 800 },
+  drawer: { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 1000, display: 'flex', flexDirection: 'column', width: 'min(32rem, 100%)', borderLeft: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-main)', boxShadow: '-18px 0 45px rgba(0,0,0,.22)' }, drawerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', padding: 'var(--space-5)', borderBottom: '1px solid var(--border-color)' }, drawerTitle: { margin: 0, color: 'var(--text-main)', fontSize: 'var(--text-xl)', fontWeight: 800 }, drawerDate: { display: 'block', marginTop: '.35rem', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }, closeButton: { display: 'grid', placeItems: 'center', width: 36, height: 36, border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }, drawerBody: { flex: 1, overflowY: 'auto', padding: 'var(--space-5)' }, badgeRow: { display: 'flex', gap: '.45rem', marginBottom: 'var(--space-5)', flexWrap: 'wrap' }, detail: { display: 'grid', gap: '.3rem', padding: '.75rem 0', borderBottom: '1px solid var(--border-color)' }, messageBox: { marginTop: 'var(--space-4)', padding: '.8rem', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.5 }, meta: { marginTop: 'var(--space-4)', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }, approvalBox: { display: 'grid', gap: '.8rem', marginTop: 'var(--space-5)', padding: 'var(--space-4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)' }, textarea: { width: '100%', minHeight: 92, resize: 'vertical', boxSizing: 'border-box', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '.7rem', background: 'var(--bg-panel)', color: 'var(--text-main)', font: 'inherit' }, drawerFooter: { display: 'flex', alignItems: 'center', gap: '.5rem', padding: 'var(--space-4) var(--space-5)', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }, drawerAction: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', minHeight: 38, padding: '.45rem .65rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', color: 'var(--text-main)', cursor: 'pointer', font: 'inherit', fontSize: 'var(--text-xs)', fontWeight: 800 },
 };
-

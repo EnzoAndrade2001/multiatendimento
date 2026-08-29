@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const printGuard = require('../services/printGuardService');
+const { hasPermission } = require('../auth/permissions');
 const { queueAuditEvent } = require('../services/auditEventService');
 
 async function status(req, res) {
@@ -49,6 +50,15 @@ async function sync(req, res) {
   try { return res.json(await printGuard.syncEvents(req.user.tenantId)); } catch (error) { return res.status(502).json({ error: error.message }); }
 }
 
+async function remotePage(req, res) {
+  try {
+    const resource = req.params.resource;
+    return res.json(await printGuard.listRemote(req.user.tenantId, resource, req.query.cursor));
+  } catch (error) {
+    return res.status(502).json({ error: error.message || 'Nao foi possivel consultar o PrintGuard.' });
+  }
+}
+
 async function webhook(req, res) {
   const headerConnection = req.header('x-printguard-connection');
   if (!headerConnection) return res.status(401).json({ error: 'Cabecalho de conexao PrintGuard ausente.' });
@@ -83,9 +93,12 @@ async function action(req, res) {
   try {
     const action = req.params.action;
     if (!['ignore', 'monitor', 'approve'].includes(action)) return res.status(400).json({ error: 'Acao invalida.' });
+    if (action === 'approve' && !hasPermission(req.user, 'inbox.create_os')) {
+      return res.status(403).json({ error: 'Voce nao possui permissao para abrir O.S.' });
+    }
     const result = await printGuard.eventAction(req.user.tenantId, req.params.eventId, action, req.body || {});
     return res.json({ event: result, serviceOrder: action === 'approve' ? result : undefined });
   } catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel atualizar o evento.' }); }
 }
 
-module.exports = { status, pair, test, disconnect, getMetrics, sync, webhook, queue, action };
+module.exports = { status, pair, test, disconnect, getMetrics, sync, remotePage, webhook, queue, action };

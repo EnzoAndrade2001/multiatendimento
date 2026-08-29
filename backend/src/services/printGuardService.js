@@ -5,14 +5,23 @@ const { encryptSecret, decryptSecret } = require('./printGuardCrypto');
 
 const SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
+// Versioned API prefix shared by pairing and all authenticated resources.
+const PRINTGUARD_API_PREFIX = '/integrations/v1/multiatendimento';
 let io = null;
 
 function setIo(value) { io = value; }
 
 function normalizeBaseUrl(value) {
-  const url = String(value || process.env.PRINTGUARD_URL || '').trim().replace(/\/+$/, '');
+  let url = String(value || process.env.PRINTGUARD_URL || '').trim().replace(/\/+$/, '');
   if (!url || !/^https?:\/\//i.test(url)) throw new Error('URL do PrintGuard invalida.');
+  if (url.toLowerCase().endsWith(PRINTGUARD_API_PREFIX)) {
+    url = url.slice(0, -PRINTGUARD_API_PREFIX.length).replace(/\/+$/, '');
+  }
   return url;
+}
+
+function apiBaseUrl(baseUrl) {
+  return `${normalizeBaseUrl(baseUrl)}${PRINTGUARD_API_PREFIX}`;
 }
 
 function callbackUrl(req) {
@@ -53,7 +62,7 @@ function secureConnection(connection, includeSecrets = false) {
 
 async function getConnection(tenantId) {
   return prisma.printGuardConnection.findFirst({
-    where: { tenantId },
+    where: { tenantId, status: { not: 'INACTIVE' } },
     orderBy: { updatedAt: 'desc' },
   });
 }
@@ -62,7 +71,7 @@ function clientFor(connection) {
   const credentials = secureConnection(connection, true);
   if (!credentials.accessToken) throw new Error('Conexao PrintGuard sem token ativo.');
   return axios.create({
-    baseURL: normalizeBaseUrl(connection.baseUrl),
+    baseURL: apiBaseUrl(connection.baseUrl),
     timeout: Number(process.env.PRINTGUARD_TIMEOUT_MS) || 15000,
     headers: { Authorization: `Bearer ${credentials.accessToken}`, Accept: 'application/json' },
   });
@@ -75,7 +84,7 @@ async function exchangePairing(tenantId, req, input = {}) {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, slug: true } });
   if (!tenant) throw new Error('Tenant nao encontrado.');
 
-  const response = await axios.post(`${baseUrl}/integrations/v1/multiatendimento/pairing/exchange`, {
+  const response = await axios.post(`${apiBaseUrl(baseUrl)}/pairing/exchange`, {
     code,
     callbackUrl: callbackUrl(req),
     tenantExternalId: tenant.slug || tenant.id,
@@ -114,6 +123,12 @@ async function exchangePairing(tenantId, req, input = {}) {
       lastTestAt: new Date(),
     },
   });
+  // Um tenant opera com uma única conexão PrintGuard ativa. Pareamentos
+  // anteriores permanecem no histórico, mas não podem competir na ingestão.
+  await prisma.printGuardConnection.updateMany({
+    where: { tenantId, id: { not: saved.id }, status: { not: 'INACTIVE' } },
+    data: { status: 'INACTIVE', accessTokenCipher: null, webhookSecretCipher: null },
+  });
   return secureConnection(saved);
 }
 
@@ -149,9 +164,10 @@ function eventFields(input) {
   return {
     eventId: String(pick(source.eventId, source.id, source.externalEventId) || '').trim(),
     eventType: String(pick(source.eventType, source.type, source.kind, 'telemetry')).trim().slice(0, 120),
-    customerCode: normalizeCode(pick(source.customerCode, source.customerExternalId, source.customer?.code, source.customer?.externalId)),
+    customerCode: normalizeCode(pick(source.customerCode, source.customerExternalId, source.customer?.customerCode, source.customer?.code, source.customer?.externalId)),
     serialNumber: normalizeSerial(pick(source.serialNumber, source.serial, source.equipment?.serialNumber, source.device?.serialNumber)),
-    occurredAt: pick(source.occurredAt, source.timestamp, source.createdAt),
+    severity: String(pick(source.severity, source.priority, 'INFO')).trim().toUpperCase().slice(0, 30),
+    occurredAt: pick(source.occurredAt, source.detectedAt, source.timestamp, source.createdAt),
     payload: source,
   };
 }
@@ -232,6 +248,7 @@ async function ingestWebhook({ connection, body, rawBody, timestamp, signature }
       connectionId: connection.id,
       externalEventId: fields.eventId,
       eventType: fields.eventType,
+      severity: fields.severity,
       occurredAt,
       customerCode: fields.customerCode,
       serialNumber: fields.serialNumber,
@@ -250,7 +267,14 @@ async function listTelemetry(tenantId, query = {}) {
   const limit = Math.max(1, Math.min(Number(query.limit) || 40, 200));
   const where = { tenantId };
   if (query.status) where.state = String(query.status).toUpperCase();
+  if (query.severity) where.severity = String(query.severity).toUpperCase();
   if (query.type) where.eventType = { contains: String(query.type), mode: 'insensitive' };
+  if (query.from || query.to) {
+    where.occurredAt = {};
+    if (query.from && !Number.isNaN(new Date(query.from).getTime())) where.occurredAt.gte = new Date(query.from);
+    if (query.to && !Number.isNaN(new Date(query.to).getTime())) where.occurredAt.lte = new Date(query.to);
+    if (Object.keys(where.occurredAt).length === 0) delete where.occurredAt;
+  }
   if (query.q) {
     const q = String(query.q);
     where.OR = [
@@ -260,11 +284,18 @@ async function listTelemetry(tenantId, query = {}) {
       { externalEventId: { contains: q, mode: 'insensitive' } },
     ];
   }
-  const [events, total] = await Promise.all([
+  const [events, total, critical, open, monitoring] = await Promise.all([
     prisma.printGuardTelemetryEvent.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit, skip: Math.max(0, Number(query.offset) || 0) }),
     prisma.printGuardTelemetryEvent.count({ where }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...where, severity: 'CRITICAL' } }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...where, state: 'RECEIVED' } }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...where, state: 'MONITORING' } }),
   ]);
-  return { events: events.map((event) => ({ ...event, severity: event.payload?.severity || 'INFO', customer: event.customerCode ? { externalId: event.customerCode } : null, equipment: event.serialNumber ? { serialNumber: event.serialNumber } : null, measurement: event.payload?.measurement || event.payload?.reading || null, message: event.errorMessage || event.payload?.message || null })), total };
+  return {
+    events: events.map((event) => ({ ...event, status: event.state, customer: event.customerCode ? { externalId: event.customerCode } : null, equipment: event.serialNumber ? { serialNumber: event.serialNumber } : null, measurement: event.payload?.measurement || event.payload?.reading || null, message: event.errorMessage || event.payload?.message || null })),
+    total,
+    summary: { total, critical, open, monitoring },
+  };
 }
 
 async function eventAction(tenantId, eventId, action, body = {}) {
@@ -295,9 +326,13 @@ async function approveEvent(tenantId, event, body = {}) {
     await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', serviceOrderId: existing.id, ticketId: existing.ticketId } });
     return existing;
   }
-  const osType = body.cdOstp
-    ? await prisma.crmOsType.findFirst({ where: { tenantId, code: String(body.cdOstp) } })
-    : await prisma.crmOsType.findFirst({ where: { tenantId }, orderBy: { code: 'asc' } });
+  const requestedOsType = String(body.cdOstp || '').trim();
+  if (!requestedOsType) {
+    const error = new Error('Informe explicitamente o tipo de O.S. para aprovar este evento.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const osType = await prisma.crmOsType.findFirst({ where: { tenantId, code: requestedOsType } });
   if (!osType) { const error = new Error('Nenhum tipo de O.S. sincronizado no iLux.'); error.statusCode = 409; throw error; }
   const defect = String(body.defect || event.payload?.description || event.payload?.message || `Alerta PrintGuard ${event.eventType}`).trim().slice(0, 4000);
   const result = await prisma.$transaction(async (tx) => {
@@ -306,7 +341,15 @@ async function approveEvent(tenantId, event, body = {}) {
     await tx.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', ticketId: ticket.id, serviceOrderId: serviceOrder.id, errorCode: null, errorMessage: null } });
     return serviceOrder;
   });
-  await notifyRemote(event.connection, event.externalEventId, 'outcome', { outcome: 'APPROVED', serviceOrderId: result.id });
+  await notifyRemote(event.connection, event.externalEventId, 'outcome', {
+    status: 'resolved',
+    resolution: 'Solicitacao de O.S. criada no Multiatendimento e enviada ao fluxo do iLux.',
+    metadata: { serviceOrderId: result.id },
+  });
+  await notifyRemote(event.connection, event.externalEventId, 'ack', {
+    status: 'acknowledged',
+    note: 'APPROVED',
+  });
   return result;
 }
 
@@ -314,7 +357,10 @@ async function notifyRemote(connection, externalEventId, action, body = {}) {
   if (!connection?.externalId || !externalEventId) return { ok: false, skipped: true };
   const path = action === 'outcome' ? 'outcome' : 'ack';
   try {
-    await clientFor(connection).post(`/events/${encodeURIComponent(externalEventId)}/${path}`, { action, ...body });
+    const payload = path === 'ack'
+      ? { status: 'acknowledged', note: String(body.note || action).slice(0, 1000) }
+      : body;
+    await clientFor(connection).post(`/events/${encodeURIComponent(externalEventId)}/${path}`, payload);
     return { ok: true };
   } catch (error) {
     console.warn(`[printguard] falha ao registrar ${action}: ${error.message}`);
@@ -327,6 +373,13 @@ async function fetchPage(connection, resource, cursor) {
   const response = await clientFor(connection).get(`/${resource}`, { params });
   const data = extractPayload(response.data);
   return { items: Array.isArray(data.items) ? data.items : [], nextCursor: data.nextCursor || null, hasMore: Boolean(data.hasMore) };
+}
+
+async function listRemote(tenantId, resource, cursor) {
+  if (!['customers', 'equipment', 'events'].includes(resource)) throw new Error('Recurso PrintGuard invalido.');
+  const connection = await getConnection(tenantId);
+  if (!connection) throw new Error('Nenhuma conexao PrintGuard configurada.');
+  return fetchPage(connection, resource, cursor);
 }
 
 async function syncEvents(tenantId) {
@@ -348,11 +401,11 @@ async function syncEvents(tenantId) {
       const occurredAt = fields.occurredAt && !Number.isNaN(new Date(fields.occurredAt).getTime())
         ? new Date(fields.occurredAt)
         : null;
-      await prisma.printGuardTelemetryEvent.create({ data: { tenantId, connectionId: connection.id, externalEventId: fields.eventId, eventType: fields.eventType, occurredAt, customerCode: fields.customerCode, serialNumber: fields.serialNumber, payload: item, state: mapping.state === 'MATCHED' ? 'RECEIVED' : 'ERROR', bindingId: mapping.binding.id, errorCode: mapping.state === 'MATCHED' ? null : mapping.state, errorMessage: mapping.state === 'MATCHED' ? null : 'Vinculo nao identificado.' } });
+      await prisma.printGuardTelemetryEvent.create({ data: { tenantId, connectionId: connection.id, externalEventId: fields.eventId, eventType: fields.eventType, severity: fields.severity, occurredAt, customerCode: fields.customerCode, serialNumber: fields.serialNumber, payload: item, state: mapping.state === 'MATCHED' ? 'RECEIVED' : 'ERROR', bindingId: mapping.binding.id, errorCode: mapping.state === 'MATCHED' ? null : mapping.state, errorMessage: mapping.state === 'MATCHED' ? null : 'Vinculo nao identificado.' } });
       processed += 1;
     }
-    cursor = page.nextCursor;
-    if (!page.hasMore || !cursor || pages >= 50) break;
+    if (page.nextCursor) cursor = page.nextCursor;
+    if (!page.hasMore || !page.nextCursor || pages >= 50) break;
   } while (true);
   await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastCursor: cursor, lastTestAt: new Date(), status: 'CONNECTED', lastError: null } });
   return { processed, pages, nextCursor: cursor };
@@ -387,6 +440,7 @@ module.exports = {
   listTelemetry,
   eventAction,
   syncEvents,
+  listRemote,
   metrics,
   disconnect,
 };

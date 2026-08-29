@@ -1192,6 +1192,7 @@ model PrintGuardTelemetryEvent {
   connectionId    String
   externalEventId String
   eventType       String
+  severity        String   @default("INFO")
   occurredAt      DateTime?
   customerCode    String?
   serialNumber    String?
@@ -1210,5 +1211,6 @@ model PrintGuardTelemetryEvent {
 
   @@unique([connectionId, externalEventId])
   @@index([tenantId, state, createdAt])
+  @@index([tenantId, severity, occurredAt])
   @@index([tenantId, customerCode, serialNumber])
 }
