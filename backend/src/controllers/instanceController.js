@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const evolution = require('../services/evolutionService');
+const metaCloudApi = require('../services/metaCloudApiService');
 
 async function getSettings(tenantId) {
   const s = await prisma.tenantSettings.findUnique({ where: { tenantId } });
@@ -129,12 +130,35 @@ async function create(req, res) {
       }
     });
 
+    const warnings = [];
+
+    // API oficial: inscreve o app na WABA da Meta e aponta o webhook da Meta
+    // direto para o /webhook/meta da Evolution. Sem isso a Meta nao entrega as
+    // mensagens recebidas. A falha aqui nao invalida a conexao ja criada.
+    if (provider === 'evolution_official' && officialBusinessId && officialAccessToken) {
+      try {
+        const callbackUrl = `${String(evolutionUrl).replace(/\/+$/, '')}/webhook/meta`;
+        const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || 'evolution';
+        await metaCloudApi.subscribeAppToWaba({
+          wabaId: officialBusinessId,
+          accessToken: officialAccessToken,
+          callbackUrl,
+          verifyToken,
+        });
+        console.log(`[instanceController] App inscrito na WABA ${officialBusinessId} (callback ${callbackUrl}).`);
+      } catch (err) {
+        const detail = metaCloudApi.graphErrorDetail(err);
+        console.warn(`[instanceController] Falha ao inscrever app na WABA ${officialBusinessId}: ${detail}`);
+        warnings.push(`Conexão criada, mas não consegui inscrever o app na conta do WhatsApp automaticamente (${detail}). Confirme que o token tem as permissões whatsapp_business_management e whatsapp_business_messaging; sem essa inscrição a Meta não entrega as mensagens recebidas.`);
+      }
+    }
+
     // Setup Webhook automático
     const backendUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3002}`;
     const webhookUrl = `${backendUrl}/api/webhook`;
     await evolution.setWebhook(evolutionUrl, evolutionKey, instanceName, webhookUrl);
 
-    res.json(inst);
+    res.json(warnings.length ? { ...inst, warnings } : inst);
   } catch (err) {
     console.error(`[instanceController] Erro geral ao criar instância:`, err);
     res.status(400).json({ error: err.message });

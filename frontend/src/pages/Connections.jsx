@@ -57,7 +57,11 @@ export default function Connections() {
         loadQr(data.id);
       } else {
         setModal(null);
-        toast.success('Conexão oficial adicionada. A Evolution fará a comunicação com a Meta.');
+        if (Array.isArray(data?.warnings) && data.warnings.length) {
+          data.warnings.forEach((w) => toast.warning(w, 10000));
+        } else {
+          toast.success('Conexão oficial adicionada. A Evolution fará a comunicação com a Meta.');
+        }
         load();
       }
     } catch (err) {
