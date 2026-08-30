@@ -37,8 +37,17 @@ import {
 } from 'lucide-react';
 import { toast } from '../utils/toast';
 
+const TABS = [
+  { key: 'parque', label: 'Saúde do Parque' },
+  { key: 'crise', label: 'Centro de Crise' },
+  { key: 'funil', label: 'Vazamento do Funil' },
+  { key: 'benchmark', label: 'Benchmark Interno' },
+  { key: 'detetive', label: 'Detetive IA' },
+  { key: 'auditoria', label: 'Auditoria por IA' },
+];
+
 export default function RevGuard() {
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState('parque');
   
   // States para cada aba
   const [crisisData, setCrisisData] = useState(null);
@@ -71,14 +80,14 @@ export default function RevGuard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 0) loadCrisis();
-    if (activeTab === 2) loadBenchmark();
-    if (activeTab === 3) loadDetective();
-    if (activeTab === 4) loadAuditList();
+    if (activeTab === 'parque' || activeTab === 'crise') loadCrisis();
+    if (activeTab === 'benchmark') loadBenchmark();
+    if (activeTab === 'detetive') loadDetective();
+    if (activeTab === 'auditoria') loadAuditList();
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === 2) loadBenchmark();
+    if (activeTab === 'benchmark') loadBenchmark();
   }, [benchmarkPeriod]);
 
   async function loadCrisis() {
@@ -285,8 +294,6 @@ export default function RevGuard() {
     });
   };
 
-  const TABS = ['Centro de Crise', 'Vazamento do Funil', 'Benchmark Interno', 'Detetive IA', 'Auditoria por IA'];
-
   return (
     <div style={s.container}>
       <header style={s.header}>
@@ -305,13 +312,13 @@ export default function RevGuard() {
 
       {/* Navegação de Abas */}
       <div style={s.tabs}>
-        {TABS.map((tabName, index) => (
-          <button 
-            key={tabName} 
-            style={{ ...s.tab, ...(activeTab === index ? s.tabActive : {}) }} 
-            onClick={() => setActiveTab(index)}
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            style={{ ...s.tab, ...(activeTab === t.key ? s.tabActive : {}) }}
+            onClick={() => setActiveTab(t.key)}
           >
-            {tabName}
+            {t.label}
           </button>
         ))}
       </div>
@@ -331,7 +338,102 @@ export default function RevGuard() {
       )}
 
       {/* ABA 0: CENTRO DE CRISE */}
-      {activeTab === 0 && (
+      {activeTab === 'parque' && (
+        loadingCrisis ? (
+          <div style={s.loadingBox}>
+            <div style={s.spinner} /> Carregando saúde do parque...
+          </div>
+        ) : !crisisData?.telemetry ? (
+          <div style={s.errorBox}>Telemetria do PrintGuard indisponível no momento.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <section style={s.telemetrySection} aria-label="Saúde do parque">
+              <div style={s.sectionHeader}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                  <Activity size={21} color="#10b981" />
+                  <div style={{ minWidth: 0 }}>
+                    <h2 style={s.sectionTitle}>Saúde do parque</h2>
+                    <p style={s.telemetrySubtitle}>Resumo das ocorrências PrintGuard nas últimas {crisisData.telemetry.windowHours || 24} horas.</p>
+                  </div>
+                </div>
+                <div style={s.telemetryHeaderActions}>
+                  <span style={{ ...s.telemetryConnectionBadge, color: crisisData.telemetry.available ? '#10b981' : '#f59e0b' }}>
+                    <span style={{ ...s.telemetryStatusDot, background: crisisData.telemetry.available ? '#10b981' : '#f59e0b' }} />
+                    {crisisData.telemetry.available ? 'PrintGuard conectado' : 'Telemetria indisponível'}
+                  </span>
+                  <a href="/telemetry" style={s.telemetryLink}>Abrir telemetria <ArrowUpRight size={14} /></a>
+                </div>
+              </div>
+
+              {!crisisData.telemetry.available && crisisData.telemetry.message && (
+                <div style={s.telemetryNotice}>
+                  {crisisData.telemetry.message} Os últimos registros continuam visíveis para consulta.
+                </div>
+              )}
+
+              <div style={s.telemetryMetrics}>
+                {[
+                  ['Críticos', crisisData.telemetry.critical, '#ef4444'],
+                  ['Aguardando decisão', crisisData.telemetry.awaitingDecision, '#f59e0b'],
+                  ['Em monitoramento', crisisData.telemetry.monitoring, '#10b981'],
+                  ['Vínculos pendentes', crisisData.telemetry.unlinked, '#f97316'],
+                  ['Toner/insumo baixo', crisisData.telemetry.lowToner, '#a855f7'],
+                  ['Equipamentos afetados', crisisData.telemetry.affectedEquipment, '#3b82f6'],
+                ].map(([label, value, color]) => (
+                  <div key={label} style={s.telemetryMetricCard}>
+                    <span style={{ ...s.telemetryMetricValue, color }}>{value ?? 0}</span>
+                    <span style={s.telemetryMetricLabel}>{label}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={s.telemetryIncidentPanel}>
+                <div style={s.telemetryIncidentHeader}>
+                  <div>
+                    <strong style={s.telemetryIncidentTitle}>Fila de decisão</strong>
+                    <span style={s.telemetryIncidentHint}>Prioridade, impacto e próxima ação para a equipe.</span>
+                  </div>
+                  <span style={s.telemetryLastSignal}>
+                    Último sinal: {crisisData.telemetry.lastSignalAt ? new Date(crisisData.telemetry.lastSignalAt).toLocaleString('pt-BR') : 'nenhum'}
+                  </span>
+                </div>
+                {crisisData.telemetry.incidents?.length ? (
+                  <div style={s.telemetryIncidentList}>
+                    {crisisData.telemetry.incidents.map((incident) => {
+                      const severity = String(incident.severity || '').toUpperCase();
+                      const severityColor = severity === 'CRITICAL' || severity === 'HIGH' ? '#ef4444' : severity === 'WARNING' || severity === 'MEDIUM' ? '#f59e0b' : '#64748b';
+                      const equipmentLabel = [incident.equipmentModel, incident.serialNumber].filter(Boolean).join(' · ') || 'Equipamento não identificado';
+                      return (
+                        <div key={incident.id} style={s.telemetryIncidentRow}>
+                          <div style={s.telemetryIncidentMain}>
+                            <div style={s.telemetryIncidentTopline}>
+                              <span style={{ ...s.telemetrySeverityBadge, color: severityColor, borderColor: `${severityColor}55`, background: `${severityColor}12` }}>{severity || 'INFO'}</span>
+                              <strong style={s.telemetryIncidentEvent}>{incident.eventType}</strong>
+                              <span style={s.telemetryIncidentAge}>{formatTelemetryAge(incident.ageMinutes)}</span>
+                            </div>
+                            <strong style={s.telemetryIncidentCustomer}>{incident.customerName}</strong>
+                            <span style={s.telemetryIncidentEquipment}>{equipmentLabel}</span>
+                            {(incident.measurement || incident.message) && <span style={s.telemetryIncidentDetail}>{incident.measurement || incident.message}</span>}
+                          </div>
+                          <div style={s.telemetryIncidentSide}>
+                            <span style={s.telemetryStateBadge}>{incident.stateLabel}</span>
+                            <a href="/telemetry" style={s.telemetryActionLink}>{incident.action} <ArrowUpRight size={13} /></a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={s.telemetryEmpty}>Nenhuma ocorrência pendente no período. O parque está sem decisões aguardando a equipe.</div>
+                )}
+                {crisisData.telemetry.truncated && <p style={s.telemetryTruncated}>Há mais ocorrências no período. Abra a telemetria para consultar a fila completa.</p>}
+              </div>
+            </section>
+          </div>
+        )
+      )}
+
+      {activeTab === 'crise' && (
         loadingCrisis ? (
           <div style={s.loadingBox}>
             <div style={s.spinner} /> Carregando centro de crise...
@@ -419,93 +521,6 @@ export default function RevGuard() {
                 </div>
               </div>
             </div>
-
-            {/* Resumo executivo da telemetria para o gestor. A fila técnica
-                completa continua disponível na tela Telemetria. */}
-            {crisisData.telemetry && (
-              <section style={s.telemetrySection} aria-label="Saúde do parque">
-                <div style={s.sectionHeader}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                    <Activity size={21} color="#10b981" />
-                    <div style={{ minWidth: 0 }}>
-                      <h2 style={s.sectionTitle}>Saúde do parque</h2>
-                      <p style={s.telemetrySubtitle}>Resumo das ocorrências PrintGuard nas últimas {crisisData.telemetry.windowHours || 24} horas.</p>
-                    </div>
-                  </div>
-                  <div style={s.telemetryHeaderActions}>
-                    <span style={{ ...s.telemetryConnectionBadge, color: crisisData.telemetry.available ? '#10b981' : '#f59e0b' }}>
-                      <span style={{ ...s.telemetryStatusDot, background: crisisData.telemetry.available ? '#10b981' : '#f59e0b' }} />
-                      {crisisData.telemetry.available ? 'PrintGuard conectado' : 'Telemetria indisponível'}
-                    </span>
-                    <a href="/telemetry" style={s.telemetryLink}>Abrir telemetria <ArrowUpRight size={14} /></a>
-                  </div>
-                </div>
-
-                {!crisisData.telemetry.available && crisisData.telemetry.message && (
-                  <div style={s.telemetryNotice}>
-                    {crisisData.telemetry.message} Os últimos registros continuam visíveis para consulta.
-                  </div>
-                )}
-
-                <div style={s.telemetryMetrics}>
-                  {[
-                    ['Críticos', crisisData.telemetry.critical, '#ef4444'],
-                    ['Aguardando decisão', crisisData.telemetry.awaitingDecision, '#f59e0b'],
-                    ['Em monitoramento', crisisData.telemetry.monitoring, '#10b981'],
-                    ['Vínculos pendentes', crisisData.telemetry.unlinked, '#f97316'],
-                    ['Toner/insumo baixo', crisisData.telemetry.lowToner, '#a855f7'],
-                    ['Equipamentos afetados', crisisData.telemetry.affectedEquipment, '#3b82f6'],
-                  ].map(([label, value, color]) => (
-                    <div key={label} style={s.telemetryMetricCard}>
-                      <span style={{ ...s.telemetryMetricValue, color }}>{value ?? 0}</span>
-                      <span style={s.telemetryMetricLabel}>{label}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={s.telemetryIncidentPanel}>
-                  <div style={s.telemetryIncidentHeader}>
-                    <div>
-                      <strong style={s.telemetryIncidentTitle}>Fila de decisão</strong>
-                      <span style={s.telemetryIncidentHint}>Prioridade, impacto e próxima ação para a equipe.</span>
-                    </div>
-                    <span style={s.telemetryLastSignal}>
-                      Último sinal: {crisisData.telemetry.lastSignalAt ? new Date(crisisData.telemetry.lastSignalAt).toLocaleString('pt-BR') : 'nenhum'}
-                    </span>
-                  </div>
-                  {crisisData.telemetry.incidents?.length ? (
-                    <div style={s.telemetryIncidentList}>
-                      {crisisData.telemetry.incidents.map((incident) => {
-                        const severity = String(incident.severity || '').toUpperCase();
-                        const severityColor = severity === 'CRITICAL' || severity === 'HIGH' ? '#ef4444' : severity === 'WARNING' || severity === 'MEDIUM' ? '#f59e0b' : '#64748b';
-                        const equipmentLabel = [incident.equipmentModel, incident.serialNumber].filter(Boolean).join(' · ') || 'Equipamento não identificado';
-                        return (
-                          <div key={incident.id} style={s.telemetryIncidentRow}>
-                            <div style={s.telemetryIncidentMain}>
-                              <div style={s.telemetryIncidentTopline}>
-                                <span style={{ ...s.telemetrySeverityBadge, color: severityColor, borderColor: `${severityColor}55`, background: `${severityColor}12` }}>{severity || 'INFO'}</span>
-                                <strong style={s.telemetryIncidentEvent}>{incident.eventType}</strong>
-                                <span style={s.telemetryIncidentAge}>{formatTelemetryAge(incident.ageMinutes)}</span>
-                              </div>
-                              <strong style={s.telemetryIncidentCustomer}>{incident.customerName}</strong>
-                              <span style={s.telemetryIncidentEquipment}>{equipmentLabel}</span>
-                              {(incident.measurement || incident.message) && <span style={s.telemetryIncidentDetail}>{incident.measurement || incident.message}</span>}
-                            </div>
-                            <div style={s.telemetryIncidentSide}>
-                              <span style={s.telemetryStateBadge}>{incident.stateLabel}</span>
-                              <a href="/telemetry" style={s.telemetryActionLink}>{incident.action} <ArrowUpRight size={13} /></a>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={s.telemetryEmpty}>Nenhuma ocorrência pendente no período. O parque está sem decisões aguardando a equipe.</div>
-                  )}
-                  {crisisData.telemetry.truncated && <p style={s.telemetryTruncated}>Há mais ocorrências no período. Abra a telemetria para consultar a fila completa.</p>}
-                </div>
-              </section>
-            )}
 
             {/* Main Grid: Gargalos e Mini-Funil */}
             <div style={s.mainGrid}>
@@ -640,7 +655,7 @@ export default function RevGuard() {
       )}
 
       {/* ABA 1: VAZAMENTO DO FUNIL */}
-      {activeTab === 1 && (
+      {activeTab === 'funil' && (
         loadingCrisis ? (
           <div style={s.loadingBox}><div style={s.spinner} /> Carregando funil...</div>
         ) : !crisisData ? (
@@ -724,7 +739,7 @@ export default function RevGuard() {
       )}
 
       {/* ABA 2: BENCHMARK INTERNO */}
-      {activeTab === 2 && (
+      {activeTab === 'benchmark' && (
         loadingBenchmark ? (
           <div style={s.loadingBox}><div style={s.spinner} /> Carregando benchmark...</div>
         ) : !benchmarkData ? (
@@ -865,7 +880,7 @@ export default function RevGuard() {
       )}
 
       {/* ABA 3: DETETIVE IA */}
-      {activeTab === 3 && (
+      {activeTab === 'detetive' && (
         loadingDetective ? (
           <div style={s.loadingBox}><div style={s.spinner} /> Detetive analisando histórico...</div>
         ) : !detectiveData ? (
@@ -944,7 +959,7 @@ export default function RevGuard() {
       )}
 
       {/* ABA 4: AUDITORIA IA */}
-      {activeTab === 4 && (
+      {activeTab === 'auditoria' && (
         loadingAudit ? (
           <div style={s.loadingBox}><div style={s.spinner} /> Carregando atendimentos para auditoria...</div>
         ) : (
