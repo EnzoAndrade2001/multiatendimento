@@ -247,7 +247,7 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, busy }) {
         <b>{item.equipment?.model || 'Equipamento não identificado'}</b>
         <span>Série: {item.serialNumber || 'não informada'}{item.equipment?.sector ? ` · ${item.equipment.sector}` : ''}</span>
         <span>{item.customer?.address || item.equipment?.address || 'Endereço não informado'}</span>
-        {item.contract && <span>Contrato #{item.contract.number || item.contract.externalId || '—'}{item.franchise?.limit ? ` · ${fmtInt(item.franchise.limit)} pág.` : ''}</span>}
+        {item.contract && <span>Contrato #{item.contract.number || item.contract.externalId || '—'}{item.franchise?.franchise ? ` · ${fmtInt(item.franchise.franchise)} pág.` : ''}</span>}
       </div>
       <div className="park-inc-evidence">
         <small>EVIDÊNCIA E IMPACTO</small>
