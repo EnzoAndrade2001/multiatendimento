@@ -392,7 +392,6 @@ async function syncEvents(tenantId) {
     const page = await fetchPage(connection, 'events', cursor);
     pages += 1;
     for (const item of page.items) {
-      const rawBody = Buffer.from(JSON.stringify(item));
       const fields = eventFields(item);
       if (!fields.eventId) continue;
       const duplicate = await prisma.printGuardTelemetryEvent.findUnique({ where: { connectionId_externalEventId: { connectionId: connection.id, externalEventId: fields.eventId } } });

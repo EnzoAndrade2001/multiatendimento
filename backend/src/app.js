@@ -41,6 +41,7 @@ const mediaRoutes = require('./routes/media');
 const auditEventRoutes = require('./routes/auditEvents');
 const printGuardRoutes = require('./routes/printGuard');
 const telemetryRoutes = require('./routes/telemetry');
+const { setIo: setIoPrintGuard } = require('./services/printGuardService');
 
 const app = express();
 app.use('/api/report', require('./routes/report'));
@@ -68,6 +69,7 @@ campaignProcessor.setIo(io);
 setIoBilling(io);
 setIoManagerCopy(io);
 setIoBillingDocuments(io);
+setIoPrintGuard(io);
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5174', credentials: true }));
 // Preserva os bytes exatos apenas para webhooks PrintGuard assinados. A

@@ -1142,7 +1142,7 @@ model PrintGuardConnection {
   tenantId          String
   name              String
   baseUrl            String
-  externalId         String?
+  externalId         String?  @unique
   organization       Json?
   accessTokenCipher  String?  @db.Text
   webhookSecretCipher String? @db.Text
