@@ -158,6 +158,93 @@ function normalizeSerial(value) {
   return text ? text.toUpperCase() : null;
 }
 
+function isRecord(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function normalizePageCounter(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > Number.MAX_SAFE_INTEGER) return null;
+  return Math.floor(number);
+}
+
+function normalizeReadAt(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function normalizeUsageCounters(value) {
+  if (!isRecord(value)) return null;
+  const result = {};
+  // Counters are deliberately kept as a small JSON object. Ignore malformed
+  // values instead of allowing an integration payload to poison CRM data.
+  for (const [key, raw] of Object.entries(value).slice(0, 100)) {
+    const name = String(key).trim().slice(0, 80);
+    if (!name) continue;
+    const number = normalizePageCounter(raw);
+    if (number !== null) result[name] = number;
+  }
+  return Object.keys(result).length ? result : null;
+}
+
+function normalizeMeterSnapshot(input) {
+  if (!isRecord(input)) return null;
+  const nested = [
+    input.meter,
+    input.measurement?.meter,
+    input.reading?.meter,
+    input.payload?.meter,
+    input.payload?.measurement?.meter,
+  ].find(isRecord) || {};
+  const pick = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+  const pageCounter = normalizePageCounter(pick(
+    nested.pageCounter,
+    nested.page_counter,
+    input.pageCounter,
+    input.page_counter,
+    input.payload?.pageCounter,
+    input.payload?.page_counter,
+  ));
+  const usageCounters = normalizeUsageCounters(pick(
+    nested.usageCounters,
+    nested.usage_counters,
+    input.usageCounters,
+    input.usage_counters,
+    input.payload?.usageCounters,
+    input.payload?.usage_counters,
+  ));
+  const readAt = normalizeReadAt(pick(
+    nested.readAt,
+    nested.read_at,
+    input.lastMeterReadAt,
+    input.last_meter_read_at,
+    input.readAt,
+    input.read_at,
+    input.payload?.lastMeterReadAt,
+    input.payload?.last_meter_read_at,
+    input.payload?.readAt,
+    input.payload?.read_at,
+  ));
+  if (pageCounter === null && !usageCounters && !readAt) return null;
+  return { pageCounter, usageCounters: usageCounters || {}, readAt };
+}
+
+function withMeterPayload(payload, meter) {
+  const result = isRecord(payload) ? { ...payload } : {};
+  if (!meter) return result;
+  result.meter = meter;
+  result.pageCounter = meter.pageCounter;
+  result.usageCounters = meter.usageCounters;
+  result.lastMeterReadAt = meter.readAt;
+  // Keep aliases for integrations that still consume the original collector
+  // naming while exposing one canonical snapshot to new consumers.
+  result.page_counter = meter.pageCounter;
+  result.usage_counters = meter.usageCounters;
+  return result;
+}
+
 function eventFields(input) {
   const source = input && typeof input === 'object' ? (input.event && typeof input.event === 'object' ? input.event : input) : {};
   const pick = (...values) => values.find((v) => v !== undefined && v !== null && String(v).trim() !== '');
@@ -169,7 +256,55 @@ function eventFields(input) {
     severity: String(pick(source.severity, source.priority, 'INFO')).trim().toUpperCase().slice(0, 30),
     occurredAt: pick(source.occurredAt, source.detectedAt, source.timestamp, source.createdAt),
     payload: source,
+    meter: normalizeMeterSnapshot(source),
   };
+}
+
+function normalizeRemoteEquipment(item) {
+  const result = isRecord(item) ? { ...item } : {};
+  const meter = normalizeMeterSnapshot(result);
+  return meter ? withMeterPayload(result, meter) : result;
+}
+
+async function updateCrmEquipmentMeter(tenantId, equipmentId, meter) {
+  if (!equipmentId || !meter) return { updated: false, skipped: true };
+  const equipment = await prisma.crmEquipment.findFirst({
+    where: { id: equipmentId, tenantId },
+    select: { id: true, raw: true, pageCounter: true, usageCounters: true, lastMeterReadAt: true },
+  });
+  if (!equipment) return { updated: false, skipped: true, reason: 'equipment_not_found' };
+
+  const incomingReadAt = meter.readAt ? new Date(meter.readAt) : null;
+  if (incomingReadAt && Number.isNaN(incomingReadAt.getTime())) return { updated: false, skipped: true, reason: 'invalid_read_at' };
+  const currentReadAt = equipment.lastMeterReadAt ? new Date(equipment.lastMeterReadAt) : null;
+  // A delayed webhook must never make the CRM show an older counter as the
+  // current one. Equal timestamps are harmless and can refresh missing data.
+  if (incomingReadAt && currentReadAt && incomingReadAt < currentReadAt) {
+    return { updated: false, skipped: true, stale: true };
+  }
+  // Legacy collectors may omit the reading timestamp. In that case a lower
+  // total is still stale; do not make the current CRM snapshot go backwards.
+  if (!incomingReadAt && !currentReadAt
+    && meter.pageCounter !== null && meter.pageCounter !== undefined
+    && equipment.pageCounter !== null && equipment.pageCounter !== undefined
+    && meter.pageCounter < equipment.pageCounter) {
+    return { updated: false, skipped: true, stale: true };
+  }
+
+  const data = { meterSource: 'printguard' };
+  if (meter.pageCounter !== null && meter.pageCounter !== undefined) data.pageCounter = meter.pageCounter;
+  if (meter.usageCounters && Object.keys(meter.usageCounters).length) data.usageCounters = meter.usageCounters;
+  if (incomingReadAt) data.lastMeterReadAt = incomingReadAt;
+  const raw = isRecord(equipment.raw) ? equipment.raw : {};
+  data.raw = {
+    ...raw,
+    printGuardMeter: {
+      ...meter,
+      receivedAt: new Date().toISOString(),
+    },
+  };
+  await prisma.crmEquipment.update({ where: { id: equipment.id }, data });
+  return { updated: true, stale: false };
 }
 
 async function resolveMapping(tenantId, fields, connectionId) {
@@ -263,13 +398,16 @@ async function ingestWebhook({ connection, body, rawBody, timestamp, signature }
       occurredAt,
       customerCode: fields.customerCode,
       serialNumber: fields.serialNumber,
-      payload: fields.payload,
+      payload: withMeterPayload(fields.payload, fields.meter),
       state: mapping.state === 'MATCHED' ? 'RECEIVED' : 'ERROR',
       bindingId: mapping.binding.id,
       errorCode: mapping.state === 'MATCHED' ? null : mapping.state,
       errorMessage: mapping.state === 'MATCHED' ? null : 'Vinculo de cliente/equipamento nao identificado de forma inequívoca.',
     },
   });
+  if (mapping.state === 'MATCHED' && mapping.equipment && fields.meter) {
+    await updateCrmEquipmentMeter(connection.tenantId, mapping.equipment.id, fields.meter);
+  }
   if (io) io.to(connection.tenantId).emit('printguard_telemetry', { event: { ...event, mappingState: mapping.state } });
   return { event, duplicate: false, mapping };
 }
@@ -443,7 +581,7 @@ async function managerSnapshot(tenantId, options = {}) {
       ? prisma.crmCustomer.findMany({ where: { tenantId, id: { in: customerIds } }, select: { id: true, name: true, externalId: true } })
       : [],
     equipmentIds.length
-      ? prisma.crmEquipment.findMany({ where: { tenantId, id: { in: equipmentIds } }, select: { id: true, model: true, serialNumber: true, externalId: true, isActive: true } })
+      ? prisma.crmEquipment.findMany({ where: { tenantId, id: { in: equipmentIds } }, select: { id: true, model: true, serialNumber: true, externalId: true, isActive: true, pageCounter: true, usageCounters: true, lastMeterReadAt: true, meterSource: true } })
       : [],
   ]);
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
@@ -459,6 +597,15 @@ async function managerSnapshot(tenantId, options = {}) {
     const eventType = String(event.eventType || 'telemetry');
     const lowerType = eventType.toLowerCase();
     const measurement = rawPayload.measurement ?? rawPayload.reading ?? rawPayload.counter ?? rawPayload.pages;
+    const meter = rawPayload.meter || (measurement && typeof measurement === 'object' ? measurement.meter : null)
+      || (equipment && equipment.pageCounter !== undefined
+        ? {
+          pageCounter: equipment.pageCounter ?? null,
+          usageCounters: equipment.usageCounters && typeof equipment.usageCounters === 'object' && !Array.isArray(equipment.usageCounters) ? equipment.usageCounters : {},
+          readAt: equipment.lastMeterReadAt || null,
+          source: equipment.meterSource || null,
+        }
+        : null);
     const canOpenServiceOrder = mappingState === 'MATCHED' && equipment?.isActive !== false;
     const signalTimestamp = signalAt ? new Date(signalAt).getTime() : NaN;
     return {
@@ -476,6 +623,7 @@ async function managerSnapshot(tenantId, options = {}) {
       equipmentModel: equipment?.model || rawPayload.equipmentModel || null,
       serialNumber: equipment?.serialNumber || event.serialNumber || null,
       measurement: measurementLabel(measurement),
+      meter,
       message: String(rawPayload.message || rawPayload.description || event.errorMessage || '').slice(0, 240) || null,
       mappingState,
       canOpenServiceOrder,
@@ -608,12 +756,56 @@ async function listRemote(tenantId, resource, cursor) {
   if (!['customers', 'equipment', 'events'].includes(resource)) throw new Error('Recurso PrintGuard invalido.');
   const connection = await getConnection(tenantId);
   if (!connection) throw new Error('Nenhuma conexao PrintGuard configurada.');
-  return fetchPage(connection, resource, cursor);
+  const page = await fetchPage(connection, resource, cursor);
+  if (resource !== 'equipment') return page;
+  return { ...page, items: page.items.map(normalizeRemoteEquipment) };
+}
+
+async function syncRemoteEquipmentMeters(tenantId, connection) {
+  let cursor = null;
+  let pages = 0;
+  let processed = 0;
+  let updated = 0;
+  let unmatched = 0;
+  do {
+    const page = await fetchPage(connection, 'equipment', cursor);
+    pages += 1;
+    for (const item of page.items) {
+      const fields = eventFields(item);
+      if (!fields.meter) continue;
+      processed += 1;
+      if (!fields.serialNumber && !fields.customerCode) {
+        unmatched += 1;
+        continue;
+      }
+      const mapping = await resolveMapping(tenantId, fields, connection.id);
+      if (mapping.state !== 'MATCHED' || !mapping.equipment) {
+        unmatched += 1;
+        continue;
+      }
+      const result = await updateCrmEquipmentMeter(tenantId, mapping.equipment.id, fields.meter);
+      if (result.updated) updated += 1;
+    }
+    if (page.nextCursor) cursor = page.nextCursor;
+    if (!page.hasMore || !page.nextCursor || pages >= 50) break;
+  } while (true);
+  return { processed, updated, unmatched, pages };
 }
 
 async function syncEvents(tenantId) {
   const connection = await getConnection(tenantId);
   if (!connection) throw new Error('Nenhuma conexao PrintGuard configurada.');
+  let equipment = { processed: 0, updated: 0, unmatched: 0, pages: 0 };
+  let equipmentError = null;
+  try {
+    // Equipment snapshots use an independent cursor because the PrintGuard
+    // equipment endpoint is a current-state view, while events are append-only.
+    equipment = await syncRemoteEquipmentMeters(tenantId, connection);
+  } catch (error) {
+    // A temporary equipment endpoint failure must not block historical alert
+    // synchronization. The result exposes the diagnostic to administrators.
+    equipmentError = String(error.message || error).slice(0, 500);
+  }
   let cursor = connection.lastCursor || null;
   let processed = 0;
   let reconciled = 0;
@@ -635,6 +827,10 @@ async function syncEvents(tenantId) {
         errorMessage: null,
       },
     });
+    const storedFields = eventFields(stored);
+    if (mapping.equipment && storedFields.meter) {
+      await updateCrmEquipmentMeter(tenantId, mapping.equipment.id, storedFields.meter);
+    }
     reconciled += 1;
   }
   do {
@@ -649,14 +845,17 @@ async function syncEvents(tenantId) {
       const occurredAt = fields.occurredAt && !Number.isNaN(new Date(fields.occurredAt).getTime())
         ? new Date(fields.occurredAt)
         : null;
-      await prisma.printGuardTelemetryEvent.create({ data: { tenantId, connectionId: connection.id, externalEventId: fields.eventId, eventType: fields.eventType, severity: fields.severity, occurredAt, customerCode: fields.customerCode, serialNumber: fields.serialNumber, payload: item, state: mapping.state === 'MATCHED' ? 'RECEIVED' : 'ERROR', bindingId: mapping.binding.id, errorCode: mapping.state === 'MATCHED' ? null : mapping.state, errorMessage: mapping.state === 'MATCHED' ? null : 'Vinculo nao identificado.' } });
+      await prisma.printGuardTelemetryEvent.create({ data: { tenantId, connectionId: connection.id, externalEventId: fields.eventId, eventType: fields.eventType, severity: fields.severity, occurredAt, customerCode: fields.customerCode, serialNumber: fields.serialNumber, payload: withMeterPayload(item, fields.meter), state: mapping.state === 'MATCHED' ? 'RECEIVED' : 'ERROR', bindingId: mapping.binding.id, errorCode: mapping.state === 'MATCHED' ? null : mapping.state, errorMessage: mapping.state === 'MATCHED' ? null : 'Vinculo nao identificado.' } });
+      if (mapping.state === 'MATCHED' && mapping.equipment && fields.meter) {
+        await updateCrmEquipmentMeter(tenantId, mapping.equipment.id, fields.meter);
+      }
       processed += 1;
     }
     if (page.nextCursor) cursor = page.nextCursor;
     if (!page.hasMore || !page.nextCursor || pages >= 50) break;
   } while (true);
   await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastCursor: cursor, lastTestAt: new Date(), lastConnectedAt: new Date(), status: 'CONNECTED', lastError: null } });
-  return { processed, reconciled, pages, nextCursor: cursor };
+  return { processed, reconciled, pages, nextCursor: cursor, equipment, equipmentError };
 }
 
 async function metrics(tenantId) {
@@ -681,6 +880,8 @@ module.exports = {
   setIo,
   getConnection,
   secureConnection,
+  normalizeMeterSnapshot,
+  normalizeRemoteEquipment,
   exchangePairing,
   testConnection,
   verifySignature,

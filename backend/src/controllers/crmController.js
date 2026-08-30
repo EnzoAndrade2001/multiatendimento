@@ -1329,6 +1329,14 @@ async function getCustomer360(req, res) {
     const closedEquipmentOrders = equipmentOrders.filter(isOrderClosedForAnalytics);
     return {
       equipmentExternalId: equipment.externalId,
+      currentMeter: {
+        pageCounter: equipment.pageCounter ?? null,
+        usageCounters: equipment.usageCounters && typeof equipment.usageCounters === 'object' && !Array.isArray(equipment.usageCounters)
+          ? equipment.usageCounters
+          : {},
+        readAt: equipment.lastMeterReadAt || null,
+        source: equipment.meterSource || null,
+      },
       meters: equipmentMeters,
       serviceOrderCount: equipmentOrders.length,
       lastMaintenance: closedEquipmentOrders[0] || null,

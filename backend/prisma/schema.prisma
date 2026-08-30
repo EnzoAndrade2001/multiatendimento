@@ -848,6 +848,13 @@ model CrmEquipment {
   state              String?
   phone              String?
   contractExternalId String?
+  // Current meter snapshot received from PrintGuard. Historical readings
+  // remain available in PrintGuard; these fields make the latest value
+  // available to CRM/telemetry without changing the Firebird sync contract.
+  pageCounter        Int?
+  usageCounters      Json?
+  lastMeterReadAt    DateTime?
+  meterSource        String?
   isActive           Boolean   @default(true)
   raw                Json?
   createdAt          DateTime  @default(now())

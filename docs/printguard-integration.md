@@ -16,10 +16,17 @@ O webhook usa os cabeçalhos `X-PrintGuard-Connection`, `X-PrintGuard-Timestamp`
 
 - `customer.customerCode` corresponde ao `externalId` do cliente sincronizado do iLux.
 - `equipment.serialNumber` corresponde ao número de série do equipamento no CRM.
+- `equipment.meter` expõe a leitura atual do equipamento: `pageCounter`, `usageCounters` e `readAt`. Os aliases `page_counter` e `usage_counters` permanecem disponíveis para clientes legados.
 - Eventos sem correspondência única ficam em erro para revisão; nunca abrem O.S. automaticamente.
 - A aprovação exige a seleção explícita do tipo de O.S. e cria uma solicitação idempotente `printguard:<evento>` no fluxo normal do agente Firebird.
 
 O PrintGuard usa uma fila persistente para entregar webhooks fora do ciclo de coleta. Falhas recebem novas tentativas com espera progressiva; o cursor somente avança após confirmações contíguas, evitando perda de eventos.
+
+## Contadores e sincronização
+
+O endpoint autenticado `/integrations/v1/multiatendimento/equipment` retorna o retrato atual de cada equipamento, incluindo `meter.pageCounter`, `meter.usageCounters` e `meter.readAt`. Quando o PrintGuard gera um alerta, a mesma fotografia é enviada no webhook, tanto em `meter` quanto dentro de `measurement.meter`.
+
+O botão **Sincronizar** do Multiatendimento consulta esse endpoint e grava o último retrato nos equipamentos CRM vinculados por série/cliente. Leituras antigas não substituem uma leitura mais nova. O histórico bruto continua preservado no evento e no PrintGuard; o CRM usa o retrato atual para ficha do cliente, telemetria e futuras projeções de consumo.
 
 ## Implantação segura
 

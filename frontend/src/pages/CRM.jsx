@@ -1279,8 +1279,45 @@ function EquipmentDetail({ equipment, evolution }) {
 
 function EquipmentEvolution({ evolution }) {
   if (!evolution) return null;
+  const currentMeter = evolution.currentMeter && typeof evolution.currentMeter === 'object' && !Array.isArray(evolution.currentMeter)
+    ? evolution.currentMeter
+    : {};
+  const usageCounters = currentMeter.usageCounters && typeof currentMeter.usageCounters === 'object' && !Array.isArray(currentMeter.usageCounters)
+    ? currentMeter.usageCounters
+    : {};
+  const usageEntries = Object.entries(usageCounters).slice(0, 6);
+  const hasCurrentMeter = currentMeter.pageCounter !== null && currentMeter.pageCounter !== undefined
+    || usageEntries.length > 0;
+  const formatCounterLabel = (value) => String(value || '').replace(/[_-]+/g, ' ');
   return (
     <InfoSection title="Evolução e manutenção" icon={<Gauge size={17} />} compact>
+      {hasCurrentMeter ? (
+        <div style={s.currentMeterPanel} aria-label="Contador atual do equipamento">
+          <div style={s.currentMeterHeader}>
+            <div>
+              <span style={s.currentMeterLabel}>Contador atual</span>
+              <strong style={s.currentMeterValue}>
+                {currentMeter.pageCounter !== null && currentMeter.pageCounter !== undefined
+                  ? Number(currentMeter.pageCounter).toLocaleString('pt-BR')
+                  : '—'}
+              </strong>
+            </div>
+            {currentMeter.source ? <span style={s.currentMeterSource}>{currentMeter.source}</span> : null}
+          </div>
+          {usageEntries.length ? (
+            <div style={s.currentMeterCounters}>
+              {usageEntries.map(([key, value]) => (
+                <span key={key} style={s.counterChip}>
+                  <b>{formatCounterLabel(key)}</b> {Number(value).toLocaleString('pt-BR')}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <small style={s.mutedText}>
+            Leitura: {currentMeter.readAt ? new Date(currentMeter.readAt).toLocaleString('pt-BR') : 'sem data'}
+          </small>
+        </div>
+      ) : null}
       <div style={s.meterGrid}>
         {arrayOf(evolution.meters).map((meter) => (
           <div key={meter.externalId || meter.meterCode} style={s.meterCard}>
@@ -2006,6 +2043,13 @@ const s = {
   permissionNotice: { display: 'flex', alignItems: 'center', gap: '0.45rem', padding: '0.65rem', borderRadius: 9, color: 'var(--text-muted)', background: 'var(--bg-base)', border: '1px dashed var(--border-color)', fontSize: '0.76rem' },
   meterGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: '0.55rem' },
   meterCard: { display: 'grid', gap: 2, padding: '0.7rem', border: '1px solid var(--border-color)', borderRadius: 10, background: 'var(--bg-base)', fontVariantNumeric: 'tabular-nums' },
+  currentMeterPanel: { display: 'grid', gap: '0.6rem', marginBottom: '0.7rem', padding: '0.8rem', border: '1px solid var(--accent-border)', borderRadius: 12, background: 'var(--accent-light)' },
+  currentMeterHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.7rem' },
+  currentMeterLabel: { display: 'block', color: 'var(--text-muted)', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase' },
+  currentMeterValue: { display: 'block', marginTop: 2, color: 'var(--text-main)', fontSize: '1.3rem', fontVariantNumeric: 'tabular-nums' },
+  currentMeterSource: { color: 'var(--accent)', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase' },
+  currentMeterCounters: { display: 'flex', flexWrap: 'wrap', gap: '0.4rem' },
+  counterChip: { display: 'inline-flex', gap: '0.3rem', padding: '0.3rem 0.5rem', borderRadius: 999, background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.7rem', fontVariantNumeric: 'tabular-nums' },
   maintenanceSummary: { display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '0.55rem', marginTop: '0.65rem' },
   technicalMentions: { display: 'grid', gap: '0.4rem', marginTop: '0.7rem', padding: '0.7rem', borderRadius: 10, color: 'var(--text-muted)', background: 'var(--warning-light)', border: '1px solid var(--warning-border)' },
   equipmentAside: { display: 'grid', gap: '0.7rem', minWidth: 0 },

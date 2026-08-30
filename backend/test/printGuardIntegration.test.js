@@ -46,3 +46,24 @@ test('connection serialization never exposes encrypted credentials', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(serialized, 'webhookSecret'), false);
   assert.equal(JSON.stringify(serialized).includes('v1.secret'), false);
 });
+
+test('PrintGuard meter snapshots accept canonical and legacy field names', () => {
+  const printGuard = require('../src/services/printGuardService');
+  const snapshot = printGuard.normalizeMeterSnapshot({
+    page_counter: '12345.9',
+    usage_counters: { general: '12345', color_a4: 2345, invalid: 'n/a' },
+    last_meter_read_at: '2026-08-30T12:00:00-03:00',
+  });
+  assert.deepEqual(snapshot, {
+    pageCounter: 12345,
+    usageCounters: { general: 12345, color_a4: 2345 },
+    readAt: '2026-08-30T15:00:00.000Z',
+  });
+
+  const nested = printGuard.normalizeRemoteEquipment({
+    serialNumber: 'SN-1',
+    meter: { pageCounter: 99, usageCounters: { mono: 90 }, readAt: '2026-08-30T00:00:00Z' },
+  });
+  assert.equal(nested.pageCounter, 99);
+  assert.equal(nested.meter.usageCounters.mono, 90);
+});
