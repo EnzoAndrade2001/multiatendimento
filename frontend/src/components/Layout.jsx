@@ -149,13 +149,28 @@ export default function Layout() {
     });
     setInternalSocket(socket);
 
-    getInstances()
-      .then((res) => {
-        if (Array.isArray(res.data)) {
-          setInstances(res.data);
-        }
-      })
-      .catch(() => {});
+    // /instance/list consulta a Evolution por instância (pode demorar/falhar).
+    // Uma falha transitória aqui deixava o app sem lista de instâncias até um
+    // reload completo, então tentamos de novo algumas vezes.
+    let instancesTries = 0;
+    const loadInstances = () => {
+      getInstances()
+        .then((res) => {
+          if (Array.isArray(res.data) && res.data.length) {
+            setInstances(res.data);
+          } else if (instancesTries < 3) {
+            instancesTries += 1;
+            setTimeout(loadInstances, 4000);
+          }
+        })
+        .catch(() => {
+          if (instancesTries < 3) {
+            instancesTries += 1;
+            setTimeout(loadInstances, 4000);
+          }
+        });
+    };
+    loadInstances();
 
     socket.on('new_message', ({ message, contact, fromMe }) => {
       if (fromMe) return;

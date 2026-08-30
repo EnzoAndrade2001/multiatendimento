@@ -23,6 +23,7 @@ import api, {
   updateTicketPreferences,
   getTicketOutboundOptions,
   updateContact,
+  getInstances,
 } from '../services/api';
 import { toast } from '../utils/toast';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -125,7 +126,23 @@ export default function Inbox() {
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => window.innerWidth > 768 && window.innerWidth <= 1440);
   const openOsHandledRef = useRef(false);
   const isMobile = useIsMobile();
-  const { instances } = useOutletContext() || { instances: [] };
+  const { instances: contextInstances } = useOutletContext() || { instances: [] };
+  const [fallbackInstances, setFallbackInstances] = useState([]);
+  // O Layout busca as instâncias uma única vez no mount e engole falhas
+  // silenciosamente (.catch), então uma falha transitória deixava o seletor
+  // "Enviar por" vazio até um reload completo. Aqui refazemos a busca quando
+  // o contexto vier vazio.
+  useEffect(() => {
+    if (Array.isArray(contextInstances) && contextInstances.length) return;
+    let active = true;
+    getInstances()
+      .then((res) => { if (active && Array.isArray(res.data)) setFallbackInstances(res.data); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [contextInstances]);
+  const instances = (Array.isArray(contextInstances) && contextInstances.length)
+    ? contextInstances
+    : fallbackInstances;
   const navigate = useNavigate();
 
   useEffect(() => {

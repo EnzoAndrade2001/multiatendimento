@@ -2475,6 +2475,11 @@ export const MessageComposer = React.memo(function MessageComposer({
                 {outboundOptionsLoading ? (
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>validando…</span>
                 ) : null}
+                {(instances || []).filter((item) => !String(item.instanceName || '').startsWith('DELETED_')).length === 0 ? (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--warning, #9a6700)' }}>
+                    Instâncias não carregaram — recarregue a página (F5).
+                  </span>
+                ) : null}
               </div>
             ) : null}
 
