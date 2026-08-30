@@ -889,6 +889,7 @@ module.exports = {
   listTelemetry,
   managerSnapshot,
   eventAction,
+  notifyRemote,
   syncEvents,
   listRemote,
   metrics,

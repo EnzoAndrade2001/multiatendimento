@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const printGuard = require('../services/printGuardService');
+const parkService = require('../services/parkService');
 const { hasPermission } = require('../auth/permissions');
 const { queueAuditEvent } = require('../services/auditEventService');
 
@@ -101,4 +102,40 @@ async function action(req, res) {
   } catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel atualizar o evento.' }); }
 }
 
-module.exports = { status, pair, test, disconnect, getMetrics, sync, remotePage, webhook, queue, action };
+async function parkQueue(req, res) {
+  try { return res.json(await parkService.parkQueue(req.user.tenantId, req.query)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel carregar a fila do parque.' }); }
+}
+
+async function parkCoverage(req, res) {
+  try { return res.json(await parkService.parkCoverage(req.user.tenantId)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel carregar a cobertura do parque.' }); }
+}
+
+async function parkRanking(req, res) {
+  try { return res.json(await parkService.equipmentRanking(req.user.tenantId, req.query)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel carregar o ranking.' }); }
+}
+
+async function parkTimeline(req, res) {
+  try { return res.json(await parkService.equipmentTimeline(req.user.tenantId, req.params.equipmentId, req.query)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel carregar a timeline.' }); }
+}
+
+async function parkConsolidate(req, res) {
+  try {
+    if (!hasPermission(req.user, 'inbox.create_os')) {
+      return res.status(403).json({ error: 'Voce nao possui permissao para abrir O.S.' });
+    }
+    const { eventIds, cdOstp, priority, defect, nmsuportet } = req.body || {};
+    const serviceOrder = await parkService.consolidateToServiceOrder(req.user.tenantId, eventIds, { cdOstp, priority, defect, nmsuportet });
+    return res.json({ serviceOrder });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel consolidar a O.S.' });
+  }
+}
+
+module.exports = {
+  status, pair, test, disconnect, getMetrics, sync, remotePage, webhook, queue, action,
+  parkQueue, parkCoverage, parkRanking, parkTimeline, parkConsolidate,
+};
