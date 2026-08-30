@@ -546,6 +546,17 @@ function truncToUtcDay(date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+function normalizeMeterUsage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const result = {};
+  for (const [rawKey, rawValue] of Object.entries(value).slice(0, 100)) {
+    const key = String(rawKey).trim().slice(0, 80);
+    const number = parseNum(rawValue);
+    if (key && Number.isFinite(number) && number >= 0) result[key] = Math.floor(number);
+  }
+  return Object.keys(result).length ? result : null;
+}
+
 // Contrato do iLux -> CrmContract consultavel. Le tanto os campos ja
 // normalizados pelo agente quanto os nomes crus das colunas Firebird.
 async function upsertCrmContract(tenant, data) {
@@ -602,8 +613,9 @@ async function persistMeterHistory(tenant, data) {
 
     const previousReading = parseNum(pick(m.previousReading, m.medidorult, m.MEDIDORULT));
     const previousReadAt = truncToUtcDay(normalizeDate(pick(m.previousReadAt, m.dtleiturault, m.DTLEITURAULT)));
+    const usageCounters = normalizeMeterUsage(pick(m.usageCounters, m.usage_counters, m.contadores, m.counters));
 
-    const base = { serialNumber, meterName, source: 'firebird' };
+    const base = { serialNumber, meterName, usageCounters, source: 'firebird' };
     await prisma.crmMeterReading.upsert({
       where: { tenantId_equipmentExternalId_meterCode_readAt: { tenantId: tenant.id, equipmentExternalId: String(equipmentExternalId), meterCode: String(meterCode), readAt } },
       update: { reading: Math.round(reading), previousReading: previousReading != null ? Math.round(previousReading) : undefined, previousReadAt: previousReadAt || undefined, ...base },

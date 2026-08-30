@@ -5,6 +5,8 @@ const { encryptSecret, decryptSecret } = require('./printGuardCrypto');
 
 const SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
+const METER_HISTORY_PAGE_SIZE = 100;
+const METER_HISTORY_MAX_PAGES = 50;
 // Versioned API prefix shared by pairing and all authenticated resources.
 const PRINTGUARD_API_PREFIX = '/integrations/v1/multiatendimento';
 let io = null;
@@ -47,6 +49,7 @@ function secureConnection(connection, includeSecrets = false) {
     lastTestAt: connection.lastTestAt,
     lastConnectedAt: connection.lastConnectedAt,
     lastCursor: connection.lastCursor,
+    lastMeterCursor: connection.lastMeterCursor,
     lastError: connection.lastError,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
@@ -745,20 +748,127 @@ async function notifyRemote(connection, externalEventId, action, body = {}) {
   }
 }
 
-async function fetchPage(connection, resource, cursor) {
-  const params = cursor ? { cursor } : {};
+async function fetchPage(connection, resource, cursor, { limit } = {}) {
+  const params = {};
+  if (cursor) params.cursor = cursor;
+  if (limit) params.limit = limit;
   const response = await clientFor(connection).get(`/${resource}`, { params });
   const data = extractPayload(response.data);
   return { items: Array.isArray(data.items) ? data.items : [], nextCursor: data.nextCursor || null, hasMore: Boolean(data.hasMore) };
 }
 
 async function listRemote(tenantId, resource, cursor) {
-  if (!['customers', 'equipment', 'events'].includes(resource)) throw new Error('Recurso PrintGuard invalido.');
+  if (!['customers', 'equipment', 'equipment-readings', 'events'].includes(resource)) throw new Error('Recurso PrintGuard invalido.');
   const connection = await getConnection(tenantId);
   if (!connection) throw new Error('Nenhuma conexao PrintGuard configurada.');
   const page = await fetchPage(connection, resource, cursor);
+  if (resource === 'equipment-readings') {
+    return {
+      ...page,
+      items: page.items.map((item) => {
+        const meter = normalizeMeterSnapshot(item);
+        return meter ? withMeterPayload(item, meter) : item;
+      }),
+    };
+  }
   if (resource !== 'equipment') return page;
   return { ...page, items: page.items.map(normalizeRemoteEquipment) };
+}
+
+function truncateToUtcDay(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function meterReadingValue(meter) {
+  if (!meter) return null;
+  if (meter.pageCounter !== null && meter.pageCounter !== undefined) return normalizePageCounter(meter.pageCounter);
+  const usage = isRecord(meter.usageCounters) ? meter.usageCounters : {};
+  const fallback = usage.general ?? usage.total ?? usage.overall;
+  return normalizePageCounter(fallback);
+}
+
+async function persistCrmMeterReading(tenantId, equipment, item, meter) {
+  if (!equipment?.externalId || !meter) return { stored: false, skipped: true, reason: 'missing_equipment_or_meter' };
+  const value = meterReadingValue(meter);
+  const readAt = truncateToUtcDay(meter.readAt);
+  if (value === null || !readAt) return { stored: false, skipped: true, reason: 'missing_page_counter_or_read_at' };
+
+  const meterCode = 'page_total';
+  const key = {
+    tenantId,
+    equipmentExternalId: String(equipment.externalId),
+    meterCode,
+    readAt,
+  };
+  const previous = await prisma.crmMeterReading.findFirst({
+    where: {
+      tenantId,
+      equipmentExternalId: String(equipment.externalId),
+      meterCode,
+      readAt: { lt: readAt },
+    },
+    orderBy: { readAt: 'desc' },
+    select: { reading: true, readAt: true },
+  });
+  const data = {
+    serialNumber: equipment.serialNumber || null,
+    meterName: 'Contador geral',
+    reading: value,
+    usageCounters: meter.usageCounters && Object.keys(meter.usageCounters).length
+      ? meter.usageCounters
+      : null,
+    previousReading: previous?.reading ?? null,
+    previousReadAt: previous?.readAt ?? null,
+    source: 'printguard',
+  };
+  await prisma.crmMeterReading.upsert({
+    where: { tenantId_equipmentExternalId_meterCode_readAt: key },
+    update: data,
+    create: { ...key, ...data },
+  });
+  return { stored: true, skipped: false, readAt };
+}
+
+async function syncRemoteMeterHistory(tenantId, connection) {
+  let cursor = connection.lastMeterCursor || null;
+  let pages = 0;
+  let processed = 0;
+  let stored = 0;
+  let unmatched = 0;
+  let skipped = 0;
+  let hasMore = false;
+  do {
+    const page = await fetchPage(connection, 'equipment-readings', cursor, { limit: METER_HISTORY_PAGE_SIZE });
+    pages += 1;
+    for (const item of page.items) {
+      const fields = eventFields(item);
+      const meter = normalizeMeterSnapshot(item);
+      if (!meter) {
+        skipped += 1;
+        continue;
+      }
+      processed += 1;
+      if (!fields.serialNumber && !fields.customerCode) {
+        unmatched += 1;
+        continue;
+      }
+      const mapping = await resolveMapping(tenantId, fields, connection.id);
+      if (mapping.state !== 'MATCHED' || !mapping.equipment) {
+        unmatched += 1;
+        continue;
+      }
+      const result = await persistCrmMeterReading(tenantId, mapping.equipment, item, meter);
+      if (result.stored) stored += 1;
+      else skipped += 1;
+    }
+    if (page.nextCursor) cursor = page.nextCursor;
+    hasMore = Boolean(page.hasMore && page.nextCursor);
+    if (!hasMore || pages >= METER_HISTORY_MAX_PAGES) break;
+  } while (true);
+  await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastMeterCursor: cursor } });
+  return { processed, stored, unmatched, skipped, pages, nextCursor: cursor, hasMore };
 }
 
 async function syncRemoteEquipmentMeters(tenantId, connection) {
@@ -805,6 +915,16 @@ async function syncEvents(tenantId) {
     // A temporary equipment endpoint failure must not block historical alert
     // synchronization. The result exposes the diagnostic to administrators.
     equipmentError = String(error.message || error).slice(0, 500);
+  }
+  let meterHistory = { processed: 0, stored: 0, unmatched: 0, skipped: 0, pages: 0, nextCursor: connection.lastMeterCursor || null, hasMore: false };
+  let meterHistoryError = null;
+  try {
+    // Historical readings are independent from the current equipment
+    // snapshot. They are consumed with their own cursor so a large history
+    // never forces a full replay on every synchronization.
+    meterHistory = await syncRemoteMeterHistory(tenantId, connection);
+  } catch (error) {
+    meterHistoryError = String(error.message || error).slice(0, 500);
   }
   let cursor = connection.lastCursor || null;
   let processed = 0;
@@ -855,7 +975,7 @@ async function syncEvents(tenantId) {
     if (!page.hasMore || !page.nextCursor || pages >= 50) break;
   } while (true);
   await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastCursor: cursor, lastTestAt: new Date(), lastConnectedAt: new Date(), status: 'CONNECTED', lastError: null } });
-  return { processed, reconciled, pages, nextCursor: cursor, equipment, equipmentError };
+  return { processed, reconciled, pages, nextCursor: cursor, equipment, equipmentError, meterHistory, meterHistoryError };
 }
 
 async function metrics(tenantId) {
@@ -891,6 +1011,8 @@ module.exports = {
   eventAction,
   notifyRemote,
   syncEvents,
+  syncRemoteMeterHistory,
+  persistCrmMeterReading,
   listRemote,
   metrics,
   disconnect,

@@ -84,9 +84,9 @@ async function meterTrend(tenantId, equipmentExternalId, { meterCode = null, day
       readAt: { gte: since },
     },
     orderBy: { readAt: 'asc' },
-    select: { readAt: true, reading: true, meterCode: true },
+    select: { readAt: true, reading: true, meterCode: true, usageCounters: true },
   });
-  if (!rows.length) return { pagesPerDay: null, points: 0, current: null, windowDays: days };
+  if (!rows.length) return { pagesPerDay: null, points: 0, current: null, currentUsageCounters: {}, windowDays: days };
 
   const pagesPerDay = linearPagesPerDay(rows);
   const first = rows[0];
@@ -96,6 +96,9 @@ async function meterTrend(tenantId, equipmentExternalId, { meterCode = null, day
     pagesPerDay: pagesPerDay == null ? null : Math.round(pagesPerDay),
     points: rows.length,
     current: last.reading,
+    currentUsageCounters: last.usageCounters && typeof last.usageCounters === 'object'
+      ? last.usageCounters
+      : {},
     firstAt: first.readAt,
     lastAt: last.readAt,
     spanDays: Math.round(spanDays),

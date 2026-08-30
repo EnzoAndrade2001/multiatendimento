@@ -1159,6 +1159,7 @@ model PrintGuardConnection {
   lastTestAt         DateTime?
   lastConnectedAt    DateTime?
   lastCursor         String?
+  lastMeterCursor    String?
   lastError          String?  @db.Text
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -1267,6 +1268,7 @@ model CrmMeterReading {
   meterCode           String? // CDMEDIDOR
   meterName           String? // rotulo do medidor
   reading             Int // valor do contador
+  usageCounters       Json? // leituras por uso (mono/cor/scan etc.)
   previousReading     Int?
   readAt              DateTime // DTLEITURA (truncado ao dia, UTC)
   previousReadAt      DateTime?

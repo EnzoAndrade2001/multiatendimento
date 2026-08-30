@@ -26,7 +26,20 @@ O PrintGuard usa uma fila persistente para entregar webhooks fora do ciclo de co
 
 O endpoint autenticado `/integrations/v1/multiatendimento/equipment` retorna o retrato atual de cada equipamento, incluindo `meter.pageCounter`, `meter.usageCounters` e `meter.readAt`. Quando o PrintGuard gera um alerta, a mesma fotografia é enviada no webhook, tanto em `meter` quanto dentro de `measurement.meter`.
 
-O botão **Sincronizar** do Multiatendimento consulta esse endpoint e grava o último retrato nos equipamentos CRM vinculados por série/cliente. Leituras antigas não substituem uma leitura mais nova. O histórico bruto continua preservado no evento e no PrintGuard; o CRM usa o retrato atual para ficha do cliente, telemetria e futuras projeções de consumo.
+O botão **Sincronizar** do Multiatendimento consulta esse endpoint e grava o último retrato nos equipamentos CRM vinculados por série/cliente. Leituras antigas não substituem uma leitura mais nova.
+
+O endpoint autenticado `/integrations/v1/multiatendimento/equipment-readings`
+expõe o histórico de leituras persistido pelo PrintGuard. O Multiatendimento
+consome essa lista com um cursor independente e grava uma leitura diária por
+equipamento em `CrmMeterReading`, usando `page_total` como medidor do contador
+geral e preservando os `usageCounters` (mono, cor, digitalização e outros
+medidores disponíveis). A chave empresa + equipamento + medidor + dia UTC
+torna a importação idempotente: repetir a sincronização atualiza o mesmo
+ponto, sem duplicar leituras. Registros sem série/cliente correspondente ficam
+contabilizados como **não vinculados** e não são associados a outro equipamento.
+
+O histórico passa a sustentar tendências de páginas/dia e rendimento; o
+retrato atual continua sendo usado na ficha do cliente e na telemetria.
 
 ## Implantação segura
 
