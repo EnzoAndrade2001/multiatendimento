@@ -5,15 +5,26 @@ import {
   X,
 } from 'lucide-react';
 import {
-  BACKEND_URL, approveTelemetryEvent, assignParkIncident, consolidateParkServiceOrder, getParkBindingCandidates,
-  getParkEquipmentTimeline, getParkQueue, getUsers, ignoreTelemetryEvent, monitorTelemetryEvent,
-  notifyParkIncident, resolveParkBinding, sendOSManagerCopy,
+  BACKEND_URL, approveTelemetryEvent, assignParkIncident, consolidateParkServiceOrder, getCrmCustomer360,
+  getParkBindingCandidates, getParkEquipmentTimeline, getParkQueue, getUsers, ignoreTelemetryEvent,
+  monitorTelemetryEvent, notifyParkIncident, resolveParkBinding, sendOSManagerCopy,
 } from '../../services/api';
 import { toast } from '../../utils/toast';
+import { usePermissions } from '../../auth/PermissionContext';
+import { CrmCustomerProfileModal } from '../CRM';
 import './DecisionCenter.css';
 
+const incidentContext = (item) => ({
+  customer: item.customerName,
+  equipment: item.equipment?.model
+    ? `${item.equipment.model}${item.serialNumber ? ` (série ${item.serialNumber})` : ''}`
+    : (item.serialNumber || null),
+  eventType: item.eventType,
+  priority: item._priority?.level,
+  recommendation: item._recommendation?.label,
+});
+
 const fmtInt = (value) => Number(value || 0).toLocaleString('pt-BR');
-const digits = (value) => String(value || '').replace(/\D/g, '');
 const fmtDate = (value, withTime = true) => {
   if (!value) return 'Não definido';
   const date = new Date(value);
@@ -56,6 +67,7 @@ function recommendationOf(item) {
 }
 
 export default function DecisionCenter({ osTypes = [] }) {
+  const { user } = usePermissions();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
@@ -96,12 +108,14 @@ export default function DecisionCenter({ osTypes = [] }) {
       unlinked: data?.summary?.unlinked ?? all.filter((i) => i.mappingState !== 'MATCHED').length,
       openOs: data?.summary?.openServiceOrders ?? all.filter((i) => i.openServiceOrder).length,
       monitoring: data?.summary?.monitoring ?? all.filter((i) => i.state === 'MONITORING').length,
+      mine: all.filter((i) => user?.id && i.workflow?.assignedTo?.id === user.id).length,
     };
-  }, [all, data]);
+  }, [all, data, user]);
 
   const visible = useMemo(() => {
     const now = Date.now();
     let list = all.filter((i) => {
+      if (filter === 'mine') return user?.id && i.workflow?.assignedTo?.id === user.id;
       if (filter === 'action') return ['P1', 'P2'].includes(i._priority.level) && !i.openServiceOrder;
       if (filter === 'risk') return Number.isFinite(i.toner?.daysLeft) && i.toner.daysLeft <= 3;
       if (filter === 'overdue') {
@@ -118,7 +132,7 @@ export default function DecisionCenter({ osTypes = [] }) {
       ? Number(b.ageMinutes || 0) - Number(a.ageMinutes || 0)
       : Number(b._priority.score || 0) - Number(a._priority.score || 0));
     return list;
-  }, [all, filter, sort]);
+  }, [all, filter, sort, user]);
 
   const selectedList = Object.values(selected);
   const sameCustomer = selectedList.length > 1 && new Set(selectedList.map((i) => i.customer?.id)).size === 1;
@@ -134,7 +148,7 @@ export default function DecisionCenter({ osTypes = [] }) {
     try {
       await monitorTelemetryEvent(dialog.item.id, {
         monitoringUntil: new Date(form.until).toISOString(), assignedToId: form.assignedToId || null,
-        monitoringCondition: form.condition, nextStep: form.note,
+        monitoringCondition: form.condition, nextStep: form.note, context: incidentContext(dialog.item),
       });
       await refreshAfter('Monitoramento agendado com responsável e prazo.');
     } catch (error) { toast.error(error.response?.data?.error || 'Falha ao agendar monitoramento.'); }
@@ -167,11 +181,32 @@ export default function DecisionCenter({ osTypes = [] }) {
   async function notifyManager(item) {
     setBusy(true);
     try {
-      if (item.openServiceOrder?.id) await sendOSManagerCopy(item.openServiceOrder.id);
-      else await notifyParkIncident(item.id, { channel: 'manager' });
-      toast.success('Gestor notificado.');
+      if (item.openServiceOrder?.id) {
+        await sendOSManagerCopy(item.openServiceOrder.id);
+        toast.success('Cópia da O.S. enviada ao gestor.');
+      } else {
+        const { data: result } = await notifyParkIncident(item.id, { channel: 'manager', context: incidentContext(item) });
+        if (result?.delivered) toast.success('Gestor notificado por WhatsApp.');
+        else toast.info('Registrado. Configure o telefone do gestor em Configurações para o envio automático.');
+      }
     } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível notificar o gestor.'); }
     finally { setBusy(false); }
+  }
+
+  // Continua o atendimento dentro do inbox: se o cliente já tem conversa ativa,
+  // abre direto; senão leva à ficha para iniciar/vincular o contato.
+  async function openConversation(item) {
+    if (!item.customer?.id) { toast.error('Cliente não vinculado ao CRM — corrija o vínculo primeiro.'); return; }
+    setBusy(true);
+    try {
+      const { data: profile } = await getCrmCustomer360(item.customer.id);
+      const ticketId = profile?.quickActions?.ticketId;
+      if (ticketId) { window.location.assign(`/inbox?ticketId=${encodeURIComponent(ticketId)}`); return; }
+      toast.info('Sem conversa ativa com este cliente. Abrindo a ficha para iniciar o atendimento.');
+      setDialog({ type: 'crm360', item, tab: 'contacts' });
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível localizar a conversa do cliente.');
+    } finally { setBusy(false); }
   }
 
   if (loading) return <div className="park-loading"><Loader2 className="spin" size={18} /> Montando fila gerencial…</div>;
@@ -198,6 +233,11 @@ export default function DecisionCenter({ osTypes = [] }) {
     <section className="park-toolbar">
       <div><b>Fila de decisão gerencial</b><span>{visible.length} de {all.length} ocorrência(s)</span></div>
       <div className="park-toolbar-actions">
+        {user?.id && (
+          <button className={`park-btn ${filter === 'mine' ? 'primary' : ''}`} onClick={() => setFilter(filter === 'mine' ? 'all' : 'mine')}>
+            <UserRound size={14} /> Minha fila{summary.mine ? ` (${summary.mine})` : ''}
+          </button>
+        )}
         <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenação">
           <option value="priority">Maior prioridade</option><option value="age">Mais antigas</option>
         </select>
@@ -216,7 +256,8 @@ export default function DecisionCenter({ osTypes = [] }) {
         {visible.length === 0 && <div className="park-empty">Nenhuma ocorrência neste filtro.</div>}
         {visible.map((item) => <IncidentRow key={item.id} item={item} checked={Boolean(selected[item.id])}
           onToggle={() => setSelected((prev) => { const next = { ...prev }; if (next[item.id]) delete next[item.id]; else next[item.id] = item; return next; })}
-          onDialog={(type) => setDialog({ type, item })} onNotify={() => notifyManager(item)} busy={busy} />)}
+          onDialog={(type) => setDialog({ type, item })} onNotify={() => notifyManager(item)}
+          onConversation={() => openConversation(item)} busy={busy} />)}
       </section>
       <ReplenishmentPanel groups={data.replenishment || []} incidents={all} selected={selected} setSelected={setSelected} onOs={(items) => setDialog({ type: 'os', items, item: items[0] })} />
     </div>
@@ -226,14 +267,23 @@ export default function DecisionCenter({ osTypes = [] }) {
     {dialog?.type === 'os' && <OsDialog item={dialog.item} count={dialog.items?.length || 1} osTypes={osTypes} busy={busy} onClose={() => setDialog(null)} onSave={saveOs} />}
     {dialog?.type === 'binding' && <BindingDialog item={dialog.item} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Vínculo corrigido e fila recalculada.')} />}
     {dialog?.type === 'timeline' && <TimelineDialog item={dialog.item} onClose={() => setDialog(null)} />}
-    {dialog?.type === 'assign' && <AssignDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Responsável e próximo passo atualizados.')} />}
+    {dialog?.type === 'assign' && <AssignDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Responsável notificado no chat interno.')} />}
+    {dialog?.type === 'crm360' && dialog.item.customer?.id && (
+      <CrmCustomerProfileModal
+        customerId={dialog.item.customer.id}
+        initialTab={dialog.tab || 'overview'}
+        onClose={() => setDialog(null)}
+        onOpenConversation={() => setDialog(null)}
+        onOpenServiceOrder={() => setDialog(null)}
+      />
+    )}
   </div>;
 }
 
-function IncidentRow({ item, checked, onToggle, onDialog, onNotify, busy }) {
+function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversation, busy }) {
   const priority = item._priority;
   const rec = item._recommendation;
-  const phone = digits(item.customer?.phone);
+  const hasCustomer = Boolean(item.customer?.id);
   const reasons = priority.reasons?.length ? priority.reasons : [rec.explanation];
   const due = item.workflow?.decisionDueAt || item.workflow?.monitoringUntil;
   return <article className={`park-incident priority-${priority.level.toLowerCase()}`}>
@@ -280,9 +330,9 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, busy }) {
       <button className="park-btn" onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar</button>
       <button className="park-btn" onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir</button>
       <button className="park-btn" onClick={() => onDialog('timeline')}><History size={14} /> Histórico</button>
-      <button className="park-btn" onClick={() => window.open(`/crm?q=${encodeURIComponent(item.customerName || '')}`, '_blank')}><ExternalLink size={14} /> CRM 360</button>
-      <button className="park-btn" disabled={!phone} title={phone ? 'Abrir conversa no WhatsApp' : 'Telefone não disponível'} onClick={() => window.open(`https://wa.me/${phone}`, '_blank')}><MessageCircle size={14} /> WhatsApp</button>
-      <button className="park-btn" disabled={busy} onClick={onNotify}><BellRing size={14} /> Gestor</button>
+      <button className="park-btn" disabled={!hasCustomer} title={hasCustomer ? 'Abrir a ficha 360 sobreposta' : 'Cliente não vinculado ao CRM'} onClick={() => onDialog('crm360')}><ClipboardList size={14} /> CRM 360</button>
+      <button className="park-btn" disabled={!hasCustomer || busy} title={hasCustomer ? 'Continuar o atendimento no inbox' : 'Cliente não vinculado ao CRM'} onClick={onConversation}><MessageCircle size={14} /> Atendimento</button>
+      <button className="park-btn" disabled={busy} onClick={onNotify} title="Enviar alerta ao gestor por WhatsApp"><BellRing size={14} /> Gestor</button>
       <button className="park-btn danger" onClick={() => onDialog('ignore')}>Ignorar</button>
     </div>
   </article>;
@@ -371,10 +421,20 @@ function TimelineDialog({ item, onClose }) {
 
 function AssignDialog({ item, users, busy, onClose, onDone }) {
   const [form, setForm] = useState({ assignedToId: item.workflow?.assignedTo?.id || '', decisionDueAt: '', nextStep: item.workflow?.nextStep || '' });
-  async function save() { try { await assignParkIncident(item.id, { ...form, decisionDueAt: form.decisionDueAt ? new Date(form.decisionDueAt).toISOString() : null }); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Falha ao atribuir ocorrência.'); } }
-  return <Modal eyebrow="Responsabilidade" title="Atribuir decisão" onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !form.assignedToId} onClick={save}>Salvar atribuição</button></>}>
+  async function save() {
+    try {
+      await assignParkIncident(item.id, {
+        ...form,
+        decisionDueAt: form.decisionDueAt ? new Date(form.decisionDueAt).toISOString() : null,
+        context: incidentContext(item),
+      });
+      onDone();
+    } catch (e) { toast.error(e.response?.data?.error || 'Falha ao atribuir ocorrência.'); }
+  }
+  return <Modal eyebrow="Responsabilidade" title="Atribuir decisão" onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !form.assignedToId} onClick={save}>Salvar e avisar</button></>}>
+    <p>O responsável recebe um aviso no chat interno com o contexto e o próximo passo, e a ocorrência entra na "Minha fila" dele.</p>
     <label>Responsável<select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}><option value="">Selecione…</option>{users.map((u) => <option value={u.id} key={u.id}>{u.name}</option>)}</select></label>
     <label>Prazo da decisão<input type="datetime-local" value={form.decisionDueAt} onChange={(e) => setForm({ ...form, decisionDueAt: e.target.value })} /></label>
-    <label>Próximo passo<textarea value={form.nextStep} onChange={(e) => setForm({ ...form, nextStep: e.target.value })} /></label>
+    <label>Próximo passo<textarea value={form.nextStep} onChange={(e) => setForm({ ...form, nextStep: e.target.value })} placeholder="O que essa pessoa precisa fazer?" /></label>
   </Modal>;
 }

@@ -736,6 +736,31 @@ async function eventAction(tenantId, eventId, action, body = {}, actorId = null)
 
   const updated = await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data });
   await notifyRemote(event.connection, event.externalEventId, action, body);
+
+  // Avisa o responsavel do monitoramento pelo chat interno (best-effort).
+  if (action === 'monitor' && assignedToId && actorId && assignedToId !== actorId && assignedToId !== event.assignedToId) {
+    try {
+      const ctx = (body.context && typeof body.context === 'object') ? body.context : {};
+      const dueTxt = updated.monitoringUntil
+        ? new Date(updated.monitoringUntil).toLocaleString('pt-BR', { timeZone: process.env.APP_TIMEZONE || 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
+        : 'sem prazo';
+      const bodyText = [
+        '🖨️ Monitoramento sob sua responsabilidade — *Saúde do Parque*.',
+        '',
+        `Cliente: ${ctx.customer || 'não identificado'}`,
+        `Equipamento: ${ctx.equipment || 'não identificado'}`,
+        `Reavaliar até: ${dueTxt}`,
+        updated.monitoringCondition ? `Condição de escalonamento: ${updated.monitoringCondition}` : null,
+        updated.nextStep ? `Próximo passo: ${updated.nextStep}` : null,
+        '',
+        'A ocorrência volta para a fila de decisão ao vencer o prazo.',
+      ].filter((line) => line !== null).join('\n');
+      const internal = require('../controllers/internalMessageController');
+      await internal.notifyUser({ tenantId, fromUserId: actorId, toUserId: assignedToId, body: bodyText });
+    } catch (error) {
+      console.error('[printGuard] aviso de monitoramento falhou:', error.message);
+    }
+  }
   return updated;
 }
 

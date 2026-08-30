@@ -144,6 +144,41 @@ function emitMessage(message, recipientUserIds = [], teamId = null) {
   }
 }
 
+// Mensagem direta disparada pelo sistema (ex.: atribuição no Saúde do Parque).
+// Reaproveita o mesmo caminho do chat interno para o destinatário receber
+// toast em tempo real e contador de não lidas. Nunca lança — quem chama trata
+// a entrega como best-effort.
+async function notifyUser({ tenantId, fromUserId, toUserId, body }) {
+  try {
+    if (!tenantId || !fromUserId || !toUserId || fromUserId === toUserId) return null;
+    const text = String(body || '').trim().slice(0, 4000);
+    if (!text) return null;
+    const [sender, recipient] = await Promise.all([
+      prisma.user.findFirst({ where: { id: fromUserId, tenantId, active: true }, select: { id: true } }),
+      prisma.user.findFirst({ where: { id: toUserId, tenantId, active: true }, select: { id: true } }),
+    ]);
+    if (!sender || !recipient) return null;
+    const message = await prisma.internalMessage.create({
+      data: {
+        tenantId, senderId: fromUserId, receiverId: toUserId, teamId: null,
+        type: 'message', body: text, mentionUserIds: [toUserId], mentionTeamIds: [],
+      },
+      include: MESSAGE_INCLUDE,
+    });
+    await prisma.internalConversationState.upsert({
+      where: { tenantId_userId_conversationKey: { tenantId, userId: toUserId, conversationKey: directKey(fromUserId) } },
+      update: { unreadCount: { increment: 1 } },
+      create: { tenantId, userId: toUserId, conversationKey: directKey(fromUserId), unreadCount: 1 },
+    });
+    emitMessage(message, [fromUserId, toUserId]);
+    if (io) io.to(`user:${toUserId}`).emit('internal_mention', { message, mentionedUserId: toUserId });
+    return message;
+  } catch (error) {
+    console.error('[internal-chat] notifyUser falhou:', error.message);
+    return null;
+  }
+}
+
 async function listConversations(req, res) {
   const tenantId = req.user.tenantId;
   const userId = req.user.userId;
@@ -399,4 +434,5 @@ module.exports = {
   list, send, setIo, listConversations, listConversationMessages, markRead,
   pinConversation, sendMessage, getThread, setReaction, removeReaction,
   parseConversationKey, messageWhere, resolveConversation, assertMessageAccess,
+  notifyUser,
 };

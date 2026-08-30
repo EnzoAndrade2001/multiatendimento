@@ -395,6 +395,13 @@ function parseOptionalDate(value, field, { future = false } = {}) {
   return date;
 }
 
+function fmtDueDate(value) {
+  if (!value) return 'sem prazo';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return 'sem prazo';
+  return d.toLocaleString('pt-BR', { timeZone: process.env.APP_TIMEZONE || 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' });
+}
+
 async function updateDecisionWorkflow(tenantId, eventId, input = {}, actorId = null) {
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
   if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
@@ -410,7 +417,29 @@ async function updateDecisionWorkflow(tenantId, eventId, input = {}, actorId = n
   };
   if (Object.prototype.hasOwnProperty.call(input, 'decisionDueAt')) data.decisionDueAt = parseOptionalDate(input.decisionDueAt, 'Prazo da decisao');
   if (Object.prototype.hasOwnProperty.call(input, 'nextStep')) data.nextStep = String(input.nextStep || '').trim().slice(0, 2000) || null;
-  return prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data });
+  const updated = await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data });
+
+  // Notifica o novo responsavel pelo chat interno (toast em tempo real +
+  // contador de nao lidas). Best-effort: nunca derruba a atribuicao.
+  const isNewAssignee = assignedToId && actorId && assignedToId !== actorId && assignedToId !== event.assignedToId;
+  if (isNewAssignee) {
+    const ctx = obj(input.context);
+    const lines = [
+      '🖨️ Você foi designado para decidir sobre um alerta do *Saúde do Parque*.',
+      '',
+      `Cliente: ${ctx.customer || 'não identificado'}`,
+      `Equipamento: ${ctx.equipment || 'não identificado'}`,
+      `Alerta: ${ctx.eventType || event.eventType || 'telemetria'}${ctx.priority ? ` · ${ctx.priority}` : ''}`,
+      ctx.recommendation ? `Recomendação do sistema: ${ctx.recommendation}` : null,
+      `Prazo da decisão: ${fmtDueDate(updated.decisionDueAt)}`,
+      updated.nextStep ? `Próximo passo: ${updated.nextStep}` : null,
+      '',
+      'Abra Sentinela › Saúde do Parque › Fila de decisão para agir.',
+    ].filter((line) => line !== null);
+    const internal = require('../controllers/internalMessageController');
+    await internal.notifyUser({ tenantId, fromUserId: actorId, toUserId: assignedToId, body: lines.join('\n') });
+  }
+  return updated;
 }
 
 async function bindingCandidates(tenantId, eventId, query = {}) {
@@ -485,14 +514,36 @@ async function correctBinding(tenantId, eventId, { customerId, equipmentId } = {
   return { binding, customer: { id: customer.id, name: customer.name }, equipment: { id: equipment.id, model: equipment.model, serialNumber: equipment.serialNumber, externalId: equipment.externalId } };
 }
 
-// Sinaliza que o gestor foi acionado para esta ocorrencia. Sem O.S. aberta nao
-// ha copia de O.S. para enviar, entao o registro fica no proprio evento (e o
-// middleware de auditoria da rota grava quem/quando).
-async function notifyManagerIncident(tenantId, eventId, { note } = {}, actorId = null) {
+// Dispara um alerta de WhatsApp para o telefone do gestor configurado em
+// Configurações (mesma via do alertService) e carimba o evento. O middleware
+// de auditoria da rota grava quem/quando.
+async function notifyManagerIncident(tenantId, eventId, { note, context } = {}, actorId = null) {
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
   if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+
+  const ctx = obj(context);
+  const alertBody = [
+    '🖨️ *Saúde do Parque* — decisão pendente precisa de atenção',
+    '',
+    `Cliente: ${ctx.customer || 'não identificado'}`,
+    `Equipamento: ${ctx.equipment || 'não identificado'}`,
+    `Alerta: ${ctx.eventType || event.eventType || 'telemetria'}${ctx.priority ? ` · ${ctx.priority}` : ''}`,
+    ctx.recommendation ? `Recomendação do sistema: ${ctx.recommendation}` : null,
+    note ? `Observação: ${String(note).trim().slice(0, 500)}` : null,
+    '',
+    'Abra o painel Sentinela › Saúde do Parque para decidir.',
+  ].filter((line) => line !== null).join('\n');
+
+  let delivered = false;
+  try {
+    const alertService = require('./alertService');
+    delivered = await alertService.sendSystemAlert(tenantId, alertBody);
+  } catch (error) {
+    console.error('[parkService] notifyManagerIncident: alerta falhou:', error.message);
+  }
+
   const when = new Date().toLocaleString('pt-BR', { timeZone: process.env.APP_TIMEZONE || 'America/Sao_Paulo' });
-  const stamp = `Gestor notificado em ${when}${note ? ` — ${String(note).trim().slice(0, 500)}` : ''}`;
+  const stamp = `Gestor ${delivered ? 'notificado por WhatsApp' : 'sinalizado (WhatsApp não configurado)'} em ${when}${note ? ` — ${String(note).trim().slice(0, 500)}` : ''}`;
   const updated = await prisma.printGuardTelemetryEvent.update({
     where: { id: event.id },
     data: {
@@ -501,7 +552,7 @@ async function notifyManagerIncident(tenantId, eventId, { note } = {}, actorId =
       decisionById: actorId || event.decisionById,
     },
   });
-  return { ok: true, event: updated };
+  return { ok: true, delivered, event: updated };
 }
 
 async function parkCoverage(tenantId) {
