@@ -189,6 +189,13 @@ async function resolveMapping(tenantId, fields, connectionId) {
   let state = 'UNMATCHED';
   let customer = customers.length === 1 ? customers[0] : null;
   let equipment = equipments.length === 1 ? equipments[0] : null;
+  // Alguns coletores conhecem apenas a série. Quando ela identifica um único
+  // equipamento, o próprio vínculo do equipamento é a fonte segura do cliente.
+  if (!customer && equipment?.customerId) {
+    customer = await prisma.crmCustomer.findFirst({
+      where: { id: equipment.customerId, tenantId, externalSource: 'firebird' },
+    });
+  }
   if (customers.length > 1 || equipments.length > 1) state = 'AMBIGUOUS';
   else if (!customer && !equipment) state = 'UNMATCHED';
   else if (!customer) state = 'UNMATCHED_CUSTOMER';
@@ -295,8 +302,39 @@ async function listTelemetry(tenantId, query = {}) {
     prisma.printGuardTelemetryEvent.count({ where: { ...where, state: 'RECEIVED' } }),
     prisma.printGuardTelemetryEvent.count({ where: { ...where, state: 'MONITORING' } }),
   ]);
+  const bindingIds = [...new Set(events.map((event) => event.bindingId).filter(Boolean))];
+  const bindings = bindingIds.length
+    ? await prisma.printGuardBinding.findMany({ where: { tenantId, id: { in: bindingIds } } })
+    : [];
+  const bindingById = new Map(bindings.map((binding) => [binding.id, binding]));
+  const customerIds = [...new Set(bindings.map((binding) => binding.customerId).filter(Boolean))];
+  const equipmentIds = [...new Set(bindings.map((binding) => binding.equipmentId).filter(Boolean))];
+  const [customers, equipments] = await Promise.all([
+    customerIds.length ? prisma.crmCustomer.findMany({ where: { tenantId, id: { in: customerIds } }, select: { id: true, name: true, externalId: true } }) : [],
+    equipmentIds.length ? prisma.crmEquipment.findMany({ where: { tenantId, id: { in: equipmentIds } }, select: { id: true, model: true, serialNumber: true, externalId: true, isActive: true } }) : [],
+  ]);
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const equipmentById = new Map(equipments.map((equipment) => [equipment.id, equipment]));
   return {
-    events: events.map((event) => ({ ...event, status: event.state, customer: event.customerCode ? { externalId: event.customerCode } : null, equipment: event.serialNumber ? { serialNumber: event.serialNumber } : null, measurement: event.payload?.measurement || event.payload?.reading || null, message: event.errorMessage || event.payload?.message || null })),
+    events: events.map((event) => {
+      const binding = bindingById.get(event.bindingId);
+      const customer = customerById.get(binding?.customerId) || event.payload?.customer || (event.customerCode ? { externalId: event.customerCode } : null);
+      const equipment = equipmentById.get(binding?.equipmentId) || event.payload?.equipment || (event.serialNumber ? { serialNumber: event.serialNumber } : null);
+      const mappingState = binding?.state || event.errorCode || 'UNMATCHED';
+      return {
+        ...event,
+        status: event.state,
+        customer,
+        equipment,
+        mappingState,
+        canOpenServiceOrder: mappingState === 'MATCHED' && equipment?.isActive !== false,
+        mappingMessage: mappingState === 'MATCHED'
+          ? (equipment?.isActive === false ? 'Equipamento identificado, mas está inativo/fora de operação no iLux.' : 'Cliente e equipamento identificados no iLux.')
+          : 'Cliente ou equipamento ainda não identificado no iLux.',
+        measurement: event.payload?.measurement || event.payload?.reading || null,
+        message: event.payload?.message || event.payload?.description || null,
+      };
+    }),
     total,
     summary: { total, critical, open, monitoring },
   };
@@ -307,7 +345,12 @@ async function eventAction(tenantId, eventId, action, body = {}) {
   if (!event) { const error = new Error('Evento nao encontrado.'); error.statusCode = 404; throw error; }
   if (action === 'approve') return approveEvent(tenantId, event, body);
   const nextState = action === 'monitor' ? 'MONITORING' : 'IGNORED';
-  const updated = await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: nextState, errorCode: nextState === 'IGNORED' ? 'IGNORED_BY_USER' : null } });
+  const updated = await prisma.printGuardTelemetryEvent.update({
+    where: { id: event.id },
+    data: nextState === 'IGNORED'
+      ? { state: nextState, errorCode: 'IGNORED_BY_USER' }
+      : { state: nextState },
+  });
   await notifyRemote(event.connection, event.externalEventId, action, body);
   return updated;
 }
@@ -391,7 +434,27 @@ async function syncEvents(tenantId) {
   if (!connection) throw new Error('Nenhuma conexao PrintGuard configurada.');
   let cursor = connection.lastCursor || null;
   let processed = 0;
+  let reconciled = 0;
   let pages = 0;
+  const pendingMappings = await prisma.printGuardTelemetryEvent.findMany({
+    where: { tenantId, connectionId: connection.id, state: { in: ['ERROR', 'MONITORING'] } },
+    orderBy: { updatedAt: 'desc' },
+    take: 500,
+  });
+  for (const stored of pendingMappings) {
+    const mapping = await resolveMapping(tenantId, eventFields(stored), connection.id);
+    if (mapping.state !== 'MATCHED') continue;
+    await prisma.printGuardTelemetryEvent.update({
+      where: { id: stored.id },
+      data: {
+        bindingId: mapping.binding.id,
+        state: stored.state === 'MONITORING' ? 'MONITORING' : 'RECEIVED',
+        errorCode: null,
+        errorMessage: null,
+      },
+    });
+    reconciled += 1;
+  }
   do {
     const page = await fetchPage(connection, 'events', cursor);
     pages += 1;
@@ -411,7 +474,7 @@ async function syncEvents(tenantId) {
     if (!page.hasMore || !page.nextCursor || pages >= 50) break;
   } while (true);
   await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastCursor: cursor, lastTestAt: new Date(), lastConnectedAt: new Date(), status: 'CONNECTED', lastError: null } });
-  return { processed, pages, nextCursor: cursor };
+  return { processed, reconciled, pages, nextCursor: cursor };
 }
 
 async function metrics(tenantId) {

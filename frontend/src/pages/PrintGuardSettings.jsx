@@ -153,9 +153,10 @@ export default function PrintGuardSettings() {
       const { data } = await syncPrintGuardEvents();
       const payload = unwrap(data);
       const processed = Number(payload.processed || 0);
+      const reconciled = Number(payload.reconciled || 0);
       const pages = Number(payload.pages || 0);
-      setNotice(processed > 0
-        ? `Sincronização concluída: ${processed.toLocaleString('pt-BR')} evento(s) importado(s) em ${pages.toLocaleString('pt-BR')} página(s).`
+      setNotice(processed > 0 || reconciled > 0
+        ? `Sincronização concluída: ${processed.toLocaleString('pt-BR')} novo(s) evento(s) e ${reconciled.toLocaleString('pt-BR')} vínculo(s) corrigido(s) em ${pages.toLocaleString('pt-BR')} página(s).`
         : 'Sincronização concluída. Não havia novos eventos pendentes no PrintGuard.');
       await load();
     } catch (requestError) {
