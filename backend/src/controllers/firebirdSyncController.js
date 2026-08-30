@@ -532,6 +532,95 @@ async function upsertServiceOrder(tenant, instance, data) {
   return prisma.serviceOrder.create({ data: defaults });
 }
 
+function parseNum(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(String(value).replace(/\s+/g, '').replace('.', '').replace(',', '.'));
+  if (Number.isFinite(n)) return n;
+  const plain = Number(String(value).replace(/[^\d.-]/g, ''));
+  return Number.isFinite(plain) ? plain : null;
+}
+
+function truncToUtcDay(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+// Contrato do iLux -> CrmContract consultavel. Le tanto os campos ja
+// normalizados pelo agente quanto os nomes crus das colunas Firebird.
+async function upsertCrmContract(tenant, data) {
+  const p = data || {};
+  const externalId = pick(p.externalId, p.seqixlcontratos, p.seqIxlContratos, p.seqcontrato, p.seqContrato, p.SEQCONTRATO);
+  if (!externalId) return;
+
+  const modality = pick(p.modality, p.modalidade, p.billingMode);
+  const status = pick(p.status, p.ds_status, p.dsStatus, p.situacao);
+  const isActive = String(pick(p.isActive, p.ativo) ?? '').toUpperCase() !== 'FALSE'
+    && !isInactiveFlag(pick(p.tfinativo, p.inativo));
+
+  const fields = {
+    customerExternalId: pick(p.customerExternalId, p.cdcliente, p.cdCliente, p.CDCLIENTE),
+    number: pick(p.number, p.contractNumber, p.nrcontrato, p.nrContrato),
+    type: pick(p.type, p.contractType, p.nmcontratotp, p.tipocontrato),
+    typeCode: pick(p.typeCode, p.contractTypeCode, p.cdcontratotp),
+    modality: modality ? modality.toLowerCase() : null,
+    status,
+    isActive,
+    startsAt: normalizeDate(pick(p.startsAt, p.dtinicio, p.dt_inicio, p.dtInicio)),
+    endsAt: normalizeDate(pick(p.endsAt, p.dtfim, p.dt_fim, p.dtFim)),
+    monthlyValue: parseNum(pick(p.monthlyValue, p.valor_mensal, p.valmensal, p.vlmensal)),
+    pageFranchise: Math.round(parseNum(pick(p.pageFranchise, p.qt_franquia, p.qtfranquia)) || 0),
+    franchiseValue: parseNum(pick(p.franchiseValue, p.valor_franquia, p.valfranquia)) || 0,
+    excessPageValue: parseNum(pick(p.excessPageValue, p.valor_excedente, p.valexcedente, p.vlpgexcedente)) || 0,
+    activeEquipment: Math.round(parseNum(pick(p.activeEquipment, p.qt_equipamentos, p.qtequipamentos)) || 0),
+    raw: p,
+    externalUpdatedAt: normalizeDate(pick(p.externalUpdatedAt, p.atualizado, p.ATUALIZADO)),
+  };
+
+  await prisma.crmContract.upsert({
+    where: { tenantId_externalSource_externalId: { tenantId: tenant.id, externalSource: 'firebird', externalId: String(externalId) } },
+    update: fields,
+    create: { tenantId: tenant.id, externalSource: 'firebird', externalId: String(externalId), ...fields },
+  });
+}
+
+// Leitura de contador -> CrmMeterReading (append-only, 1 ponto por medidor/dia).
+// Tambem grava o ponto anterior quando vier junto, para semear o historico.
+async function persistMeterHistory(tenant, data) {
+  const rows = Array.isArray(data?.meters) ? data.meters : [data];
+  for (const m of rows) {
+    if (!m || typeof m !== 'object') continue;
+    const equipmentExternalId = pick(m.equipmentExternalId, m.cdequipamento, m.cdEquipamento, m.CDEQUIPAMENTO);
+    const reading = parseNum(pick(m.reading, m.medidor, m.MEDIDOR, m.page_counter, m.pageCounter, m.counter));
+    if (!equipmentExternalId || reading == null) continue;
+
+    const meterCode = pick(m.meterCode, m.cdmedidor, m.CDMEDIDOR) || '0';
+    const meterName = pick(m.meterName, m.nome, m.descricao, m.tipo);
+    const serialNumber = pick(m.serialNumber, m.numserie, m.nrserie, m.NRSERIE);
+    const readAt = truncToUtcDay(normalizeDate(pick(m.readAt, m.dtleitura, m.DTLEITURA)) || new Date());
+    if (!readAt) continue;
+
+    const previousReading = parseNum(pick(m.previousReading, m.medidorult, m.MEDIDORULT));
+    const previousReadAt = truncToUtcDay(normalizeDate(pick(m.previousReadAt, m.dtleiturault, m.DTLEITURAULT)));
+
+    const base = { serialNumber, meterName, source: 'firebird' };
+    await prisma.crmMeterReading.upsert({
+      where: { tenantId_equipmentExternalId_meterCode_readAt: { tenantId: tenant.id, equipmentExternalId: String(equipmentExternalId), meterCode: String(meterCode), readAt } },
+      update: { reading: Math.round(reading), previousReading: previousReading != null ? Math.round(previousReading) : undefined, previousReadAt: previousReadAt || undefined, ...base },
+      create: { tenantId: tenant.id, equipmentExternalId: String(equipmentExternalId), meterCode: String(meterCode), reading: Math.round(reading), previousReading: previousReading != null ? Math.round(previousReading) : null, readAt, previousReadAt: previousReadAt || null, ...base },
+    });
+
+    // Semeia o ponto anterior (dia distinto) para dar 2+ pontos ao historico.
+    if (previousReading != null && previousReadAt && previousReadAt.getTime() !== readAt.getTime()) {
+      await prisma.crmMeterReading.upsert({
+        where: { tenantId_equipmentExternalId_meterCode_readAt: { tenantId: tenant.id, equipmentExternalId: String(equipmentExternalId), meterCode: String(meterCode), readAt: previousReadAt } },
+        update: {},
+        create: { tenantId: tenant.id, equipmentExternalId: String(equipmentExternalId), meterCode: String(meterCode), reading: Math.round(previousReading), readAt: previousReadAt, ...base },
+      });
+    }
+  }
+}
+
 async function pushBatch(req, res) {
   try {
     const { tenantSlug, entity, records } = req.body || {};
@@ -614,6 +703,10 @@ async function pushBatch(req, res) {
         } else if (entity === 'serviceOrders') {
           await upsertServiceOrder(tenant, instance, record);
           stats.serviceOrders += 1;
+        } else if (entity === 'contracts') {
+          await upsertCrmContract(tenant, record);
+        } else if (entity === 'equipmentMeters') {
+          await persistMeterHistory(tenant, record);
         } else if (entity === COMPANY_ENTITY) {
           stats.companyInfo += 1;
         } else {

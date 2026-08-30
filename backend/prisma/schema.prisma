@@ -62,6 +62,8 @@ model Tenant {
   printGuardConnections      PrintGuardConnection[]
   printGuardBindings         PrintGuardBinding[]
   printGuardTelemetryEvents  PrintGuardTelemetryEvent[]
+  crmContracts               CrmContract[]
+  crmMeterReadings           CrmMeterReading[]
 }
 
 model TenantSettings {
@@ -1213,4 +1215,60 @@ model PrintGuardTelemetryEvent {
   @@index([tenantId, state, createdAt])
   @@index([tenantId, severity, occurredAt])
   @@index([tenantId, customerCode, serialNumber])
+}
+
+// Contrato do iLux normalizado e consultável (hoje só existe como ExternalSyncRecord
+// raw, lido sob demanda). Populado pelo agente Firebird em firebirdSyncController.
+model CrmContract {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  externalSource     String    @default("firebird")
+  externalId         String // SEQCONTRATO / SEQIXLCONTRATOS
+  customerExternalId String? // CDCLIENTE
+  number             String?
+  type               String?
+  typeCode           String?
+  modality           String? // "contador" | "franquia" | ...
+  status             String?
+  isActive           Boolean   @default(true)
+  startsAt           DateTime?
+  endsAt             DateTime?
+  monthlyValue       Float?
+  pageFranchise      Int?      @default(0) // qt_franquia
+  franchiseValue     Float?    @default(0) // valor_franquia (R$ da franquia)
+  excessPageValue    Float?    @default(0) // R$ por pagina excedente
+  activeEquipment    Int?      @default(0) // IXLCONTRATOSIT (qtd ativa)
+  raw                Json?
+  externalUpdatedAt  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalSource, externalId])
+  @@index([tenantId, customerExternalId])
+  @@index([tenantId, isActive])
+}
+
+// Historico append-only de leitura de contador. Uma linha por
+// (equipamento, medidor, dia). Base para paginas/dia, rendimento e projecao.
+model CrmMeterReading {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  equipmentExternalId String // CDEQUIPAMENTO
+  serialNumber        String?
+  meterCode           String? // CDMEDIDOR
+  meterName           String? // rotulo do medidor
+  reading             Int // valor do contador
+  previousReading     Int?
+  readAt              DateTime // DTLEITURA (truncado ao dia, UTC)
+  previousReadAt      DateTime?
+  source              String   @default("firebird") // firebird | printguard | os
+  createdAt           DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, equipmentExternalId, meterCode, readAt])
+  @@index([tenantId, equipmentExternalId, readAt])
+  @@index([tenantId, serialNumber, readAt])
 }
