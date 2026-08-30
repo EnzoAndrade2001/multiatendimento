@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.7"
+DEFAULT_AGENT_VERSION = "1.0.8"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -1112,9 +1112,22 @@ class FirebirdRepository:
         reconciliacao (desativa no CRM o que sumiu do iLux)."""
         yield from self._rows("select CDEQUIPAMENTO from IXLEQUIPAMENTO", ())
 
-    def fetch_contracts(self, cursor: int) -> Iterator[dict[str, Any]]:
-        sql = """
-            select
+    def _contracts_sql(
+        self,
+        where_clause: str,
+        order_clause: str,
+        limit: int | None = None,
+    ) -> str:
+        """Monta a consulta de contratos para carga e refresh incremental.
+
+        A carga inicial e o refresh por ATUALIZADO precisam usar exatamente os
+        mesmos joins e agregacoes. Centralizar a consulta evita que a tela de
+        contratos e o refresh periodico passem a calcular franquia ou vinculos
+        de equipamentos de formas diferentes.
+        """
+        first = f"first {max(1, int(limit))}" if limit is not None else ""
+        return f"""
+            select {first}
                 ct.SEQCONTRATO, ct.NRCONTRATO, ct.CDCLIENTE, ct.STATUS,
                 ct.DTCONTRATOINI, ct.DTCONTRATOFIN, ct.TIPOCONTRATO,
                 ct.CDCONTRATOTP, tp.NMCONTRATOTP,
@@ -1156,10 +1169,39 @@ class FirebirdRepository:
                 where coalesce(TFMEDIDORATIVO, 'S') <> 'N'
                 group by SEQCONTRATO
             ) med on med.SEQCONTRATO = ct.SEQCONTRATO
-            where ct.SEQCONTRATO > ?
-            order by ct.SEQCONTRATO
+            where {where_clause}
+            order by {order_clause}
         """
+
+    def fetch_contracts(self, cursor: int) -> Iterator[dict[str, Any]]:
+        sql = self._contracts_sql("ct.SEQCONTRATO > ?", "ct.SEQCONTRATO")
         yield from self._rows(sql, (cursor,))
+
+    def fetch_recently_updated_contracts(
+        self,
+        updated_after: datetime | None = None,
+        limit: int = 5000,
+    ) -> Iterator[dict[str, Any]]:
+        """Reenvia contratos alterados no iLux sem depender do SEQCONTRATO.
+
+        O cursor da carga inicial so encontra contratos novos. Este caminho usa
+        ATUALIZADO para que alteracoes de franquia, excedente, vigencia ou
+        equipamentos vinculados cheguem ao CRM. Quando nao houver marcador
+        salvo, a consulta fica limitada para proteger o servidor; o backfill
+        versionado continua sendo o responsavel pela carga completa.
+        """
+        predicates = ["ct.ATUALIZADO is not null"]
+        params: tuple[Any, ...] = ()
+        if updated_after is not None:
+            predicates.append("ct.ATUALIZADO >= ?")
+            params = (updated_after,)
+
+        sql = self._contracts_sql(
+            " and ".join(predicates),
+            "ct.ATUALIZADO desc, ct.SEQCONTRATO desc",
+            limit,
+        )
+        yield from self._rows(sql, params)
 
     def get_receivables_watermark(self) -> int:
         con = self.connect()
@@ -2208,31 +2250,51 @@ def normalize_equipment(record: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_contract(record: dict[str, Any]) -> dict[str, Any]:
     external_id = str(record["seqcontrato"]).strip()
+    client_external_id = str(record["cdcliente"]).strip() if record.get("cdcliente") is not None else None
+    contract_number = first_non_empty(record.get("nrcontrato"))
+    contract_type = first_non_empty(record.get("nmcontratotp"), record.get("tipocontrato"), record.get("cdcontratotp"))
+    contract_type_code = first_non_empty(record.get("cdcontratotp"), record.get("tipocontrato"))
     total_value = float(record.get("valor_total_contrato") or 0)
     fixed_value = float(record.get("tr_vl_fixo") or 0)
     franchise_value = float(record.get("valor_franquia") or 0)
     monthly_value = fixed_value + franchise_value
+    page_franchise = int(record.get("qt_franquia") or 0)
+    overage_rate_min = float(record.get("min_excedente") or 0) / 1000
+    overage_rate_max = float(record.get("max_excedente") or 0) / 1000
+    equipment_count = int(record.get("qt_equipamentos") or 0)
+    updated_at = parse_firebird_timestamp(record.get("atualizado"))
     return {
         "externalId": external_id,
-        "clientExternalId": str(record["cdcliente"]).strip() if record.get("cdcliente") is not None else None,
-        "contractNumber": first_non_empty(record.get("nrcontrato")),
+        "clientExternalId": client_external_id,
+        "contractNumber": contract_number,
         "status": first_non_empty(record.get("status")),
-        "contractType": first_non_empty(record.get("nmcontratotp"), record.get("tipocontrato"), record.get("cdcontratotp")),
-        "contractTypeCode": first_non_empty(record.get("cdcontratotp"), record.get("tipocontrato")),
+        "contractType": contract_type,
+        "contractTypeCode": contract_type_code,
         "value": monthly_value if monthly_value > 0 else total_value,
         "monthlyValue": monthly_value,
         "fixedValue": fixed_value,
         "franchiseValue": franchise_value,
         "totalValue": total_value,
-        "equipmentCount": int(record.get("qt_equipamentos") or 0),
-        "pageFranchise": int(record.get("qt_franquia") or 0),
-        "overageRateMin": float(record.get("min_excedente") or 0) / 1000,
-        "overageRateMax": float(record.get("max_excedente") or 0) / 1000,
+        "equipmentCount": equipment_count,
+        "pageFranchise": page_franchise,
+        "overageRateMin": overage_rate_min,
+        "overageRateMax": overage_rate_max,
         "billingMode": first_non_empty(record.get("billing_mode")),
         "startsAt": parse_firebird_timestamp(record.get("dtcontratoini")),
         "endsAt": parse_firebird_timestamp(record.get("dtcontratofin")),
-        "updatedAt": parse_firebird_timestamp(record.get("atualizado")),
+        "updatedAt": updated_at,
         "inclusionAt": parse_firebird_timestamp(record.get("inclusao")),
+        # Nomes canônicos adicionais mantidos no mesmo payload para tornar o
+        # contrato explícito e facilitar a compatibilidade com consumidores
+        # que não conhecem os nomes históricos usados pelo agente.
+        "customerExternalId": client_external_id,
+        "number": contract_number,
+        "type": contract_type,
+        "typeCode": contract_type_code,
+        "modality": first_non_empty(record.get("billing_mode")),
+        "activeEquipment": equipment_count,
+        "excessPageValue": overage_rate_max or overage_rate_min,
+        "externalUpdatedAt": updated_at,
         "raw": {k: json_safe(v) for k, v in record.items()},
     }
 
@@ -2489,6 +2551,7 @@ def sync_crm360_details(
     state: StateStore,
     batch_size: int,
     force_meter_bootstrap: bool = False,
+    force_contract_bootstrap: bool = False,
 ) -> None:
     receivable_cursor = state.get_cursor("receivables")
     if receivable_cursor <= 0:
@@ -2519,8 +2582,14 @@ def sync_crm360_details(
     # medidor - precisa aparecer no CRM rapido o suficiente pro atendente nao
     # esbarrar em dado desatualizado no meio de um atendimento real.
     CRM360_REFRESH_INTERVAL_SECONDS = 15 * 60
-    refresh_due = force_meter_bootstrap or not last_refresh or (datetime.now() - last_refresh).total_seconds() >= CRM360_REFRESH_INTERVAL_SECONDS
+    refresh_due = (
+        force_meter_bootstrap
+        or force_contract_bootstrap
+        or not last_refresh
+        or (datetime.now() - last_refresh).total_seconds() >= CRM360_REFRESH_INTERVAL_SECONDS
+    )
     if refresh_due:
+        refresh_started_at = datetime.now()
         recent_receivable_rows = list(repo.fetch_recent_receivables(1000))
         recent_receivables, _ = push_normalized_batches(
             crm, "receivables", recent_receivable_rows, normalize_receivable, batch_size
@@ -2544,6 +2613,37 @@ def sync_crm360_details(
         recent_equipments, _ = push_normalized_batches(
             crm, "equipments", repo.fetch_recently_updated_equipments(5000), normalize_equipment, batch_size
         )
+        contract_refresh_total = 0
+        if force_contract_bootstrap:
+            # O sync_entity("contracts") acabou de reenviar a tabela inteira
+            # por causa do backfill versionado. Evita duplicar esse custo no
+            # mesmo ciclo, mas deixa o watermark preparado para o proximo.
+            logging.info("CRM 360: refresh de contratos ignorado apos backfill completo")
+        else:
+            contract_watermark_text = state.data.get("crm360_contracts_updated_at")
+            try:
+                contract_watermark = (
+                    datetime.fromisoformat(contract_watermark_text)
+                    if contract_watermark_text
+                    else None
+                )
+            except (TypeError, ValueError):
+                contract_watermark = None
+
+            # ATUALIZADO pode ter precisao menor que a do relogio do agente e
+            # os dois servidores podem ter pequena diferenca de horario. A
+            # sobreposicao torna o refresh resiliente a esses casos; o upsert
+            # no backend torna a repeticao segura.
+            if contract_watermark is not None:
+                contract_watermark -= timedelta(minutes=5)
+            contract_refresh_total, _ = push_normalized_batches(
+                crm,
+                "contracts",
+                repo.fetch_recently_updated_contracts(contract_watermark, 5000),
+                normalize_contract,
+                batch_size,
+            )
+
         equipment_ids = sorted({
             int(row["cdequipamento"])
             for row in repo.fetch_equipment_ids()
@@ -2558,12 +2658,17 @@ def sync_crm360_details(
                 "externalIds": [str(value) for value in equipment_ids],
                 "capturedAt": datetime.now().isoformat(timespec="seconds"),
             }])
-        state.data["crm360_recent_refresh_at"] = datetime.now().isoformat(timespec="seconds")
+        # O marcador so e salvo depois de todos os pushes do ciclo. Se o
+        # backend falhar, a excecao interrompe o ciclo e a janela sera tentada
+        # novamente na proxima execucao.
+        state.data["crm360_recent_refresh_at"] = refresh_started_at.isoformat(timespec="seconds")
+        state.data["crm360_contracts_updated_at"] = refresh_started_at.isoformat(timespec="seconds")
         logging.info(
-            "CRM 360: atualizados %s titulo(s), %s medidor(es) e %s equipamento(s) recentes",
+            "CRM 360: atualizados %s titulo(s), %s medidor(es), %s equipamento(s) e %s contrato(s) recentes",
             recent_receivables + open_receivables,
             recent_meters,
             recent_equipments,
+            contract_refresh_total,
         )
     elif meter_total:
         logging.info("CRM 360: %s novo(s) medidor(es) sincronizado(s)", meter_total)
@@ -2682,7 +2787,7 @@ def run_cycle(
     # em dinheiro), e cada medidor do contrato pode ter uma taxa diferente --
     # somar essas taxas entre medidores nao produz nenhum valor real. Trocado
     # por min/max da taxa (por pagina) entre os medidores ativos do contrato.
-    contract_details_version = 5
+    contract_details_version = 6
     receivable_details_version = 2
     refresh_contract_details = int(state.data.get("contract_details_version", 0) or 0) < contract_details_version
     refresh_receivable_details = int(state.data.get("receivable_details_version", 0) or 0) < receivable_details_version
@@ -2746,6 +2851,7 @@ def run_cycle(
         state,
         config.batch_size,
         force_meter_bootstrap=refresh_contract_details or full,
+        force_contract_bootstrap=refresh_contract_details or full,
     )
     if refresh_receivable_details:
         state.data["receivable_details_version"] = receivable_details_version

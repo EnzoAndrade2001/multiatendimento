@@ -20,7 +20,7 @@ Cliente de integração para rodar no servidor da empresa, ler o Firebird localm
 - Monitora, sem alterar os arquivos, uma ou mais pastas de PDFs oficiais exportados em **Documentos em Lote**
 - Associa Nota/Fatura, Demonstrativo e boleto pelo conteúdo (CNPJ, número, datas e valor), sem depender do nome do arquivo
 
-Os dados financeiros e os contadores são atualizados em lotes. A primeira execução carrega a janela inicial; depois, novos registros seguem por cursor. Uma vez por hora o agente confere os títulos em aberto, os 1.000 títulos mais recentes e os 1.000 medidores mais recentes. Isso mantém baixas e novas leituras atualizadas sem varrer todas as tabelas a cada ciclo.
+Os dados financeiros, contratos e contadores são atualizados em lotes. A primeira execução carrega a janela inicial; depois, novos registros seguem por cursor. A cada 15 minutos o agente confere os títulos em aberto, os registros recentes e as alterações de contratos, equipamentos e medidores. O refresh de contratos usa `ATUALIZADO` com uma pequena sobreposição e upsert idempotente, para que alterações de franquia, excedente, vigência ou vínculos não fiquem desatualizadas no CRM.
 
 O incremental de O.S. vem ativo por padrão. Para desativá-lo deliberadamente, configure `SYNC_SERVICE_ORDERS_INCREMENTAL=false`.
 
@@ -45,7 +45,7 @@ Depois preencha o arquivo `.env` com:
 
 O agente também informa sua identificação em cada heartbeat enviado ao CRM:
 
-- `AGENT_VERSION`: versão do executável instalado (release atual: `1.0.7`)
+- `AGENT_VERSION`: versão do executável instalado (release atual: `1.0.8`)
 - `AGENT_PROTOCOL_VERSION`: versão do contrato de comunicação com o backend
 
 Além do `tenantSlug` usado pelas versões atuais do backend, o heartbeat inclui
