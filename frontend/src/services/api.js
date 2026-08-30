@@ -126,6 +126,7 @@ export const getAuditEvents = (params = {}, signal) => api.get('/audit/events', 
 export const getPrintGuardStatus = () => api.get('/integrations/printguard');
 export const createPrintGuardPairing = (data = {}) => api.post('/integrations/printguard/pairing', data);
 export const testPrintGuardConnection = () => api.post('/integrations/printguard/test');
+export const syncPrintGuardEvents = () => api.post('/integrations/printguard/sync');
 export const disconnectPrintGuard = () => api.post('/integrations/printguard/disconnect');
 export const getPrintGuardMetrics = () => api.get('/integrations/printguard/metrics');
 

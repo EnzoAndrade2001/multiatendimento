@@ -20,6 +20,7 @@ import {
   disconnectPrintGuard,
   getPrintGuardMetrics,
   getPrintGuardStatus,
+  syncPrintGuardEvents,
   testPrintGuardConnection,
 } from '../services/api';
 import ActionButton from '../components/ui/ActionButton';
@@ -86,7 +87,7 @@ export default function PrintGuardSettings() {
         status: statusValue(nextConnection),
         baseUrl: nextConnection.baseUrl || nextConnection.url || '',
         organization: nextConnection.organization?.name || nextConnection.organization || nextConnection.companyName || '',
-        lastSync: nextConnection.lastSync || nextConnection.lastSyncAt || nextConnection.syncedAt || null,
+        lastSync: nextConnection.lastSync || nextConnection.lastSyncAt || nextConnection.lastConnectedAt || nextConnection.lastTestAt || nextConnection.syncedAt || null,
       });
       setBaseUrl(nextConnection.baseUrl || nextConnection.url || '');
       setMapping(normalizeMapping(payload.mappingSummary || payload.mapping || nextConnection.mapping));
@@ -144,6 +145,26 @@ export default function PrintGuardSettings() {
     }
   }
 
+  async function handleSync() {
+    setWorking('sync');
+    setError('');
+    setNotice('');
+    try {
+      const { data } = await syncPrintGuardEvents();
+      const payload = unwrap(data);
+      const processed = Number(payload.processed || 0);
+      const pages = Number(payload.pages || 0);
+      setNotice(processed > 0
+        ? `Sincronização concluída: ${processed.toLocaleString('pt-BR')} evento(s) importado(s) em ${pages.toLocaleString('pt-BR')} página(s).`
+        : 'Sincronização concluída. Não havia novos eventos pendentes no PrintGuard.');
+      await load();
+    } catch (requestError) {
+      setError(requestError?.response?.data?.error || 'Não foi possível sincronizar os eventos do PrintGuard.');
+    } finally {
+      setWorking('');
+    }
+  }
+
   async function handleDisconnect() {
     if (!window.confirm('Desativar a conexão PrintGuard? A coleta ficará pausada até um novo pareamento.')) return;
     setWorking('disconnect');
@@ -195,7 +216,11 @@ export default function PrintGuardSettings() {
         <div style={styles.card}>
           <div style={styles.cardHeading}><div><h3 style={styles.cardTitle}><Wifi size={18} /> Estado da integração</h3><p style={styles.cardSubtitle}>Último sinal recebido e organização vinculada.</p></div><span style={{ ...styles.statusDot, ...(status === 'connected' ? styles.statusDotOn : {}) }} /></div>
           {loading && !connection.organization ? <div style={styles.loading}><RefreshCw size={17} className="spin" /> Consultando integração…</div> : <div style={styles.connectionDetails}><Detail label="Organização" value={connection.organization || 'Não vinculada'} /><Detail label="Última comunicação" value={dateLabel(connection.lastSync)} /><Detail label="Endpoint" value={connection.baseUrl || 'Não informado'} /></div>}
-          <div style={styles.connectionActions}><ActionButton variant="secondary" onClick={handleTest} loading={working === 'test'} disabled={status === 'disconnected'}><Activity size={16} /> Testar conexão</ActionButton><button type="button" style={styles.dangerButton} onClick={handleDisconnect} disabled={working === 'disconnect' || status === 'disconnected'}>{working === 'disconnect' ? <RefreshCw size={15} className="spin" /> : <Unplug size={15} />} Desativar</button></div>
+          <div style={styles.connectionActions}>
+            <ActionButton variant="secondary" onClick={handleTest} loading={working === 'test'} disabled={status === 'disconnected' || Boolean(working)}><Activity size={16} /> Testar conexão</ActionButton>
+            <ActionButton onClick={handleSync} loading={working === 'sync'} disabled={status === 'disconnected' || Boolean(working)}><RefreshCw size={16} /> Sincronizar agora</ActionButton>
+            <button type="button" style={styles.dangerButton} onClick={handleDisconnect} disabled={Boolean(working) || status === 'disconnected'}>{working === 'disconnect' ? <RefreshCw size={15} className="spin" /> : <Unplug size={15} />} Desativar</button>
+          </div>
         </div>
       </section>
 

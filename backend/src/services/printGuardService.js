@@ -227,6 +227,10 @@ async function ingestWebhook({ connection, body, rawBody, timestamp, signature }
     error.statusCode = 401;
     throw error;
   }
+  await prisma.printGuardConnection.update({
+    where: { id: connection.id },
+    data: { status: 'CONNECTED', lastConnectedAt: new Date(), lastError: null },
+  });
   const fields = eventFields(body);
   if (!fields.eventId) {
     const error = new Error('Evento PrintGuard sem eventId.');
@@ -406,7 +410,7 @@ async function syncEvents(tenantId) {
     if (page.nextCursor) cursor = page.nextCursor;
     if (!page.hasMore || !page.nextCursor || pages >= 50) break;
   } while (true);
-  await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastCursor: cursor, lastTestAt: new Date(), status: 'CONNECTED', lastError: null } });
+  await prisma.printGuardConnection.update({ where: { id: connection.id }, data: { lastCursor: cursor, lastTestAt: new Date(), lastConnectedAt: new Date(), status: 'CONNECTED', lastError: null } });
   return { processed, pages, nextCursor: cursor };
 }
 
