@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Clipboard,
   Clock3,
-  Copy,
   Database,
   Link2,
   PlugZap,
@@ -64,7 +63,6 @@ export default function PrintGuardSettings() {
   const [metrics, setMetrics] = useState({ devices: 0, readings24h: 0, alerts: 0, errors24h: 0 });
   const [mapping, setMapping] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
-  const [pairingExpiresAt, setPairingExpiresAt] = useState(null);
   const [baseUrl, setBaseUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState('');
@@ -110,20 +108,21 @@ export default function PrintGuardSettings() {
   useEffect(() => { load(); }, [load]);
 
   async function handlePairing() {
+    const code = pairingCode.trim();
+    if (!code) {
+      setError('Informe o código temporário gerado no PrintGuard.');
+      return;
+    }
     setWorking('pair');
     setError('');
     setNotice('');
     try {
-      const { data } = await createPrintGuardPairing({ baseUrl: baseUrl.trim() || undefined });
-      const payload = unwrap(data);
-      const code = payload.code || payload.pairingCode || payload.pairing?.code;
-      if (!code) throw new Error('O servidor não retornou um código de pareamento.');
-      setPairingCode(String(code));
-      setPairingExpiresAt(payload.expiresAt || payload.pairing?.expiresAt || (payload.expiresIn ? Date.now() + Number(payload.expiresIn) * 1000 : null));
-      setNotice('Código temporário gerado. Informe-o no aplicativo PrintGuard para concluir o pareamento.');
+      await createPrintGuardPairing({ code, baseUrl: baseUrl.trim() || undefined });
+      setPairingCode('');
+      setNotice('PrintGuard vinculado com sucesso. A sincronização já pode ser testada.');
       await load();
     } catch (requestError) {
-      setError(requestError?.response?.data?.error || requestError.message || 'Não foi possível gerar o código de pareamento.');
+      setError(requestError?.response?.data?.error || requestError.message || 'Não foi possível concluir o pareamento. Confira o código e tente novamente.');
     } finally {
       setWorking('');
     }
@@ -162,16 +161,6 @@ export default function PrintGuardSettings() {
     }
   }
 
-  async function copyPairingCode() {
-    if (!pairingCode) return;
-    try {
-      await navigator.clipboard.writeText(pairingCode);
-      setNotice('Código copiado.');
-    } catch {
-      setNotice('Selecione e copie o código manualmente.');
-    }
-  }
-
   const status = statusValue(connection);
   const statusIcon = status === 'connected' ? <CheckCircle2 size={19} /> : status === 'pending' ? <Clock3 size={19} /> : <XCircle size={19} />;
   const statusTone = status === 'connected' ? 'success' : status === 'pending' ? 'warning' : 'muted';
@@ -194,13 +183,13 @@ export default function PrintGuardSettings() {
 
       <section style={styles.connectionGrid} className="printguard-connection-grid" aria-label="Conexão PrintGuard">
         <div style={styles.card}>
-          <div style={styles.cardHeading}><div><h3 style={styles.cardTitle}><Link2 size={18} /> Pareamento</h3><p style={styles.cardSubtitle}>Gere um código de uso único para vincular o aplicativo local à organização.</p></div><span style={{ ...styles.statusPill, ...styles[`${statusTone}Pill`] }}>{statusIcon}{statusLabel(status)}</span></div>
+          <div style={styles.cardHeading}><div><h3 style={styles.cardTitle}><Link2 size={18} /> Pareamento</h3><p style={styles.cardSubtitle}>Cole o código temporário gerado no painel do PrintGuard para vincular esta empresa.</p></div><span style={{ ...styles.statusPill, ...styles[`${statusTone}Pill`] }}>{statusIcon}{statusLabel(status)}</span></div>
           <label style={styles.field}><span>URL da API PrintGuard</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://printguard.suaempresa.com" /></label>
           <div style={styles.pairingRow} className="printguard-pairing-row">
-            <div style={styles.codeBox} aria-live="polite"><span style={styles.codeLabel}>Código temporário</span><strong>{pairingCode || '— — — — — —'}</strong>{pairingExpiresAt ? <small>Expira em {dateLabel(pairingExpiresAt)}</small> : <small>Gere um código quando precisar conectar um novo agente.</small>}</div>
-            <div style={styles.actionStack} className="printguard-action-stack"><ActionButton onClick={handlePairing} loading={working === 'pair'}><PlugZap size={16} /> Gerar código</ActionButton>{pairingCode ? <button type="button" style={styles.secondaryButton} onClick={copyPairingCode}><Copy size={15} /> Copiar</button> : null}</div>
+            <label style={styles.field}><span>Código gerado no PrintGuard</span><input value={pairingCode} onChange={(event) => setPairingCode(event.target.value)} placeholder="Ex.: mta_..." autoComplete="off" spellCheck={false} /></label>
+            <div style={styles.actionStack} className="printguard-action-stack"><ActionButton onClick={handlePairing} loading={working === 'pair'} disabled={!pairingCode.trim()}><PlugZap size={16} /> Conectar PrintGuard</ActionButton></div>
           </div>
-          <div style={styles.help}><ShieldCheck size={16} /><span>O código expira rapidamente e não substitui credenciais. Nunca exibimos tokens ou segredos nesta tela.</span></div>
+          <div style={styles.help}><ShieldCheck size={16} /><span>O código é gerado no PrintGuard, expira em 15 minutos e só pode ser usado uma vez. Tokens e segredos permanecem protegidos nos servidores.</span></div>
         </div>
 
         <div style={styles.card}>
