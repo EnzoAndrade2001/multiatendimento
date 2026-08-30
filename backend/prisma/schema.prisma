@@ -1184,6 +1184,9 @@ model PrintGuardBinding {
   customerId   String?
   equipmentId  String?
   state        String   @default("UNMATCHED") // MATCHED, UNMATCHED, AMBIGUOUS
+  source       String   @default("AUTO") // AUTO, MANUAL
+  confirmedAt  DateTime?
+  confirmedById String?
   lastSeenAt   DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -1213,6 +1216,19 @@ model PrintGuardTelemetryEvent {
   serviceOrderId  String?
   errorCode       String?
   errorMessage    String?  @db.Text
+  // Workflow gerencial. Todos os campos sao opcionais/default para manter a
+  // migracao compativel com eventos historicos ja gravados.
+  priorityLevel   String?  // P1, P2, P3, P4
+  priorityScore   Int?
+  recommendation Json?
+  assignedToId   String?
+  decisionDueAt  DateTime?
+  monitoringUntil DateTime?
+  monitoringCondition String? @db.Text
+  nextStep        String?  @db.Text
+  ignoredReason   String?  @db.Text
+  decisionAt      DateTime?
+  decisionById    String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -1223,6 +1239,8 @@ model PrintGuardTelemetryEvent {
   @@index([tenantId, state, createdAt])
   @@index([tenantId, severity, occurredAt])
   @@index([tenantId, customerCode, serialNumber])
+  @@index([tenantId, assignedToId, decisionDueAt])
+  @@index([tenantId, priorityLevel, state])
 }
 
 // Contrato do iLux normalizado e consultável (hoje só existe como ExternalSyncRecord

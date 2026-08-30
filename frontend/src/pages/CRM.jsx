@@ -76,7 +76,7 @@ function readSavedCrmViews() {
 export default function CRM() {
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [customers, setCustomers] = useState([]);
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get('q') || '');
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ total: 0, pageSize: CRM_PAGE_SIZE, hasMore: false });
@@ -94,7 +94,7 @@ export default function CRM() {
   const [flaggedDocuments, setFlaggedDocuments] = useState([]);
   const [flaggedExpanded, setFlaggedExpanded] = useState(false);
 
-  useEffect(() => { load('', 1); }, []);
+  useEffect(() => { load(new URLSearchParams(window.location.search).get('q') || '', 1); }, []);
   useEffect(() => {
     // Reativo: só existe aqui o que alguém já tentou abrir e falhou (documento
     // ambíguo ou ainda não localizado nas pastas). Usuário sem acesso financeiro

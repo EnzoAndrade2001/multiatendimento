@@ -5,6 +5,7 @@ const printGuard = require('./printGuardService');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LOW_TONER_RE = /toner|supply|cartucho|insumo|cilindro|drum|maintenance/i;
 const HARDWARE_RE = /error|erro|jam|atol|hardware|fusor|falha|offline|stopped|parou/i;
+const CLOSED_OS_RE = /^(FINALIZADA|FECHADA|CONCLUIDA|CANCELADA|C|F)$/i;
 
 function obj(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -75,6 +76,46 @@ function pickOsType(types, eventType) {
   return null;
 }
 
+function priorityForIncident({ severity, mappingState, isHardware, isLowToner, tonerDaysLeft, state, monitoringUntil, hasOpenServiceOrder, ageMinutes }) {
+  let score = severityRank(severity) * 18;
+  const reasons = [];
+  const monitorDeadline = monitoringUntil ? new Date(monitoringUntil) : null;
+  const monitoringExpired = state === 'MONITORING' && monitorDeadline && monitorDeadline.getTime() <= Date.now();
+  if (mappingState !== 'MATCHED') { score += 28; reasons.push('Vinculo impede a decisao operacional'); }
+  if (isHardware && severityRank(severity) >= 3) { score += 24; reasons.push('Possivel parada do equipamento'); }
+  if (isLowToner && Number.isFinite(tonerDaysLeft)) {
+    if (tonerDaysLeft <= 1) { score += 35; reasons.push('Insumo previsto para acabar em ate 1 dia'); }
+    else if (tonerDaysLeft <= 3) { score += 25; reasons.push('Insumo previsto para acabar em ate 3 dias'); }
+    else if (tonerDaysLeft <= 7) { score += 12; reasons.push('Reposicao recomendada nesta semana'); }
+  }
+  if (Number(ageMinutes) >= 24 * 60) { score += 8; reasons.push('Decisao pendente ha mais de 24 horas'); }
+  if (monitoringExpired) { score += 20; reasons.push('Prazo de monitoramento expirou'); }
+  if (hasOpenServiceOrder) { score -= 35; reasons.push('Ja existe O.S. aberta para o equipamento'); }
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const level = score >= 75 ? 'P1' : score >= 50 ? 'P2' : score >= 25 ? 'P3' : 'P4';
+  return { level, score, reasons, monitoringExpired: Boolean(monitoringExpired) };
+}
+
+function recommendationForIncident(incident) {
+  const openOrder = incident.openServiceOrder;
+  if (incident.mappingState !== 'MATCHED') {
+    return { action: 'FIX_BINDING', label: 'Corrigir vinculo', explanation: 'O alerta nao pode gerar uma O.S. segura enquanto cliente e equipamento nao forem confirmados.', confidence: 'high' };
+  }
+  if (openOrder) {
+    return { action: 'VIEW_SERVICE_ORDER', label: 'Ver O.S. existente', explanation: `A O.S. ${openOrder.number || openOrder.id} ja atende este equipamento; evite abertura duplicada.`, confidence: 'high' };
+  }
+  if (incident.isHardware && severityRank(incident.severity) >= 3) {
+    return { action: 'OPEN_SERVICE_ORDER', label: 'Abrir O.S. agora', explanation: 'Falha critica com risco de parada do equipamento.', confidence: 'high' };
+  }
+  if (incident.isLowToner && Number.isFinite(incident.toner?.daysLeft) && incident.toner.daysLeft <= 3) {
+    return { action: 'OPEN_SERVICE_ORDER', label: 'Abrir O.S. de suprimento', explanation: `Previsao de termino em aproximadamente ${Math.max(0, Math.ceil(incident.toner.daysLeft))} dia(s).`, confidence: incident.trend?.reliable ? 'high' : 'medium' };
+  }
+  if (incident.state === 'MONITORING') {
+    return { action: 'KEEP_MONITORING', label: 'Manter monitoramento', explanation: incident.monitoringCondition || 'Acompanhar a proxima leitura antes de abrir uma O.S.', confidence: 'medium' };
+  }
+  return { action: 'MONITOR', label: 'Monitorar com prazo', explanation: 'Nao ha evidencia suficiente para abertura imediata; defina prazo e condicao de escalonamento.', confidence: incident.trend?.points >= 2 ? 'medium' : 'low' };
+}
+
 // ---------------------------------------------------------------------------
 
 async function loadDecisionEvents(tenantId, { windowHours = 72, states = ['RECEIVED', 'MONITORING', 'ERROR'] } = {}) {
@@ -85,6 +126,8 @@ async function loadDecisionEvents(tenantId, { windowHours = 72, states = ['RECEI
       id: true, eventType: true, severity: true, occurredAt: true, createdAt: true, state: true,
       customerCode: true, serialNumber: true, payload: true, bindingId: true, errorCode: true,
       errorMessage: true, ticketId: true, serviceOrderId: true,
+      assignedToId: true, decisionDueAt: true, monitoringUntil: true, monitoringCondition: true,
+      nextStep: true, ignoredReason: true, decisionAt: true, decisionById: true,
     },
     orderBy: { createdAt: 'desc' },
     take: 400,
@@ -101,7 +144,8 @@ async function enrichEvents(tenantId, events) {
 
   const customerIds = [...new Set(bindings.map((b) => b.customerId).filter(Boolean))];
   const equipmentIds = [...new Set(bindings.map((b) => b.equipmentId).filter(Boolean))];
-  const [customers, crmEquipments, osTypes] = await Promise.all([
+  const assigneeIds = [...new Set(events.map((e) => e.assignedToId).filter(Boolean))];
+  const [customers, crmEquipments, osTypes, assignees] = await Promise.all([
     customerIds.length ? prisma.crmCustomer.findMany({
       where: { tenantId, id: { in: customerIds } },
       select: { id: true, name: true, externalId: true, address: true, neighborhood: true, city: true, state: true },
@@ -114,9 +158,11 @@ async function enrichEvents(tenantId, events) {
       },
     }) : [],
     prisma.crmOsType.findMany({ where: { tenantId }, select: { code: true, name: true, description: true } }).catch(() => []),
+    assigneeIds.length ? prisma.user.findMany({ where: { tenantId, id: { in: assigneeIds }, active: true }, select: { id: true, name: true } }) : [],
   ]);
   const customerById = new Map(customers.map((c) => [c.id, c]));
   const crmEqById = new Map(crmEquipments.map((e) => [e.id, e]));
+  const assigneeById = new Map(assignees.map((u) => [u.id, u]));
 
   // O.S. locais por equipamento (para contagem de 90 dias) — resolvidas por externalId.
   const eqExternalIds = [...new Set(crmEquipments.map((e) => e.externalId).filter(Boolean))];
@@ -136,6 +182,23 @@ async function enrichEvents(tenantId, events) {
     })
     : [];
   const callCountByLocalId = new Map(callCounts.map((row) => [row.equipmentId, row._count._all]));
+  const activeOrders = localEquipments.length
+    ? await prisma.serviceOrder.findMany({
+      where: {
+        tenantId,
+        equipmentId: { in: localEquipments.map((e) => e.id) },
+        closedAt: null,
+        resolvedAt: null,
+      },
+      select: { id: true, externalId: true, equipmentId: true, status: true, cdOstp: true, defect: true, createdAt: true, ticketId: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    : [];
+  const openOrderByEquipment = new Map();
+  for (const order of activeOrders) {
+    if (CLOSED_OS_RE.test(String(order.status || ''))) continue;
+    if (!openOrderByEquipment.has(order.equipmentId)) openOrderByEquipment.set(order.equipmentId, order);
+  }
 
   const incidents = [];
   for (const event of events) {
@@ -163,8 +226,9 @@ async function enrichEvents(tenantId, events) {
       });
     }
     const suggested = pickOsType(osTypes, eventType);
+    const openOrder = localEq ? openOrderByEquipment.get(localEq.id) || null : null;
 
-    incidents.push({
+    const incident = {
       id: event.id,
       externalEventId: undefined,
       eventType,
@@ -198,16 +262,51 @@ async function enrichEvents(tenantId, events) {
       serialNumber: crmEq?.serialNumber || event.serialNumber || null,
       measurement: readingLabel({ ...payload, errorMessage: event.errorMessage }, LOW_TONER_RE.test(eventType)),
       health: { score: healthScore, bucket: healthBucket(healthScore), callCount90d },
+      healthScore,
+      callCount90d,
       toner: { levelPct: tonerLevelPct, daysLeft: insight?.toner?.daysLeft ?? null },
       trend: insight?.trend || null,
       contract: insight?.contract || null,
       franchise: insight?.franchise || null,
       suggestedOsType: suggested ? { code: suggested.code, name: suggested.name } : null,
+      workflow: {
+        assignedTo: event.assignedToId ? { id: event.assignedToId, name: assigneeById.get(event.assignedToId)?.name || null } : null,
+        decisionDueAt: event.decisionDueAt,
+        monitoringUntil: event.monitoringUntil,
+        monitoringCondition: event.monitoringCondition,
+        nextStep: event.nextStep,
+        decisionAt: event.decisionAt,
+        decisionById: event.decisionById,
+      },
+      openServiceOrder: openOrder && {
+        id: openOrder.id,
+        number: openOrder.externalId,
+        status: openOrder.status,
+        typeCode: openOrder.cdOstp,
+        defect: openOrder.defect,
+        createdAt: openOrder.createdAt,
+        ticketId: openOrder.ticketId,
+      },
+    };
+    const priority = priorityForIncident({
+      severity: incident.severity,
+      mappingState,
+      isHardware: incident.isHardware,
+      isLowToner: incident.isLowToner,
+      tonerDaysLeft: incident.toner.daysLeft,
+      state: incident.state,
+      monitoringUntil: event.monitoringUntil,
+      hasOpenServiceOrder: Boolean(openOrder),
+      ageMinutes,
     });
+    incident.priority = priority;
+    incident.recommendation = recommendationForIncident(incident);
+    incident.canOpenServiceOrder = incident.canOpenServiceOrder && !openOrder;
+    incidents.push(incident);
   }
 
   incidents.sort((a, b) => {
-    const d = severityRank(b.severity) - severityRank(a.severity);
+    const d = (b.priority?.score || 0) - (a.priority?.score || 0);
     if (d !== 0) return d;
     return new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime();
   });
@@ -245,10 +344,162 @@ async function parkQueue(tenantId, query = {}) {
     stopped: incidents.filter((i) => i.isHardware && severityRank(i.severity) >= 3).length,
     affectedEquipment: new Set(incidents.map((i) => i.serialNumber).filter(Boolean)).size,
     overageValue: incidents.reduce((sum, i) => sum + (i.franchise?.overValue || 0), 0),
+    actionNow: incidents.filter((i) => i.priority.level === 'P1' && !i.openServiceOrder).length,
+    riskWithin3Days: incidents.filter((i) => Number.isFinite(i.toner?.daysLeft) && i.toner.daysLeft <= 3).length,
+    overdueDecisions: incidents.filter((i) => {
+      const due = i.workflow?.decisionDueAt || i.workflow?.monitoringUntil;
+      return due && new Date(due).getTime() <= Date.now() && !i.openServiceOrder;
+    }).length,
+    openServiceOrders: incidents.filter((i) => i.openServiceOrder).length,
   };
 
+  const replenishmentMap = new Map();
+  for (const incident of incidents.filter((item) => item.isLowToner && item.customer?.id)) {
+    const key = incident.customer.id;
+    const group = replenishmentMap.get(key) || {
+      customer: incident.customer,
+      items: [],
+      urgent: 0,
+      monitoring: 0,
+      withOpenServiceOrder: 0,
+    };
+    group.items.push({
+      eventId: incident.id,
+      equipment: incident.equipment,
+      serialNumber: incident.serialNumber,
+      measurement: incident.measurement,
+      toner: incident.toner,
+      priority: incident.priority,
+      recommendation: incident.recommendation,
+      openServiceOrder: incident.openServiceOrder,
+    });
+    if (incident.priority.level === 'P1' || incident.priority.level === 'P2') group.urgent += 1;
+    if (incident.state === 'MONITORING') group.monitoring += 1;
+    if (incident.openServiceOrder) group.withOpenServiceOrder += 1;
+    replenishmentMap.set(key, group);
+  }
+  const replenishment = [...replenishmentMap.values()]
+    .map((group) => ({ ...group, total: group.items.length, eventIds: group.items.map((item) => item.eventId) }))
+    .sort((a, b) => b.urgent - a.urgent || b.total - a.total);
+
   const limit = Math.max(1, Math.min(Number(query.limit) || 60, 200));
-  return { incidents: incidents.slice(0, limit), summary, truncated: incidents.length > limit };
+  return { incidents: incidents.slice(0, limit), summary, replenishment, truncated: incidents.length > limit };
+}
+
+function parseOptionalDate(value, field, { future = false } = {}) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) { const e = new Error(`${field} invalido.`); e.statusCode = 400; throw e; }
+  if (future && date.getTime() <= Date.now()) { const e = new Error(`${field} deve estar no futuro.`); e.statusCode = 400; throw e; }
+  return date;
+}
+
+async function updateDecisionWorkflow(tenantId, eventId, input = {}, actorId = null) {
+  const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
+  if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+  const assignedToId = input.assignedToId === '' ? null : (input.assignedToId ?? event.assignedToId);
+  if (assignedToId) {
+    const user = await prisma.user.findFirst({ where: { tenantId, id: assignedToId, active: true }, select: { id: true } });
+    if (!user) { const e = new Error('Responsavel nao pertence a esta empresa ou esta inativo.'); e.statusCode = 400; throw e; }
+  }
+  const data = {
+    assignedToId,
+    decisionById: actorId || event.decisionById,
+    decisionAt: new Date(),
+  };
+  if (Object.prototype.hasOwnProperty.call(input, 'decisionDueAt')) data.decisionDueAt = parseOptionalDate(input.decisionDueAt, 'Prazo da decisao');
+  if (Object.prototype.hasOwnProperty.call(input, 'nextStep')) data.nextStep = String(input.nextStep || '').trim().slice(0, 2000) || null;
+  return prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data });
+}
+
+async function bindingCandidates(tenantId, eventId, query = {}) {
+  const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
+  if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+  const binding = event.bindingId
+    ? await prisma.printGuardBinding.findFirst({ where: { tenantId, id: event.bindingId } })
+    : null;
+  const payload = obj(event.payload);
+  const q = String(query.q || '').trim();
+  const customerCode = event.customerCode || binding?.customerCode;
+  const customerWhere = q
+    ? { tenantId, OR: [{ name: { contains: q, mode: 'insensitive' } }, { externalId: { contains: q, mode: 'insensitive' } }, { cpfCnpj: { contains: q, mode: 'insensitive' } }] }
+    : { tenantId, ...(customerCode ? { externalId: customerCode } : {}) };
+  let customers = await prisma.crmCustomer.findMany({
+    where: customerWhere,
+    select: { id: true, externalId: true, name: true, address: true, neighborhood: true, city: true, state: true },
+    take: 20,
+  });
+  if (!customers.length && !q) customers = await prisma.crmCustomer.findMany({ where: { tenantId }, select: { id: true, externalId: true, name: true, address: true, neighborhood: true, city: true, state: true }, take: 20, orderBy: { name: 'asc' } });
+  const customerIds = customers.map((customer) => customer.id);
+  const serial = event.serialNumber || binding?.serialNumber;
+  const modelHint = String(payload.model || payload.equipment?.model || '').trim();
+  const equipments = await prisma.crmEquipment.findMany({
+    where: {
+      tenantId,
+      OR: [
+        ...(serial ? [{ serialNumber: { equals: serial, mode: 'insensitive' } }] : []),
+        ...(customerIds.length ? [{ customerId: { in: customerIds } }] : []),
+        ...(q ? [{ model: { contains: q, mode: 'insensitive' } }, { externalId: { contains: q, mode: 'insensitive' } }] : []),
+        ...(modelHint ? [{ model: { contains: modelHint, mode: 'insensitive' } }] : []),
+      ],
+    },
+    select: { id: true, customerId: true, externalId: true, model: true, manufacturer: true, serialNumber: true, assetTag: true, sector: true, installLocation: true, address: true, city: true, state: true, isActive: true },
+    take: 50,
+  });
+  return { event: { id: event.id, customerCode, serialNumber: serial, modelHint }, customers, equipments };
+}
+
+async function correctBinding(tenantId, eventId, { customerId, equipmentId } = {}, actorId = null) {
+  if (!customerId || !equipmentId) { const e = new Error('Informe cliente e equipamento para corrigir o vinculo.'); e.statusCode = 400; throw e; }
+  const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
+  if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+  const [customer, equipment] = await Promise.all([
+    prisma.crmCustomer.findFirst({ where: { tenantId, id: customerId } }),
+    prisma.crmEquipment.findFirst({ where: { tenantId, id: equipmentId } }),
+  ]);
+  if (!customer || !equipment) { const e = new Error('Cliente ou equipamento nao encontrado nesta empresa.'); e.statusCode = 404; throw e; }
+  if (equipment.customerId && equipment.customerId !== customer.id) { const e = new Error('O equipamento pertence a outro cliente no iLux.'); e.statusCode = 409; throw e; }
+
+  const existing = event.bindingId
+    ? await prisma.printGuardBinding.findFirst({ where: { tenantId, id: event.bindingId } })
+    : null;
+  const key = { customerCode: event.customerCode || existing?.customerCode || null, serialNumber: event.serialNumber || existing?.serialNumber || null };
+  const binding = existing
+    ? await prisma.printGuardBinding.update({ where: { id: existing.id }, data: { customerId: customer.id, equipmentId: equipment.id, state: 'MATCHED', source: 'MANUAL', confirmedAt: new Date(), confirmedById: actorId, lastSeenAt: new Date() } })
+    : await prisma.printGuardBinding.create({ data: { tenantId, connectionId: event.connectionId, ...key, customerId: customer.id, equipmentId: equipment.id, state: 'MATCHED', source: 'MANUAL', confirmedAt: new Date(), confirmedById: actorId, lastSeenAt: new Date() } });
+
+  await prisma.printGuardTelemetryEvent.updateMany({
+    where: {
+      tenantId,
+      connectionId: event.connectionId,
+      state: { in: ['RECEIVED', 'MONITORING', 'ERROR'] },
+      OR: [
+        ...(key.serialNumber ? [{ serialNumber: key.serialNumber }] : []),
+        ...(key.customerCode ? [{ customerCode: key.customerCode }] : []),
+        { id: event.id },
+      ],
+    },
+    data: { bindingId: binding.id, state: 'RECEIVED', errorCode: null, errorMessage: null, decisionAt: new Date(), decisionById: actorId },
+  });
+  return { binding, customer: { id: customer.id, name: customer.name }, equipment: { id: equipment.id, model: equipment.model, serialNumber: equipment.serialNumber, externalId: equipment.externalId } };
+}
+
+// Sinaliza que o gestor foi acionado para esta ocorrencia. Sem O.S. aberta nao
+// ha copia de O.S. para enviar, entao o registro fica no proprio evento (e o
+// middleware de auditoria da rota grava quem/quando).
+async function notifyManagerIncident(tenantId, eventId, { note } = {}, actorId = null) {
+  const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
+  if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+  const stamp = `Gestor notificado em ${new Date().toLocaleString('pt-BR')}${note ? ` — ${String(note).trim().slice(0, 500)}` : ''}`;
+  const updated = await prisma.printGuardTelemetryEvent.update({
+    where: { id: event.id },
+    data: {
+      nextStep: event.nextStep ? `${event.nextStep}\n${stamp}` : stamp,
+      decisionAt: new Date(),
+      decisionById: actorId || event.decisionById,
+    },
+  });
+  return { ok: true, event: updated };
 }
 
 async function parkCoverage(tenantId) {
@@ -485,5 +736,12 @@ module.exports = {
   equipmentRanking,
   equipmentTimeline,
   consolidateToServiceOrder,
-  __testing: { computeHealth, healthBucket, pickOsType, tonerLevelFromPayload, severityRank },
+  bindingCandidates,
+  correctBinding,
+  updateDecisionWorkflow,
+  notifyManagerIncident,
+  __testing: {
+    computeHealth, healthBucket, pickOsType, tonerLevelFromPayload, severityRank,
+    priorityForIncident, recommendationForIncident,
+  },
 };

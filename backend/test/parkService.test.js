@@ -1,7 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { __testing } = require('../src/services/parkService');
-const { computeHealth, healthBucket, pickOsType, tonerLevelFromPayload, severityRank } = __testing;
+const {
+  computeHealth,
+  healthBucket,
+  pickOsType,
+  tonerLevelFromPayload,
+  severityRank,
+  priorityForIncident,
+  recommendationForIncident,
+} = __testing;
 
 test('computeHealth: penaliza chamados recentes e equipamento inativo', () => {
   assert.equal(computeHealth({ callCount90d: 0, ageMinutes: 0, equipmentActive: true }), 100);
@@ -41,4 +49,96 @@ test('pickOsType: escolhe tipo de suprimento para toner e tecnico para erro', ()
   assert.equal(pickOsType(types, 'hardware.error')?.code, '1');
   assert.equal(pickOsType(types, 'evento.desconhecido'), null);
   assert.equal(pickOsType([], 'toner.low'), null);
+});
+
+test('priorityForIncident: toner que acaba em ate um dia recebe prioridade operacional alta', () => {
+  const result = priorityForIncident({
+    severity: 'CRITICAL',
+    mappingState: 'MATCHED',
+    isHardware: false,
+    isLowToner: true,
+    tonerDaysLeft: 0.5,
+    state: 'RECEIVED',
+    monitoringUntil: null,
+    hasOpenServiceOrder: false,
+    ageMinutes: 30,
+  });
+  assert.equal(result.level, 'P1');
+  assert.ok(result.score >= 75);
+  assert.ok(result.reasons.some((reason) => /1 dia/i.test(reason)));
+});
+
+test('priorityForIncident: prazo de monitoramento expirado reentra com agravamento', () => {
+  const base = {
+    severity: 'LOW',
+    mappingState: 'MATCHED',
+    isHardware: false,
+    isLowToner: false,
+    tonerDaysLeft: null,
+    state: 'MONITORING',
+    hasOpenServiceOrder: false,
+    ageMinutes: 60,
+  };
+  const active = priorityForIncident({ ...base, monitoringUntil: new Date(Date.now() + 60_000) });
+  const expired = priorityForIncident({ ...base, monitoringUntil: new Date(Date.now() - 60_000) });
+  assert.equal(active.monitoringExpired, false);
+  assert.equal(expired.monitoringExpired, true);
+  assert.ok(expired.score > active.score);
+  assert.ok(expired.reasons.some((reason) => /expirou/i.test(reason)));
+});
+
+test('priorityForIncident: O.S. aberta reduz urgencia de nova abertura', () => {
+  const input = {
+    severity: 'CRITICAL', mappingState: 'MATCHED', isHardware: true, isLowToner: false,
+    tonerDaysLeft: null, state: 'RECEIVED', monitoringUntil: null, ageMinutes: 20,
+  };
+  const withoutOrder = priorityForIncident({ ...input, hasOpenServiceOrder: false });
+  const withOrder = priorityForIncident({ ...input, hasOpenServiceOrder: true });
+  assert.ok(withOrder.score < withoutOrder.score);
+  assert.ok(withOrder.reasons.some((reason) => /O\.S\. aberta/i.test(reason)));
+});
+
+test('recommendationForIncident: vinculo pendente sempre prevalece sobre abertura de O.S.', () => {
+  const recommendation = recommendationForIncident({
+    mappingState: 'AMBIGUOUS',
+    openServiceOrder: null,
+    isHardware: true,
+    isLowToner: false,
+    severity: 'CRITICAL',
+    toner: {},
+    trend: {},
+    state: 'RECEIVED',
+  });
+  assert.equal(recommendation.action, 'FIX_BINDING');
+  assert.equal(recommendation.confidence, 'high');
+});
+
+test('recommendationForIncident: O.S. existente impede recomendacao duplicada', () => {
+  const recommendation = recommendationForIncident({
+    mappingState: 'MATCHED',
+    openServiceOrder: { id: 'os-1', number: '91750' },
+    isHardware: true,
+    isLowToner: false,
+    severity: 'CRITICAL',
+    toner: {},
+    trend: {},
+    state: 'RECEIVED',
+  });
+  assert.equal(recommendation.action, 'VIEW_SERVICE_ORDER');
+  assert.match(recommendation.explanation, /91750/);
+});
+
+test('recommendationForIncident: baixa evidencia recomenda monitoramento com prazo', () => {
+  const recommendation = recommendationForIncident({
+    mappingState: 'MATCHED',
+    openServiceOrder: null,
+    isHardware: false,
+    isLowToner: true,
+    severity: 'LOW',
+    toner: { daysLeft: 40 },
+    trend: { points: 1, reliable: false },
+    state: 'RECEIVED',
+  });
+  assert.equal(recommendation.action, 'MONITOR');
+  assert.equal(recommendation.confidence, 'low');
 });

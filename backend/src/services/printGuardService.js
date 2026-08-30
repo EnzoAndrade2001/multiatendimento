@@ -313,6 +313,19 @@ async function updateCrmEquipmentMeter(tenantId, equipmentId, meter) {
 async function resolveMapping(tenantId, fields, connectionId) {
   const customerCode = fields.customerCode;
   const serialNumber = fields.serialNumber;
+  const existing = await prisma.printGuardBinding.findFirst({ where: { tenantId, connectionId, customerCode, serialNumber } });
+  // Um vinculo confirmado por uma pessoa e a fonte de verdade para os sinais
+  // seguintes. O resolvedor automatico nao pode desfazer essa decisao.
+  if (existing?.source === 'MANUAL' && existing.state === 'MATCHED' && existing.customerId && existing.equipmentId) {
+    const [customer, equipment, binding] = await Promise.all([
+      prisma.crmCustomer.findFirst({ where: { tenantId, id: existing.customerId } }),
+      prisma.crmEquipment.findFirst({ where: { tenantId, id: existing.equipmentId } }),
+      prisma.printGuardBinding.update({ where: { id: existing.id }, data: { lastSeenAt: new Date() } }),
+    ]);
+    if (customer && equipment && (!equipment.customerId || equipment.customerId === customer.id)) {
+      return { binding, state: 'MATCHED', customer, equipment };
+    }
+  }
   let customers = [];
   let equipments = [];
   if (customerCode) {
@@ -341,7 +354,6 @@ async function resolveMapping(tenantId, fields, connectionId) {
   else if (equipment.customerId && equipment.customerId !== customer.id) state = 'AMBIGUOUS';
   else state = 'MATCHED';
 
-  const existing = await prisma.printGuardBinding.findFirst({ where: { tenantId, connectionId, customerCode, serialNumber } });
   const data = { customerCode, serialNumber, customerId: customer?.id || null, equipmentId: equipment?.id || null, state, lastSeenAt: new Date() };
   const binding = existing
     ? await prisma.printGuardBinding.update({ where: { id: existing.id }, data })
@@ -673,17 +685,56 @@ async function managerSnapshot(tenantId, options = {}) {
   };
 }
 
-async function eventAction(tenantId, eventId, action, body = {}) {
+const clip = (value, max = 2000) => {
+  const text = String(value ?? '').trim();
+  return text ? text.slice(0, max) : null;
+};
+
+const IGNORE_REASONS = new Set([
+  'FALSE_POSITIVE', 'ALREADY_SUPPLIED', 'OPEN_ORDER', 'DUPLICATE', 'EQUIPMENT_INACTIVE', 'NO_CONTRACT', 'OTHER',
+]);
+
+async function eventAction(tenantId, eventId, action, body = {}, actorId = null) {
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId }, include: { connection: true } });
   if (!event) { const error = new Error('Evento nao encontrado.'); error.statusCode = 404; throw error; }
   if (action === 'approve') return approveEvent(tenantId, event, body);
-  const nextState = action === 'monitor' ? 'MONITORING' : 'IGNORED';
-  const updated = await prisma.printGuardTelemetryEvent.update({
-    where: { id: event.id },
-    data: nextState === 'IGNORED'
-      ? { state: nextState, errorCode: 'IGNORED_BY_USER' }
-      : { state: nextState },
-  });
+
+  let assignedToId;
+  if (action === 'monitor' && body.assignedToId) {
+    const user = await prisma.user.findFirst({ where: { tenantId, id: String(body.assignedToId), active: true }, select: { id: true } });
+    if (!user) { const error = new Error('Responsavel nao pertence a esta empresa ou esta inativo.'); error.statusCode = 400; throw error; }
+    assignedToId = user.id;
+  }
+
+  let ignoredReason = null;
+  if (action === 'ignore') {
+    const reason = String(body.reason ?? '').trim().toUpperCase();
+    const note = String(body.note ?? '').trim();
+    // Motivo e opcional (a fila legada ignora sem motivo), mas quando vier tem
+    // de ser um codigo conhecido; "OUTRO" exige a observacao como complemento.
+    if (reason && !IGNORE_REASONS.has(reason)) { const error = new Error('Motivo de descarte invalido.'); error.statusCode = 400; throw error; }
+    if (reason === 'OTHER' && !note) { const error = new Error('Descreva o motivo na observacao para usar "Outro".'); error.statusCode = 400; throw error; }
+    ignoredReason = clip([reason, note].filter(Boolean).join(' — '));
+  }
+
+  const base = { decisionAt: new Date(), decisionById: actorId || event.decisionById };
+  const data = action === 'monitor'
+    ? {
+      ...base,
+      state: 'MONITORING',
+      monitoringUntil: body.monitoringUntil ? new Date(body.monitoringUntil) : null,
+      monitoringCondition: clip(body.monitoringCondition),
+      ...(body.nextStep !== undefined ? { nextStep: clip(body.nextStep) } : {}),
+      ...(assignedToId ? { assignedToId } : {}),
+    }
+    : {
+      ...base,
+      state: 'IGNORED',
+      errorCode: 'IGNORED_BY_USER',
+      ignoredReason,
+    };
+
+  const updated = await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data });
   await notifyRemote(event.connection, event.externalEventId, action, body);
   return updated;
 }

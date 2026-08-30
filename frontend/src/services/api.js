@@ -132,8 +132,8 @@ export const getPrintGuardMetrics = () => api.get('/integrations/printguard/metr
 
 /** @param {Record<string, string|number|boolean>} params */
 export const getTelemetryQueue = (params = {}, signal) => api.get('/telemetry/queue', { params, signal });
-export const ignoreTelemetryEvent = (eventId) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/ignore`);
-export const monitorTelemetryEvent = (eventId) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/monitor`);
+export const ignoreTelemetryEvent = (eventId, data = {}) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/ignore`, data);
+export const monitorTelemetryEvent = (eventId, data = {}) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/monitor`, data);
 export const approveTelemetryEvent = (eventId, data = {}) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/approve`, data);
 // Cockpit "Saude do Parque"
 export const getParkQueue = (params = {}, signal) => api.get('/telemetry/park/queue', { params, signal });
@@ -141,6 +141,10 @@ export const getParkCoverage = (signal) => api.get('/telemetry/park/coverage', {
 export const getParkRanking = (params = {}, signal) => api.get('/telemetry/park/ranking', { params, signal });
 export const getParkEquipmentTimeline = (equipmentId, params = {}) => api.get(`/telemetry/park/equipment/${encodeURIComponent(equipmentId)}/timeline`, { params });
 export const consolidateParkServiceOrder = (data = {}) => api.post('/telemetry/park/consolidate', data);
+export const getParkBindingCandidates = (eventId, params = {}) => api.get(`/telemetry/park/events/${encodeURIComponent(eventId)}/binding-candidates`, { params });
+export const resolveParkBinding = (eventId, data = {}) => api.post(`/telemetry/park/events/${encodeURIComponent(eventId)}/binding`, data);
+export const assignParkIncident = (eventId, data = {}) => api.post(`/telemetry/park/events/${encodeURIComponent(eventId)}/assign`, data);
+export const notifyParkIncident = (eventId, data = {}) => api.post(`/telemetry/park/events/${encodeURIComponent(eventId)}/notify`, data);
 export const getOsTypes = () => api.get('/os/types');
 
 // Instance

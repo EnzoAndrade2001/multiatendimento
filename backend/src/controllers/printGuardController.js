@@ -97,7 +97,7 @@ async function action(req, res) {
     if (action === 'approve' && !hasPermission(req.user, 'inbox.create_os')) {
       return res.status(403).json({ error: 'Voce nao possui permissao para abrir O.S.' });
     }
-    const result = await printGuard.eventAction(req.user.tenantId, req.params.eventId, action, req.body || {});
+    const result = await printGuard.eventAction(req.user.tenantId, req.params.eventId, action, req.body || {}, req.user.id);
     return res.json({ event: result, serviceOrder: action === 'approve' ? result : undefined });
   } catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel atualizar o evento.' }); }
 }
@@ -135,7 +135,32 @@ async function parkConsolidate(req, res) {
   }
 }
 
+async function parkBindingCandidates(req, res) {
+  try { return res.json(await parkService.bindingCandidates(req.user.tenantId, req.params.eventId, req.query)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel buscar candidatos de vinculo.' }); }
+}
+
+async function parkResolveBinding(req, res) {
+  try {
+    const result = await parkService.correctBinding(req.user.tenantId, req.params.eventId, req.body || {}, req.user.id);
+    return res.json(result);
+  } catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel corrigir o vinculo.' }); }
+}
+
+async function parkAssign(req, res) {
+  try {
+    const event = await parkService.updateDecisionWorkflow(req.user.tenantId, req.params.eventId, req.body || {}, req.user.id);
+    return res.json({ event });
+  } catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel atribuir a ocorrencia.' }); }
+}
+
+async function parkNotify(req, res) {
+  try { return res.json(await parkService.notifyManagerIncident(req.user.tenantId, req.params.eventId, req.body || {}, req.user.id)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel notificar o gestor.' }); }
+}
+
 module.exports = {
   status, pair, test, disconnect, getMetrics, sync, remotePage, webhook, queue, action,
   parkQueue, parkCoverage, parkRanking, parkTimeline, parkConsolidate,
+  parkBindingCandidates, parkResolveBinding, parkAssign, parkNotify,
 };
