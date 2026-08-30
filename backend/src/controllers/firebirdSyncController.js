@@ -570,7 +570,7 @@ async function upsertCrmContract(tenant, data) {
     && !isInactiveFlag(pick(p.tfinativo, p.inativo));
 
   const fields = {
-    customerExternalId: pick(p.customerExternalId, p.cdcliente, p.cdCliente, p.CDCLIENTE),
+    customerExternalId: pick(p.customerExternalId, p.clientExternalId, p.cdcliente, p.cdCliente, p.CDCLIENTE),
     number: pick(p.number, p.contractNumber, p.nrcontrato, p.nrContrato),
     type: pick(p.type, p.contractType, p.nmcontratotp, p.tipocontrato),
     typeCode: pick(p.typeCode, p.contractTypeCode, p.cdcontratotp),
@@ -582,10 +582,11 @@ async function upsertCrmContract(tenant, data) {
     monthlyValue: parseNum(pick(p.monthlyValue, p.valor_mensal, p.valmensal, p.vlmensal)),
     pageFranchise: Math.round(parseNum(pick(p.pageFranchise, p.qt_franquia, p.qtfranquia)) || 0),
     franchiseValue: parseNum(pick(p.franchiseValue, p.valor_franquia, p.valfranquia)) || 0,
-    excessPageValue: parseNum(pick(p.excessPageValue, p.valor_excedente, p.valexcedente, p.vlpgexcedente)) || 0,
-    activeEquipment: Math.round(parseNum(pick(p.activeEquipment, p.qt_equipamentos, p.qtequipamentos)) || 0),
+    // O agente manda o valor JA por pagina em overageRateMax/Min (VALEXCEDENTE/1000).
+    excessPageValue: parseNum(pick(p.excessPageValue, p.overageRateMax, p.overageRateMin, p.valor_excedente, p.valexcedente, p.vlpgexcedente)) || 0,
+    activeEquipment: Math.round(parseNum(pick(p.activeEquipment, p.equipmentCount, p.qt_equipamentos, p.qtequipamentos)) || 0),
     raw: p,
-    externalUpdatedAt: normalizeDate(pick(p.externalUpdatedAt, p.atualizado, p.ATUALIZADO)),
+    externalUpdatedAt: normalizeDate(pick(p.externalUpdatedAt, p.updatedAt, p.atualizado, p.ATUALIZADO)),
   };
 
   await prisma.crmContract.upsert({
