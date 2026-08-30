@@ -43,6 +43,23 @@ function tonerLevelFromPayload(payload) {
   return null;
 }
 
+// Rotulo curto da leitura para o card: "level 3 · cyan · threshold 20" para
+// toner; para hardware/erro usa a mensagem do coletor.
+function readingLabel(payload, isLowToner) {
+  const p = obj(payload);
+  if (isLowToner) {
+    const parts = [];
+    const lvl = p.level ?? p.toner?.level ?? p.levelPct ?? p.percent;
+    if (lvl != null && lvl !== '') parts.push(`nível ${lvl}`);
+    const color = p.color || p.supply || p.consumable || p.toner?.color;
+    if (color) parts.push(String(color));
+    const thr = p.threshold ?? p.limit ?? p.min;
+    if (thr != null && thr !== '') parts.push(`limite ${thr}`);
+    if (parts.length) return parts.join(' · ');
+  }
+  return String(p.message || p.description || p.error || p.errorMessage || '').slice(0, 200) || null;
+}
+
 function pickOsType(types, eventType) {
   if (!types.length) return null;
   const lower = String(eventType || '').toLowerCase();
@@ -179,7 +196,7 @@ async function enrichEvents(tenantId, events) {
         localEquipmentId: localEq?.id || null,
       },
       serialNumber: crmEq?.serialNumber || event.serialNumber || null,
-      measurement: String(payload.message || payload.description || event.errorMessage || '').slice(0, 240) || null,
+      measurement: readingLabel({ ...payload, errorMessage: event.errorMessage }, LOW_TONER_RE.test(eventType)),
       health: { score: healthScore, bucket: healthBucket(healthScore), callCount90d },
       toner: { levelPct: tonerLevelPct, daysLeft: insight?.toner?.daysLeft ?? null },
       trend: insight?.trend || null,

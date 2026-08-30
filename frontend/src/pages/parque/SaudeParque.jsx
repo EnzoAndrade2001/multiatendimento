@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ArrowUpRight, RefreshCw, X } from 'lucide-react';
+import { ArrowUpRight, RefreshCw, X } from 'lucide-react';
 import {
   getParkQueue, getParkCoverage, getParkRanking, getParkEquipmentTimeline,
   consolidateParkServiceOrder, approveTelemetryEvent, monitorTelemetryEvent, ignoreTelemetryEvent,
@@ -87,6 +87,19 @@ function FilaDecisao({ osTypes }) {
     return list;
   }, [data, filter]);
 
+  const resupply = useMemo(() => {
+    const byCustomer = new Map();
+    for (const inc of (data?.incidents || [])) {
+      if (!inc.isLowToner || inc.mappingState !== 'MATCHED') continue;
+      const key = inc.customer?.id || inc.customerName;
+      if (!byCustomer.has(key)) byCustomer.set(key, { name: inc.customerName, address: inc.customer?.address, items: [], incs: [] });
+      const g = byCustomer.get(key);
+      g.items.push(`${inc.equipment?.model || 'equip.'}${inc.toner?.daysLeft != null && inc.toner.daysLeft <= 3 ? ' ⚠' : ''}`);
+      g.incs.push(inc);
+    }
+    return [...byCustomer.values()].sort((a, b) => b.items.length - a.items.length);
+  }, [data]);
+
   const selectedList = Object.values(selected);
   const selCustomers = new Set(selectedList.map((i) => i.customer?.id || i.customerName));
   const canConsolidate = selectedList.length >= 2 && selCustomers.size === 1
@@ -171,17 +184,52 @@ function FilaDecisao({ osTypes }) {
         </div>
       )}
 
-      <div style={s.card}>
-        <div style={s.cardH}>
-          <strong>Fila de decisão</strong>
-          <span style={s.hint}>{incidents.length} de {sum.total ?? 0} · janela 7 dias · <button style={s.linkBtn} onClick={load}>atualizar</button></span>
+      <div style={s.split}>
+        <div style={s.splitMain}>
+          <div style={s.card}>
+            <div style={s.cardH}>
+              <strong>Fila de decisão</strong>
+              <span style={s.hint}>{incidents.length} de {sum.total ?? 0} · janela 7 dias · <button style={s.linkBtn} onClick={load}>atualizar</button></span>
+            </div>
+            {incidents.length === 0 && <div style={s.empty}>Nada aguardando decisão no período.</div>}
+            {incidents.map((inc) => (
+              <IncidentCard key={inc.id} inc={inc} checked={!!selected[inc.id]} onToggle={() => toggle(inc)}
+                onOpenOs={() => setOsPicker({ mode: 'single', incidents: [inc], cdOstp: inc.suggestedOsType?.code || '' })}
+                onQuick={quick} busy={busy} />
+            ))}
+          </div>
         </div>
-        {incidents.length === 0 && <div style={s.empty}>Nada aguardando decisão no período.</div>}
-        {incidents.map((inc) => (
-          <IncidentCard key={inc.id} inc={inc} checked={!!selected[inc.id]} onToggle={() => toggle(inc)}
-            onOpenOs={() => setOsPicker({ mode: 'single', incidents: [inc], cdOstp: inc.suggestedOsType?.code || '' })}
-            onQuick={quick} busy={busy} />
-        ))}
+
+        <aside style={s.splitAside}>
+          <div style={s.card}>
+            <div style={s.cardH}>
+              <strong>Reposição da semana</strong>
+              <span style={s.hint}>{resupply.length} cliente(s)</span>
+            </div>
+            {resupply.length === 0 && <div style={s.empty}>Sem toner/insumo baixo com vínculo no período.</div>}
+            {resupply.map((g, i) => {
+              const allSelected = g.incs.every((x) => selected[x.id]);
+              return (
+                <div key={i} style={s.resupplyRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={s.resupplyName}>{g.name}</div>
+                    <span style={s.small}>{g.items.join(' · ')}</span>
+                    {g.address && <span style={s.small}>{g.address}</span>}
+                  </div>
+                  <button style={s.btn} onClick={() => setSelected((prev) => {
+                    const next = { ...prev };
+                    if (allSelected) g.incs.forEach((x) => delete next[x.id]);
+                    else g.incs.forEach((x) => { next[x.id] = x; });
+                    return next;
+                  })}>
+                    {allSelected ? 'Limpar' : g.incs.length > 1 ? `Selecionar ${g.incs.length}` : 'Selecionar'}
+                  </button>
+                </div>
+              );
+            })}
+            {resupply.length > 0 && <p style={s.footNote}>Selecione um cliente e use “Gerar 1 O.S.” para consolidar a reposição num único chamado.</p>}
+          </div>
+        </aside>
       </div>
 
       {osPicker && (
@@ -236,14 +284,18 @@ function IncidentCard({ inc, checked, onToggle, onOpenOs, onQuick, busy }) {
             </Field>
           )}
           {inc.measurement && <Field label="Leitura"><span style={s.mono}>{inc.measurement}</span></Field>}
-          {inc.toner?.daysLeft != null && (
-            <Field label="Previsão do toner">
+          {inc.toner?.daysLeft != null && (inc.toner.daysLeft <= 21 || inc.trend?.reliable) && (
+            <Field label="Previsão do toner" tone={inc.toner.daysLeft <= 3 ? 'crit' : undefined}>
               acaba em <b>{inc.toner.daysLeft < 1 ? '< 1 dia' : `~${Math.round(inc.toner.daysLeft)} dias`}</b>
-              {inc.trend?.pagesPerDay ? ` (≈ ${int(inc.trend.pagesPerDay)} pág/dia)` : ''}
+              {inc.trend?.pagesPerDay ? ` · ≈ ${int(inc.trend.pagesPerDay)} pág/dia` : ''}
+              {!inc.trend?.reliable && <span style={s.small}>estimativa · {inc.trend?.points || 0} leitura(s) de contador</span>}
             </Field>
           )}
-          {inc.trend && inc.trend.pagesPerDay != null && !inc.toner?.daysLeft && (
-            <Field label="Consumo">≈ {int(inc.trend.pagesPerDay)} pág/dia{inc.trend.reliable ? '' : ' (poucos pontos)'}</Field>
+          {inc.trend?.pagesPerDay != null && inc.toner?.daysLeft == null && (
+            <Field label="Consumo médio">
+              ≈ {int(inc.trend.pagesPerDay)} pág/dia
+              {!inc.trend.reliable && <span style={s.small}>estimativa · {inc.trend.points || 0} leitura(s)</span>}
+            </Field>
           )}
           {fr && fr.willExceed && (
             <Field label="Excedente projetado no fechamento" tone="crit">
@@ -519,6 +571,12 @@ const s = {
 
   consolidate: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'var(--accent-light)', border: '1px solid var(--accent-border)', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, flexWrap: 'wrap' },
 
+  split: { display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' },
+  splitMain: { flex: '1 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 },
+  splitAside: { flex: '1 1 240px', maxWidth: 360 },
+  resupplyRow: { display: 'flex', gap: 10, alignItems: 'flex-start', padding: '11px 15px', borderBottom: '1px solid var(--border-color)' },
+  resupplyName: { fontWeight: 600, fontSize: 12.5 },
+
   card: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16 },
   cardH: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '13px 15px', borderBottom: '1px solid var(--border-color)', fontSize: 14 },
   hint: { fontSize: 11.5, color: 'var(--text-muted)' },
@@ -537,7 +595,7 @@ const s = {
   tagType: { fontFamily: 'ui-monospace, monospace', fontSize: 10.5, padding: '3px 7px', borderRadius: 5, background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' },
   incAge: { marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'ui-monospace, monospace' },
   incClient: { fontWeight: 700, fontSize: 14, margin: '7px 0' },
-  incGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px 20px' },
+  incGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '8px 22px', maxWidth: 560 },
 
   field: { display: 'flex', flexDirection: 'column', gap: 3 },
   fl: { fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-muted)' },
