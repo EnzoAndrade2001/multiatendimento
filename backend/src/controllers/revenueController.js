@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const crmController = require('./crmController');
 const aiService = require('../services/aiService');
+const printGuardService = require('../services/printGuardService');
 const { generateText } = aiService;
 
 const SENTINELA_SYNC_STALE_AFTER_MINUTES = 15;
@@ -50,6 +51,30 @@ async function getRevenueDashboard(req, res) {
   const tenantId = req.user.tenantId;
 
   try {
+    // A leitura de telemetria é independente dos indicadores financeiros. Ela
+    // começa em paralelo para não aumentar desnecessariamente o tempo do
+    // Sentinela e nunca impede o restante do painel de carregar.
+    const telemetryPromise = printGuardService.managerSnapshot(tenantId).catch((error) => {
+      console.error('[revenueController] Falha ao montar resumo do PrintGuard:', error);
+      return {
+        available: false,
+        connectionStatus: 'ERROR',
+        connectionName: null,
+        lastConnectedAt: null,
+        lastSignalAt: null,
+        windowHours: 24,
+        total: 0,
+        critical: 0,
+        awaitingDecision: 0,
+        monitoring: 0,
+        errors: 0,
+        unlinked: 0,
+        lowToner: 0,
+        affectedEquipment: 0,
+        incidents: [],
+        message: 'Resumo de telemetria indisponivel no momento.',
+      };
+    });
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
     const kpiSlaLimitHours = settings?.kpiSlaLimitHours ?? 24;
     const reincidentThreshold = settings?.kpiReincidentThreshold ?? 2;
@@ -312,6 +337,8 @@ async function getRevenueDashboard(req, res) {
       console.error('[revenueController] Falha ao calcular tendência do Sentinela:', trendErr);
     }
 
+    const telemetry = await telemetryPromise;
+
     res.json({
       receitaEmRiscoHoje,
       mrrInRisk,
@@ -322,6 +349,7 @@ async function getRevenueDashboard(req, res) {
       stalledEstimatesValue,
       trend,
       synchronization,
+      telemetry,
       dataQuality: {
         mrr: {
           valueSources: mrrValueSources,

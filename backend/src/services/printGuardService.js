@@ -340,6 +340,188 @@ async function listTelemetry(tenantId, query = {}) {
   };
 }
 
+function payloadObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function measurementLabel(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'object') return String(value).slice(0, 180);
+  const source = payloadObject(value);
+  const keys = ['level', 'supply', 'threshold', 'counter', 'pages', 'total', 'value'];
+  const parts = keys
+    .filter((key) => source[key] !== undefined && source[key] !== null && source[key] !== '')
+    .map((key) => `${key}: ${String(source[key])}`);
+  return (parts.length ? parts.join(' · ') : JSON.stringify(source)).slice(0, 180);
+}
+
+function telemetrySeverityRank(value) {
+  return { CRITICAL: 4, HIGH: 3, WARNING: 2, MEDIUM: 2, INFO: 1, LOW: 1 }[String(value || '').toUpperCase()] || 0;
+}
+
+function telemetryStateLabel(value) {
+  return {
+    RECEIVED: 'Aguardando decisão',
+    MONITORING: 'Em monitoramento',
+    ERROR: 'Falha de vínculo',
+    IGNORED: 'Ignorado',
+    APPROVED: 'O.S. aberta',
+  }[String(value || '').toUpperCase()] || String(value || 'Desconhecido');
+}
+
+/**
+ * Snapshot enxuto para gestores. A tela técnica continua usando listTelemetry;
+ * este método só agrega a leitura recente em indicadores e uma fila acionável,
+ * sem expor o payload bruto do PrintGuard.
+ */
+async function managerSnapshot(tenantId, options = {}) {
+  const hours = Math.max(1, Math.min(Number(options.hours) || 24, 168));
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+  const connection = await getConnection(tenantId);
+  if (!connection) {
+    return {
+      available: false,
+      connectionStatus: 'INACTIVE',
+      connectionName: null,
+      lastConnectedAt: null,
+      lastSignalAt: null,
+      windowHours: hours,
+      total: 0,
+      critical: 0,
+      awaitingDecision: 0,
+      monitoring: 0,
+      errors: 0,
+      unlinked: 0,
+      lowToner: 0,
+      affectedEquipment: 0,
+      incidents: [],
+      message: 'Nenhuma conexao PrintGuard configurada para esta empresa.',
+    };
+  }
+
+  const activeWhere = {
+    tenantId,
+    createdAt: { gte: since },
+    state: { in: ['RECEIVED', 'MONITORING', 'ERROR'] },
+  };
+  const [events, total, critical, awaitingDecision, monitoring, errors] = await Promise.all([
+    prisma.printGuardTelemetryEvent.findMany({
+      where: activeWhere,
+      select: {
+        id: true,
+        eventType: true,
+        severity: true,
+        occurredAt: true,
+        createdAt: true,
+        state: true,
+        customerCode: true,
+        serialNumber: true,
+        payload: true,
+        bindingId: true,
+        errorCode: true,
+        errorMessage: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    }),
+    prisma.printGuardTelemetryEvent.count({ where: activeWhere }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...activeWhere, severity: { in: ['CRITICAL', 'HIGH'] } } }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...activeWhere, state: 'RECEIVED' } }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...activeWhere, state: 'MONITORING' } }),
+    prisma.printGuardTelemetryEvent.count({ where: { ...activeWhere, state: 'ERROR' } }),
+  ]);
+
+  const bindingIds = [...new Set(events.map((event) => event.bindingId).filter(Boolean))];
+  const bindings = bindingIds.length
+    ? await prisma.printGuardBinding.findMany({ where: { tenantId, id: { in: bindingIds } } })
+    : [];
+  const bindingById = new Map(bindings.map((binding) => [binding.id, binding]));
+  const customerIds = [...new Set(bindings.map((binding) => binding.customerId).filter(Boolean))];
+  const equipmentIds = [...new Set(bindings.map((binding) => binding.equipmentId).filter(Boolean))];
+  const [customers, equipments] = await Promise.all([
+    customerIds.length
+      ? prisma.crmCustomer.findMany({ where: { tenantId, id: { in: customerIds } }, select: { id: true, name: true, externalId: true } })
+      : [],
+    equipmentIds.length
+      ? prisma.crmEquipment.findMany({ where: { tenantId, id: { in: equipmentIds } }, select: { id: true, model: true, serialNumber: true, externalId: true, isActive: true } })
+      : [],
+  ]);
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const equipmentById = new Map(equipments.map((equipment) => [equipment.id, equipment]));
+
+  const incidents = events.map((event) => {
+    const binding = bindingById.get(event.bindingId);
+    const rawPayload = payloadObject(event.payload);
+    const customer = customerById.get(binding?.customerId) || rawPayload.customer || null;
+    const equipment = equipmentById.get(binding?.equipmentId) || rawPayload.equipment || null;
+    const mappingState = binding?.state || (event.state === 'ERROR' ? event.errorCode : null) || 'UNMATCHED';
+    const signalAt = event.occurredAt || event.createdAt;
+    const eventType = String(event.eventType || 'telemetry');
+    const lowerType = eventType.toLowerCase();
+    const measurement = rawPayload.measurement ?? rawPayload.reading ?? rawPayload.counter ?? rawPayload.pages;
+    const canOpenServiceOrder = mappingState === 'MATCHED' && equipment?.isActive !== false;
+    const signalTimestamp = signalAt ? new Date(signalAt).getTime() : NaN;
+    return {
+      id: event.id,
+      eventType,
+      severity: String(event.severity || 'INFO').toUpperCase(),
+      state: event.state,
+      stateLabel: telemetryStateLabel(event.state),
+      occurredAt: signalAt,
+      ageMinutes: Number.isFinite(signalTimestamp)
+        ? Math.max(0, Math.floor((Date.now() - signalTimestamp) / 60000))
+        : null,
+      customerName: customer?.name || rawPayload.customerName || event.customerCode || 'Cliente nao identificado',
+      customerExternalId: customer?.externalId || event.customerCode || null,
+      equipmentModel: equipment?.model || rawPayload.equipmentModel || null,
+      serialNumber: equipment?.serialNumber || event.serialNumber || null,
+      measurement: measurementLabel(measurement),
+      message: String(rawPayload.message || rawPayload.description || event.errorMessage || '').slice(0, 240) || null,
+      mappingState,
+      canOpenServiceOrder,
+      action: canOpenServiceOrder ? 'Abrir O.S.' : mappingState === 'MATCHED' ? 'Ver detalhes' : 'Revisar vinculo',
+      isLowToner: /toner|toner_low|supply|cartucho|insumo/.test(lowerType),
+    };
+  });
+
+  incidents.sort((a, b) => {
+    const severityDelta = telemetrySeverityRank(b.severity) - telemetrySeverityRank(a.severity);
+    if (severityDelta !== 0) return severityDelta;
+    return new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime();
+  });
+  const activeIncidents = incidents.filter((event) => event.state !== 'IGNORED' && event.state !== 'APPROVED');
+  const uniqueEquipment = new Set(activeIncidents.map((event) => event.serialNumber || event.equipmentModel).filter(Boolean));
+  const unlinked = activeIncidents.filter((event) => event.mappingState !== 'MATCHED').length;
+  const lowToner = activeIncidents.filter((event) => event.isLowToner).length;
+  const lastSignalAt = events.reduce((latest, event) => {
+    const candidate = event.occurredAt || event.createdAt;
+    if (!candidate) return latest;
+    return !latest || new Date(candidate) > new Date(latest) ? candidate : latest;
+  }, null);
+
+  return {
+    available: connection.status === 'CONNECTED',
+    connectionStatus: connection.status,
+    connectionName: connection.name,
+    lastConnectedAt: connection.lastConnectedAt,
+    lastSignalAt,
+    windowHours: hours,
+    total,
+    critical,
+    awaitingDecision,
+    monitoring,
+    errors,
+    unlinked,
+    lowToner,
+    affectedEquipment: uniqueEquipment.size,
+    incidents: activeIncidents.slice(0, 8),
+    truncated: total > events.length,
+    message: connection.status === 'CONNECTED'
+      ? null
+      : (connection.lastError || 'A conexao PrintGuard nao esta marcada como conectada.'),
+  };
+}
+
 async function eventAction(tenantId, eventId, action, body = {}) {
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId }, include: { connection: true } });
   if (!event) { const error = new Error('Evento nao encontrado.'); error.statusCode = 404; throw error; }
@@ -504,6 +686,7 @@ module.exports = {
   verifySignature,
   ingestWebhook,
   listTelemetry,
+  managerSnapshot,
   eventAction,
   syncEvents,
   listRemote,

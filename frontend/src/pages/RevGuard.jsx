@@ -31,7 +31,9 @@ import {
   Play,
   RotateCw,
   Award,
-  Clock
+  Clock,
+  Activity,
+  ArrowUpRight
 } from 'lucide-react';
 import { toast } from '../utils/toast';
 
@@ -239,6 +241,15 @@ export default function RevGuard() {
     );
   };
 
+  const formatTelemetryAge = (minutes) => {
+    const value = Number(minutes);
+    if (!Number.isFinite(value) || value < 1) return 'agora';
+    if (value < 60) return `hÃ¡ ${value} min`;
+    const hours = Math.floor(value / 60);
+    if (hours < 24) return `hÃ¡ ${hours}h`;
+    return `hÃ¡ ${Math.floor(hours / 24)}d`;
+  };
+
   // Memoizado: evita refiltrar a lista de atendimentos a cada render
   // (ex.: quando auditingTicketId muda durante uma auditoria em andamento).
   const filteredAuditList = useMemo(() => {
@@ -408,6 +419,93 @@ export default function RevGuard() {
                 </div>
               </div>
             </div>
+
+            {/* Resumo executivo da telemetria para o gestor. A fila técnica
+                completa continua disponível na tela Telemetria. */}
+            {crisisData.telemetry && (
+              <section style={s.telemetrySection} aria-label="Saúde do parque">
+                <div style={s.sectionHeader}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <Activity size={21} color="#10b981" />
+                    <div style={{ minWidth: 0 }}>
+                      <h2 style={s.sectionTitle}>Saúde do parque</h2>
+                      <p style={s.telemetrySubtitle}>Resumo das ocorrências PrintGuard nas últimas {crisisData.telemetry.windowHours || 24} horas.</p>
+                    </div>
+                  </div>
+                  <div style={s.telemetryHeaderActions}>
+                    <span style={{ ...s.telemetryConnectionBadge, color: crisisData.telemetry.available ? '#10b981' : '#f59e0b' }}>
+                      <span style={{ ...s.telemetryStatusDot, background: crisisData.telemetry.available ? '#10b981' : '#f59e0b' }} />
+                      {crisisData.telemetry.available ? 'PrintGuard conectado' : 'Telemetria indisponível'}
+                    </span>
+                    <a href="/telemetry" style={s.telemetryLink}>Abrir telemetria <ArrowUpRight size={14} /></a>
+                  </div>
+                </div>
+
+                {!crisisData.telemetry.available && crisisData.telemetry.message && (
+                  <div style={s.telemetryNotice}>
+                    {crisisData.telemetry.message} Os últimos registros continuam visíveis para consulta.
+                  </div>
+                )}
+
+                <div style={s.telemetryMetrics}>
+                  {[
+                    ['Críticos', crisisData.telemetry.critical, '#ef4444'],
+                    ['Aguardando decisão', crisisData.telemetry.awaitingDecision, '#f59e0b'],
+                    ['Em monitoramento', crisisData.telemetry.monitoring, '#10b981'],
+                    ['Vínculos pendentes', crisisData.telemetry.unlinked, '#f97316'],
+                    ['Toner/insumo baixo', crisisData.telemetry.lowToner, '#a855f7'],
+                    ['Equipamentos afetados', crisisData.telemetry.affectedEquipment, '#3b82f6'],
+                  ].map(([label, value, color]) => (
+                    <div key={label} style={s.telemetryMetricCard}>
+                      <span style={{ ...s.telemetryMetricValue, color }}>{value ?? 0}</span>
+                      <span style={s.telemetryMetricLabel}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={s.telemetryIncidentPanel}>
+                  <div style={s.telemetryIncidentHeader}>
+                    <div>
+                      <strong style={s.telemetryIncidentTitle}>Fila de decisão</strong>
+                      <span style={s.telemetryIncidentHint}>Prioridade, impacto e próxima ação para a equipe.</span>
+                    </div>
+                    <span style={s.telemetryLastSignal}>
+                      Último sinal: {crisisData.telemetry.lastSignalAt ? new Date(crisisData.telemetry.lastSignalAt).toLocaleString('pt-BR') : 'nenhum'}
+                    </span>
+                  </div>
+                  {crisisData.telemetry.incidents?.length ? (
+                    <div style={s.telemetryIncidentList}>
+                      {crisisData.telemetry.incidents.map((incident) => {
+                        const severity = String(incident.severity || '').toUpperCase();
+                        const severityColor = severity === 'CRITICAL' || severity === 'HIGH' ? '#ef4444' : severity === 'WARNING' || severity === 'MEDIUM' ? '#f59e0b' : '#64748b';
+                        const equipmentLabel = [incident.equipmentModel, incident.serialNumber].filter(Boolean).join(' · ') || 'Equipamento não identificado';
+                        return (
+                          <div key={incident.id} style={s.telemetryIncidentRow}>
+                            <div style={s.telemetryIncidentMain}>
+                              <div style={s.telemetryIncidentTopline}>
+                                <span style={{ ...s.telemetrySeverityBadge, color: severityColor, borderColor: `${severityColor}55`, background: `${severityColor}12` }}>{severity || 'INFO'}</span>
+                                <strong style={s.telemetryIncidentEvent}>{incident.eventType}</strong>
+                                <span style={s.telemetryIncidentAge}>{formatTelemetryAge(incident.ageMinutes)}</span>
+                              </div>
+                              <strong style={s.telemetryIncidentCustomer}>{incident.customerName}</strong>
+                              <span style={s.telemetryIncidentEquipment}>{equipmentLabel}</span>
+                              {(incident.measurement || incident.message) && <span style={s.telemetryIncidentDetail}>{incident.measurement || incident.message}</span>}
+                            </div>
+                            <div style={s.telemetryIncidentSide}>
+                              <span style={s.telemetryStateBadge}>{incident.stateLabel}</span>
+                              <a href="/telemetry" style={s.telemetryActionLink}>{incident.action} <ArrowUpRight size={13} /></a>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={s.telemetryEmpty}>Nenhuma ocorrência pendente no período. O parque está sem decisões aguardando a equipe.</div>
+                  )}
+                  {crisisData.telemetry.truncated && <p style={s.telemetryTruncated}>Há mais ocorrências no período. Abra a telemetria para consultar a fila completa.</p>}
+                </div>
+              </section>
+            )}
 
             {/* Main Grid: Gargalos e Mini-Funil */}
             <div style={s.mainGrid}>
@@ -1171,6 +1269,38 @@ const s = {
   sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   sectionTitle: { fontSize: '0.98rem', fontWeight: 800, margin: 0, fontFamily: 'var(--font-display)', color: 'var(--text-main)' },
   badge: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 700, padding: '3px 8px', borderRadius: '100px' },
+
+  telemetrySection: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '24px', padding: '1.35rem', display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 },
+  telemetrySubtitle: { margin: '3px 0 0', color: 'var(--text-dim)', fontSize: '0.72rem' },
+  telemetryHeaderActions: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end' },
+  telemetryConnectionBadge: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap' },
+  telemetryStatusDot: { width: '7px', height: '7px', borderRadius: '50%', boxShadow: '0 0 8px currentColor' },
+  telemetryLink: { display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--accent)', fontSize: '0.72rem', fontWeight: 800, textDecoration: 'none', whiteSpace: 'nowrap' },
+  telemetryNotice: { border: '1px solid rgba(245,158,11,0.28)', background: 'rgba(245,158,11,0.07)', color: 'var(--text-muted)', padding: '0.65rem 0.8rem', borderRadius: '12px', fontSize: '0.75rem', lineHeight: 1.4 },
+  telemetryMetrics: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.65rem' },
+  telemetryMetricCard: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '0.75rem 0.85rem', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 },
+  telemetryMetricValue: { fontSize: '1.35rem', fontWeight: 900, lineHeight: 1, fontVariantNumeric: 'tabular-nums' },
+  telemetryMetricLabel: { color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 700, lineHeight: 1.25 },
+  telemetryIncidentPanel: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '0.85rem', minWidth: 0 },
+  telemetryIncidentHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', paddingBottom: '0.7rem', borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap' },
+  telemetryIncidentTitle: { display: 'block', color: 'var(--text-main)', fontSize: '0.82rem' },
+  telemetryIncidentHint: { display: 'block', color: 'var(--text-dim)', fontSize: '0.7rem', marginTop: '3px' },
+  telemetryLastSignal: { color: 'var(--text-dim)', fontSize: '0.68rem', whiteSpace: 'nowrap' },
+  telemetryIncidentList: { display: 'flex', flexDirection: 'column' },
+  telemetryIncidentRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.8rem 0', borderBottom: '1px solid var(--border-color)', minWidth: 0 },
+  telemetryIncidentMain: { display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0, flex: 1 },
+  telemetryIncidentTopline: { display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, flexWrap: 'wrap' },
+  telemetrySeverityBadge: { border: '1px solid', borderRadius: '100px', padding: '2px 6px', fontSize: '0.6rem', fontWeight: 900, letterSpacing: '0.04em' },
+  telemetryIncidentEvent: { color: 'var(--text-main)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  telemetryIncidentAge: { color: 'var(--text-dim)', fontSize: '0.65rem', marginLeft: 'auto' },
+  telemetryIncidentCustomer: { color: 'var(--text-main)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  telemetryIncidentEquipment: { color: 'var(--text-muted)', fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  telemetryIncidentDetail: { color: 'var(--text-dim)', fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  telemetryIncidentSide: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 },
+  telemetryStateBadge: { color: 'var(--text-muted)', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '100px', padding: '3px 7px', fontSize: '0.62rem', fontWeight: 800, whiteSpace: 'nowrap' },
+  telemetryActionLink: { display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--accent)', fontSize: '0.68rem', fontWeight: 800, textDecoration: 'none', whiteSpace: 'nowrap' },
+  telemetryEmpty: { color: 'var(--text-muted)', fontSize: '0.75rem', padding: '1rem 0.2rem 0.2rem' },
+  telemetryTruncated: { color: 'var(--text-dim)', fontSize: '0.68rem', margin: '0.7rem 0 0' },
   
   causesList: { display: 'flex', flexDirection: 'column', gap: '0.75rem' },
   causeRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.9rem 1.1rem', borderRadius: '16px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', transition: 'transform 0.2s ease', gap: '1rem' },
