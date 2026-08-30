@@ -253,7 +253,13 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, busy }) {
         <small>EVIDÊNCIA E IMPACTO</small>
         <b>{reasons[0]}</b>
         <span>Saúde {item.healthScore ?? '—'} · {item.callCount90d || 0} chamado(s)/90d</span>
-        {item.toner?.daysLeft != null && <span>Previsão: {item.toner.daysLeft <= 1 ? 'menos de 1 dia' : `~${Math.ceil(item.toner.daysLeft)} dias`}{item.trend?.pagesPerDay ? ` · ${Math.round(item.trend.pagesPerDay)} pág./dia` : ''}</span>}
+        {item.toner?.daysLeft != null && (item.toner.daysLeft <= 21 || item.trend?.reliable) && (
+          <span>
+            Previsão: {item.toner.daysLeft <= 1 ? 'menos de 1 dia' : `~${Math.ceil(item.toner.daysLeft)} dias`}
+            {item.trend?.pagesPerDay ? ` · ${Math.round(item.trend.pagesPerDay)} pág./dia` : ''}
+            {!item.trend?.reliable ? ` · estimativa (${item.trend?.points || 0} leitura(s))` : ''}
+          </span>
+        )}
         {item.mappingState !== 'MATCHED' && <span className="park-warning">Vínculo {String(item.mappingState || 'pendente').toLowerCase()}</span>}
       </div>
       <div className="park-inc-recommendation">
@@ -292,7 +298,7 @@ function ReplenishmentPanel({ groups, incidents, selected, setSelected, onOs }) 
       const allSelected = usable.length && usable.every((i) => selected[i.id]);
       return <div className="park-replenishment-group" key={group.customer?.id || group.customer?.name}>
         <b>{group.customer?.name}</b><span>{group.total} item(ns) · {group.urgent} urgente(s)</span>
-        <ul>{group.items?.slice(0, 5).map((i) => <li key={i.eventId}>{i.equipment?.model || i.serialNumber} {i.toner?.daysLeft != null ? `· ~${Math.max(0, Math.ceil(i.toner.daysLeft))}d` : ''}{i.openServiceOrder ? ' · já tem O.S.' : ''}</li>)}</ul>
+        <ul>{group.items?.slice(0, 5).map((i) => <li key={i.eventId}>{i.equipment?.model || i.serialNumber} {i.toner?.daysLeft != null && (i.toner.daysLeft <= 21 || i.trend?.reliable) ? `· ~${Math.max(0, Math.ceil(i.toner.daysLeft))}d${i.trend?.reliable ? '' : '?'}` : ''}{i.openServiceOrder ? ' · já tem O.S.' : ''}</li>)}</ul>
         <small>Estoque e rota: fonte ainda não integrada.</small>
         <div><button className="park-btn" disabled={!usable.length} onClick={() => setSelected((prev) => {
           const next = { ...prev }; usable.forEach((i) => { if (allSelected) delete next[i.id]; else next[i.id] = i; }); return next;

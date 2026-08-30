@@ -81,16 +81,16 @@ function priorityForIncident({ severity, mappingState, isHardware, isLowToner, t
   const reasons = [];
   const monitorDeadline = monitoringUntil ? new Date(monitoringUntil) : null;
   const monitoringExpired = state === 'MONITORING' && monitorDeadline && monitorDeadline.getTime() <= Date.now();
-  if (mappingState !== 'MATCHED') { score += 28; reasons.push('Vinculo impede a decisao operacional'); }
-  if (isHardware && severityRank(severity) >= 3) { score += 24; reasons.push('Possivel parada do equipamento'); }
+  if (mappingState !== 'MATCHED') { score += 28; reasons.push('Vínculo impede a decisão operacional'); }
+  if (isHardware && severityRank(severity) >= 3) { score += 24; reasons.push('Possível parada do equipamento'); }
   if (isLowToner && Number.isFinite(tonerDaysLeft)) {
-    if (tonerDaysLeft <= 1) { score += 35; reasons.push('Insumo previsto para acabar em ate 1 dia'); }
-    else if (tonerDaysLeft <= 3) { score += 25; reasons.push('Insumo previsto para acabar em ate 3 dias'); }
-    else if (tonerDaysLeft <= 7) { score += 12; reasons.push('Reposicao recomendada nesta semana'); }
+    if (tonerDaysLeft <= 1) { score += 35; reasons.push('Insumo previsto para acabar em até 1 dia'); }
+    else if (tonerDaysLeft <= 3) { score += 25; reasons.push('Insumo previsto para acabar em até 3 dias'); }
+    else if (tonerDaysLeft <= 7) { score += 12; reasons.push('Reposição recomendada nesta semana'); }
   }
-  if (Number(ageMinutes) >= 24 * 60) { score += 8; reasons.push('Decisao pendente ha mais de 24 horas'); }
+  if (Number(ageMinutes) >= 24 * 60) { score += 8; reasons.push('Decisão pendente há mais de 24 horas'); }
   if (monitoringExpired) { score += 20; reasons.push('Prazo de monitoramento expirou'); }
-  if (hasOpenServiceOrder) { score -= 35; reasons.push('Ja existe O.S. aberta para o equipamento'); }
+  if (hasOpenServiceOrder) { score -= 35; reasons.push('Já existe O.S. aberta para o equipamento'); }
   score = Math.max(0, Math.min(100, Math.round(score)));
   const level = score >= 75 ? 'P1' : score >= 50 ? 'P2' : score >= 25 ? 'P3' : 'P4';
   return { level, score, reasons, monitoringExpired: Boolean(monitoringExpired) };
@@ -99,21 +99,21 @@ function priorityForIncident({ severity, mappingState, isHardware, isLowToner, t
 function recommendationForIncident(incident) {
   const openOrder = incident.openServiceOrder;
   if (incident.mappingState !== 'MATCHED') {
-    return { action: 'FIX_BINDING', label: 'Corrigir vinculo', explanation: 'O alerta nao pode gerar uma O.S. segura enquanto cliente e equipamento nao forem confirmados.', confidence: 'high' };
+    return { action: 'FIX_BINDING', label: 'Corrigir vínculo', explanation: 'O alerta não pode gerar uma O.S. segura enquanto cliente e equipamento não forem confirmados.', confidence: 'high' };
   }
   if (openOrder) {
-    return { action: 'VIEW_SERVICE_ORDER', label: 'Ver O.S. existente', explanation: `A O.S. ${openOrder.number || openOrder.id} ja atende este equipamento; evite abertura duplicada.`, confidence: 'high' };
+    return { action: 'VIEW_SERVICE_ORDER', label: 'Ver O.S. existente', explanation: `A O.S. ${openOrder.number || openOrder.id} já atende este equipamento; evite abertura duplicada.`, confidence: 'high' };
   }
   if (incident.isHardware && severityRank(incident.severity) >= 3) {
-    return { action: 'OPEN_SERVICE_ORDER', label: 'Abrir O.S. agora', explanation: 'Falha critica com risco de parada do equipamento.', confidence: 'high' };
+    return { action: 'OPEN_SERVICE_ORDER', label: 'Abrir O.S. agora', explanation: 'Falha crítica com risco de parada do equipamento.', confidence: 'high' };
   }
   if (incident.isLowToner && Number.isFinite(incident.toner?.daysLeft) && incident.toner.daysLeft <= 3) {
-    return { action: 'OPEN_SERVICE_ORDER', label: 'Abrir O.S. de suprimento', explanation: `Previsao de termino em aproximadamente ${Math.max(0, Math.ceil(incident.toner.daysLeft))} dia(s).`, confidence: incident.trend?.reliable ? 'high' : 'medium' };
+    return { action: 'OPEN_SERVICE_ORDER', label: 'Abrir O.S. de suprimento', explanation: `Previsão de término em aproximadamente ${Math.max(0, Math.ceil(incident.toner.daysLeft))} dia(s).`, confidence: incident.trend?.reliable ? 'high' : 'medium' };
   }
   if (incident.state === 'MONITORING') {
-    return { action: 'KEEP_MONITORING', label: 'Manter monitoramento', explanation: incident.monitoringCondition || 'Acompanhar a proxima leitura antes de abrir uma O.S.', confidence: 'medium' };
+    return { action: 'KEEP_MONITORING', label: 'Manter monitoramento', explanation: incident.monitoringCondition || 'Acompanhar a próxima leitura antes de abrir uma O.S.', confidence: 'medium' };
   }
-  return { action: 'MONITOR', label: 'Monitorar com prazo', explanation: 'Nao ha evidencia suficiente para abertura imediata; defina prazo e condicao de escalonamento.', confidence: incident.trend?.points >= 2 ? 'medium' : 'low' };
+  return { action: 'MONITOR', label: 'Monitorar com prazo', explanation: 'Não há evidência suficiente para abertura imediata; defina prazo e condição de escalonamento.', confidence: incident.trend?.points >= 2 ? 'medium' : 'low' };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ async function enrichEvents(tenantId, events) {
   const [customers, crmEquipments, osTypes, assignees] = await Promise.all([
     customerIds.length ? prisma.crmCustomer.findMany({
       where: { tenantId, id: { in: customerIds } },
-      select: { id: true, name: true, externalId: true, address: true, neighborhood: true, city: true, state: true },
+      select: { id: true, name: true, externalId: true, phone: true, address: true, neighborhood: true, city: true, state: true },
     }) : [],
     equipmentIds.length ? prisma.crmEquipment.findMany({
       where: { tenantId, id: { in: equipmentIds } },
@@ -244,6 +244,7 @@ async function enrichEvents(tenantId, events) {
         id: customer.id,
         name: customer.name,
         externalId: customer.externalId,
+        phone: customer.phone || null,
         address: [customer.address, customer.neighborhood, customer.city, customer.state].filter(Boolean).join(', ') || null,
       },
       customerName: customer?.name || event.customerCode || 'Cliente nao identificado',
@@ -490,7 +491,8 @@ async function correctBinding(tenantId, eventId, { customerId, equipmentId } = {
 async function notifyManagerIncident(tenantId, eventId, { note } = {}, actorId = null) {
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
   if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
-  const stamp = `Gestor notificado em ${new Date().toLocaleString('pt-BR')}${note ? ` — ${String(note).trim().slice(0, 500)}` : ''}`;
+  const when = new Date().toLocaleString('pt-BR', { timeZone: process.env.APP_TIMEZONE || 'America/Sao_Paulo' });
+  const stamp = `Gestor notificado em ${when}${note ? ` — ${String(note).trim().slice(0, 500)}` : ''}`;
   const updated = await prisma.printGuardTelemetryEvent.update({
     where: { id: event.id },
     data: {
