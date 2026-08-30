@@ -135,6 +135,13 @@ export const getTelemetryQueue = (params = {}, signal) => api.get('/telemetry/qu
 export const ignoreTelemetryEvent = (eventId) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/ignore`);
 export const monitorTelemetryEvent = (eventId) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/monitor`);
 export const approveTelemetryEvent = (eventId, data = {}) => api.post(`/telemetry/events/${encodeURIComponent(eventId)}/approve`, data);
+// Cockpit "Saude do Parque"
+export const getParkQueue = (params = {}, signal) => api.get('/telemetry/park/queue', { params, signal });
+export const getParkCoverage = (signal) => api.get('/telemetry/park/coverage', { signal });
+export const getParkRanking = (params = {}, signal) => api.get('/telemetry/park/ranking', { params, signal });
+export const getParkEquipmentTimeline = (equipmentId, params = {}) => api.get(`/telemetry/park/equipment/${encodeURIComponent(equipmentId)}/timeline`, { params });
+export const consolidateParkServiceOrder = (data = {}) => api.post('/telemetry/park/consolidate', data);
+export const getOsTypes = () => api.get('/os/types');
 
 // Instance
 export const getInstances = () => api.get('/instance/list');
