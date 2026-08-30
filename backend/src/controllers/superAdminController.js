@@ -1,7 +1,30 @@
 const prisma = require('../lib/prisma');
+const bcrypt = require('bcryptjs');
+
+function denySuperadmin(req, res) {
+  if (req.user.role !== 'superadmin') {
+    res.status(403).json({ error: 'Acesso negado' });
+    return true;
+  }
+  return false;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeCredential({ name, email, password }, { requirePassword = true } = {}) {
+  const cleanName = String(name || '').trim();
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanPassword = String(password || '');
+  if (!cleanName) return { error: 'Informe o nome do responsável pelo acesso.' };
+  if (!EMAIL_RE.test(cleanEmail)) return { error: 'Informe um e-mail válido para o acesso.' };
+  if (requirePassword || cleanPassword) {
+    if (cleanPassword.length < 6) return { error: 'A senha do acesso deve ter ao menos 6 caracteres.' };
+  }
+  return { name: cleanName, email: cleanEmail, password: cleanPassword };
+}
 
 async function listTenants(req, res) {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Acesso negado' });
+  if (denySuperadmin(req, res)) return;
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -52,29 +75,64 @@ async function listTenants(req, res) {
 }
 
 async function createTenant(req, res) {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Acesso negado' });
+  if (denySuperadmin(req, res)) return;
   const { name, slug, plan, maxConnections, maxUsers } = req.body;
-  console.log(`[superadminController] Criando novo tenant:`, { name, slug, maxConnections, maxUsers });
 
-  const tenant = await prisma.tenant.create({
-    data: {
-      name,
-      slug,
-      plan: plan || 'trial',
-      maxConnections: Number(maxConnections) || 1,
-      maxUsers: Number(maxUsers) || 5,
-      settings: { create: {} }
-    },
-  });
-  res.json(tenant);
+  const cleanSlug = String(slug || '').trim().toLowerCase();
+  if (!String(name || '').trim() || !cleanSlug) {
+    return res.status(400).json({ error: 'Nome e slug são obrigatórios.' });
+  }
+
+  // O acesso do administrador é opcional aqui só para não quebrar chamadas
+  // antigas; a tela nova sempre envia. Sem ele, a empresa nasce sem login.
+  const wantsAdmin = req.body.adminName || req.body.adminEmail || req.body.adminPassword;
+  let admin = null;
+  if (wantsAdmin) {
+    admin = normalizeCredential({ name: req.body.adminName, email: req.body.adminEmail, password: req.body.adminPassword });
+    if (admin.error) return res.status(400).json({ error: admin.error });
+  }
+
+  const slugTaken = await prisma.tenant.findUnique({ where: { slug: cleanSlug } });
+  if (slugTaken) return res.status(409).json({ error: 'Já existe uma empresa com esse slug.' });
+
+  try {
+    const tenant = await prisma.$transaction(async (tx) => {
+      const created = await tx.tenant.create({
+        data: {
+          name: String(name).trim(),
+          slug: cleanSlug,
+          plan: plan || 'trial',
+          maxConnections: Number(maxConnections) || 1,
+          maxUsers: Number(maxUsers) || 5,
+          settings: { create: {} },
+        },
+      });
+      if (admin) {
+        await tx.user.create({
+          data: {
+            tenantId: created.id,
+            name: admin.name,
+            email: admin.email,
+            password: await bcrypt.hash(admin.password, 10),
+            role: 'admin',
+            accessProfile: 'admin',
+          },
+        });
+      }
+      return created;
+    });
+    console.log(`[superadminController] Tenant criado: ${tenant.slug}${admin ? ` (admin ${admin.email})` : ' (sem login)'}`);
+    res.json({ ...tenant, admin: admin ? { email: admin.email } : null });
+  } catch (error) {
+    console.error('[superadminController] Falha ao criar tenant:', error.message);
+    res.status(500).json({ error: 'Não foi possível criar a empresa.' });
+  }
 }
 
 async function updateTenant(req, res) {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Acesso negado' });
+  if (denySuperadmin(req, res)) return;
   const { id } = req.params;
   const { name, plan, active, maxConnections, maxUsers, primaryColor, logoUrl } = req.body;
-
-  console.log(`[superadminController] Atualizando tenant ${id}:`, { maxConnections, maxUsers });
 
   const tenant = await prisma.tenant.update({
     where: { id },
@@ -91,4 +149,79 @@ async function updateTenant(req, res) {
   res.json(tenant);
 }
 
-module.exports = { listTenants, createTenant, updateTenant };
+async function listTenantUsers(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, slug: true, maxUsers: true } });
+  if (!tenant) return res.status(404).json({ error: 'Empresa não encontrada.' });
+  const users = await prisma.user.findMany({
+    where: { tenantId: tenant.id },
+    select: { id: true, name: true, email: true, role: true, accessProfile: true, active: true, createdAt: true },
+    orderBy: [{ active: 'desc' }, { createdAt: 'asc' }],
+  });
+  res.json({ tenant, users });
+}
+
+async function createTenantUser(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true, slug: true, maxUsers: true } });
+  if (!tenant) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const cred = normalizeCredential({ name: req.body.name, email: req.body.email, password: req.body.password });
+  if (cred.error) return res.status(400).json({ error: cred.error });
+
+  const role = req.body.role === 'agent' ? 'agent' : 'admin';
+
+  const count = await prisma.user.count({ where: { tenantId: tenant.id } });
+  if (tenant.maxUsers && count >= tenant.maxUsers) {
+    return res.status(409).json({ error: `Limite de ${tenant.maxUsers} usuário(s) do plano já foi atingido.` });
+  }
+  const clash = await prisma.user.findFirst({ where: { tenantId: tenant.id, email: cred.email }, select: { id: true } });
+  if (clash) return res.status(409).json({ error: 'Já existe um usuário com esse e-mail nesta empresa.' });
+
+  const user = await prisma.user.create({
+    data: {
+      tenantId: tenant.id,
+      name: cred.name,
+      email: cred.email,
+      password: await bcrypt.hash(cred.password, 10),
+      role,
+      accessProfile: role,
+    },
+    select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+  });
+  console.log(`[superadminController] Login criado para ${tenant.slug}: ${cred.email} (${role})`);
+  res.json(user);
+}
+
+async function updateTenantUser(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const { id, userId } = req.params;
+  const existing = await prisma.user.findFirst({ where: { id: userId, tenantId: id }, select: { id: true, role: true } });
+  if (!existing) return res.status(404).json({ error: 'Usuário não encontrado nesta empresa.' });
+
+  const data = {};
+  if (req.body.password !== undefined) {
+    if (String(req.body.password).length < 6) return res.status(400).json({ error: 'A nova senha deve ter ao menos 6 caracteres.' });
+    data.password = await bcrypt.hash(String(req.body.password), 10);
+  }
+  if (req.body.active !== undefined) data.active = Boolean(req.body.active);
+  if (req.body.name !== undefined && String(req.body.name).trim()) data.name = String(req.body.name).trim();
+  if (req.body.role !== undefined) {
+    const role = req.body.role === 'agent' ? 'agent' : 'admin';
+    data.role = role;
+    data.accessProfile = role;
+  }
+  if (!Object.keys(data).length) return res.status(400).json({ error: 'Nada para atualizar.' });
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data,
+    select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+  });
+  res.json(user);
+}
+
+module.exports = {
+  listTenants, createTenant, updateTenant,
+  listTenantUsers, createTenantUser, updateTenantUser,
+};

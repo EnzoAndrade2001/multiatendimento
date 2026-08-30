@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Building2, Copy, MessageSquare, Pencil, Plus, Power, Upload, Users, Wifi } from 'lucide-react';
+import { Activity, Building2, Copy, KeyRound, MessageSquare, Pencil, Plus, Power, RotateCw, Upload, Users, Wifi } from 'lucide-react';
 import { toast } from '../utils/toast';
-import { getTenants, createTenant, updateTenant, uploadFile, getMediaUrl } from '../services/api';
+import {
+  getTenants, createTenant, updateTenant, uploadFile, getMediaUrl,
+  getTenantUsers, createTenantUser, updateTenantUser,
+} from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
 import SurfaceCard from '../components/ui/SurfaceCard';
@@ -20,9 +23,13 @@ export default function SuperAdmin() {
     logoUrl: '',
     maxConnections: 1,
     maxUsers: 5,
+    adminName: '',
+    adminEmail: '',
+    adminPassword: '',
   });
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState(null);
+  const [usersModal, setUsersModal] = useState(null);
 
   useEffect(() => {
     load();
@@ -51,6 +58,9 @@ export default function SuperAdmin() {
         logoUrl: tenant.logoUrl || '',
         maxConnections: tenant.maxConnections || 1,
         maxUsers: tenant.maxUsers || 5,
+        adminName: '',
+        adminEmail: '',
+        adminPassword: '',
       });
       return;
     }
@@ -64,15 +74,25 @@ export default function SuperAdmin() {
       logoUrl: '',
       maxConnections: 1,
       maxUsers: 5,
+      adminName: '',
+      adminEmail: '',
+      adminPassword: '',
     });
   }
 
   async function handleSave(e) {
     e.preventDefault();
+    if (modal === 'new') {
+      if (!form.adminName.trim() || !form.adminEmail.trim() || form.adminPassword.length < 6) {
+        toast.error('Informe nome, e-mail e uma senha (mín. 6 caracteres) para o primeiro acesso da empresa.');
+        return;
+      }
+    }
     setSaving(true);
     try {
       if (modal === 'new') {
         await createTenant(form);
+        toast.success(`Empresa criada. Login em /${form.slug}/login com ${form.adminEmail.trim().toLowerCase()}.`);
       } else {
         await updateTenant(modal.id, form);
       }
@@ -307,6 +327,9 @@ export default function SuperAdmin() {
                   </td>
                   <td style={{ ...s.td, textAlign: 'right' }}>
                     <div style={s.actions}>
+                      <button style={s.iconBtn} onClick={() => setUsersModal(tenant)} title={`Logins de ${tenant.name}`}>
+                        <KeyRound size={16} />
+                      </button>
                       <button style={s.iconBtn} onClick={() => openModal(tenant)} title="Editar empresa">
                         <Pencil size={16} />
                       </button>
@@ -344,6 +367,18 @@ export default function SuperAdmin() {
               <label style={s.label}>Slug</label>
               <input style={s.input} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} required placeholder="ex-brasil-ads" />
             </div>
+
+            {modal === 'new' && (
+              <div style={{ ...s.field, gap: 'var(--space-3)', padding: 'var(--space-4)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md, 12px)', background: 'var(--bg-base)' }}>
+                <label style={s.label}>Acesso do administrador (primeiro login)</label>
+                <input style={s.input} value={form.adminName} onChange={(e) => setForm({ ...form, adminName: e.target.value })} required placeholder="Nome do responsável" />
+                <input style={s.input} type="email" value={form.adminEmail} onChange={(e) => setForm({ ...form, adminEmail: e.target.value })} required placeholder="email@empresa.com" />
+                <input style={s.input} type="password" value={form.adminPassword} onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} required placeholder="Senha (mín. 6 caracteres)" minLength={6} />
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)' }}>
+                  A empresa acessa por <strong>/{form.slug || 'slug'}/login</strong> com esse e-mail e senha. Dá para adicionar mais logins depois no botão da chave.
+                </span>
+              </div>
+            )}
 
             <div style={s.twoCols}>
               <div style={s.field}>
@@ -414,7 +449,114 @@ export default function SuperAdmin() {
           </form>
         </ModalShell>
       ) : null}
+
+      {usersModal ? (
+        <LoginsModal tenant={usersModal} onClose={() => setUsersModal(null)} onChanged={load} />
+      ) : null}
     </div>
+  );
+}
+
+function LoginsModal({ tenant, onClose, onChanged }) {
+  const [users, setUsers] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'admin' });
+
+  async function reload() {
+    try {
+      const { data } = await getTenantUsers(tenant.id);
+      setUsers(data.users || []);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Não foi possível carregar os logins.');
+      setUsers([]);
+    }
+  }
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [tenant.id]);
+
+  async function addLogin(e) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim() || form.password.length < 6) {
+      toast.error('Preencha nome, e-mail e senha (mín. 6 caracteres).');
+      return;
+    }
+    setBusy(true);
+    try {
+      await createTenantUser(tenant.id, form);
+      toast.success(`Login criado. Acesso em /${tenant.slug}/login.`);
+      setForm({ name: '', email: '', password: '', role: 'admin' });
+      await reload();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Não foi possível criar o login.');
+    } finally { setBusy(false); }
+  }
+
+  async function resetPassword(user) {
+    const next = window.prompt(`Nova senha para ${user.email} (mín. 6 caracteres):`);
+    if (next == null) return;
+    if (next.length < 6) { toast.error('A senha deve ter ao menos 6 caracteres.'); return; }
+    setBusy(true);
+    try {
+      await updateTenantUser(tenant.id, user.id, { password: next });
+      toast.success('Senha redefinida.');
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Não foi possível redefinir a senha.');
+    } finally { setBusy(false); }
+  }
+
+  async function toggleActive(user) {
+    setBusy(true);
+    try {
+      await updateTenantUser(tenant.id, user.id, { active: !user.active });
+      await reload();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Não foi possível atualizar o login.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <ModalShell kicker={`Logins · ${tenant.name}`} title={`Quem acessa /${tenant.slug}/login`} onClose={onClose} maxWidth="40rem">
+      <div style={s.form}>
+        {users == null ? (
+          <p style={{ color: 'var(--text-dim)' }}>Carregando…</p>
+        ) : users.length === 0 ? (
+          <p style={{ color: 'var(--text-dim)' }}>Esta empresa ainda não tem nenhum login. Crie o primeiro abaixo.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {users.map((u) => (
+              <div key={u.id} style={s.loginRow}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>{u.name} <span style={s.roleTag}>{u.role}</span></div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)' }}>{u.email}{u.active ? '' : ' · bloqueado'}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button style={s.iconBtn} title="Redefinir senha" disabled={busy} onClick={() => resetPassword(u)}><RotateCw size={15} /></button>
+                  <button style={{ ...s.iconBtn, color: u.active ? 'var(--danger)' : 'var(--success)' }} title={u.active ? 'Bloquear login' : 'Reativar login'} disabled={busy} onClick={() => toggleActive(u)}><Power size={15} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={addLogin} style={{ ...s.field, gap: 'var(--space-3)', marginTop: 'var(--space-4)', paddingTop: 'var(--space-4)', borderTop: '1px solid var(--border-color)' }}>
+          <label style={s.label}>Adicionar login</label>
+          <input style={s.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome" required />
+          <input style={s.input} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@empresa.com" required />
+          <div style={s.twoCols}>
+            <input style={s.input} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Senha (mín. 6)" minLength={6} required />
+            <select style={s.input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <option value="admin">Administrador</option>
+              <option value="agent">Atendente</option>
+            </select>
+          </div>
+          <div style={s.modalFooter}>
+            <ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton>
+            <ActionButton type="submit" disabled={busy}>{busy ? 'Processando...' : 'Criar login'}</ActionButton>
+          </div>
+        </form>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -506,6 +648,8 @@ const s = {
     borderRadius: '12px',
   },
   empty: { padding: 'var(--space-10) var(--space-6)', textAlign: 'center', color: 'var(--text-muted)' },
+  loginRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-base)' },
+  roleTag: { fontSize: 'var(--text-xs)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '1px 6px', marginLeft: '6px' },
   form: { padding: 'var(--space-8)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' },
   field: { display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' },
   label: { fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' },

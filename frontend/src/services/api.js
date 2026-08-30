@@ -222,6 +222,9 @@ export const getStats = () => api.get('/dashboard/stats');
 export const getTenants = () => api.get('/superadmin/tenants');
 export const createTenant = (data) => api.post('/superadmin/tenants', data);
 export const updateTenant = (id, data) => api.patch(`/superadmin/tenants/${id}`, data);
+export const getTenantUsers = (id) => api.get(`/superadmin/tenants/${id}/users`);
+export const createTenantUser = (id, data) => api.post(`/superadmin/tenants/${id}/users`, data);
+export const updateTenantUser = (id, userId, data) => api.patch(`/superadmin/tenants/${id}/users/${userId}`, data);
 
 // Quick Responses
 export const getQuickResponses = (params = {}) => api.get('/quick-responses', { params });

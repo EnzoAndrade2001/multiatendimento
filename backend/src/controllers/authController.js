@@ -23,8 +23,12 @@ async function login(req, res) {
   const { email, password, slug } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email e senha obrigatórios' });
 
+  // O e-mail só é único por tenant (@@unique([tenantId, email])). Quando o
+  // login vem pelo portal da empresa (com slug), a busca precisa ser escopada
+  // a esse tenant — senão um e-mail repetido em outra empresa "sequestra" o
+  // login e derruba com tenant_mismatch mesmo existindo o usuário certo.
   const user = await prisma.user.findFirst({
-    where: { email },
+    where: { email, ...(slug ? { tenant: { slug } } : {}) },
     include: { tenant: true },
   });
 
