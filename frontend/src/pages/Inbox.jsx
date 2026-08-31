@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import api, {
   getTickets,
+  getTicket,
   getMessages,
   sendMessage,
   sendMediaMessage,
@@ -87,6 +88,7 @@ export default function Inbox() {
   const { can } = usePermissions();
   const MESSAGE_PAGE_SIZE = 60;
   const [selectedId, setSelectedId] = useState(null);
+  const [directTicket, setDirectTicket] = useState(null);
   const [text, setText] = useState('');
   const [me, setMe] = useState(null);
   const [users, setUsers] = useState([]);
@@ -282,10 +284,24 @@ export default function Inbox() {
   useEffect(() => { historySearchRef.current = historySearch; }, [historySearch]);
   useEffect(() => {
     loadTickets();
+  }, [tab, filters]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tId = params.get('ticketId');
-    if (tId) setSelectedId(tId);
-  }, [tab, filters]);
+    if (!tId) return;
+    let active = true;
+    setSelectedId(tId);
+    getTicket(tId)
+      .then(({ data }) => {
+        if (!active) return;
+        setDirectTicket(data);
+        setTickets((current) => current.some((ticket) => ticket.id === data.id) ? current : [data, ...current]);
+        if (isMobile) setView('chat');
+      })
+      .catch(() => { if (active) toast.error('Não foi possível abrir diretamente o atendimento solicitado.'); });
+    return () => { active = false; };
+  }, []);
 
   // A busca so filtrava a lista ja carregada localmente (uma amostra da aba
   // atual) - clientes fora dela nunca apareciam, mesmo existindo. Sem isso,
@@ -654,8 +670,8 @@ export default function Inbox() {
   }, []);
 
   const selectedTicket = useMemo(
-    () => tickets.find(t => t.id === selectedId),
-    [tickets, selectedId]
+    () => tickets.find(t => t.id === selectedId) || (directTicket?.id === selectedId ? directTicket : null),
+    [tickets, selectedId, directTicket]
   );
 
   useEffect(() => {

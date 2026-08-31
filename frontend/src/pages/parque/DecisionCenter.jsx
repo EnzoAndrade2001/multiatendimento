@@ -335,28 +335,36 @@ export default function DecisionCenter({ osTypes = [] }) {
   ];
 
   return <div className="park-decision">
-    <section className="park-kpis" aria-label="Gestão de hoje" style={{ marginBottom: 10 }}>
-      {[
-        ['Decisões hoje', management.completedToday, CheckCircle2, 'success'],
-        ['SLA no prazo', `${management.sla}%`, TimerReset, management.sla >= 90 ? 'success' : 'warning'],
-        ['Tempo médio decisão', management.avgDecision == null ? '—' : `${management.avgDecision} min`, CalendarClock, 'info'],
-        ['Sem responsável', management.unassigned, UsersRound, management.unassigned ? 'danger' : 'success'],
-        ['O.S. em andamento', management.openOs, ClipboardList, 'info'],
-        ['Reabertas', management.reopened, RefreshCw, management.reopened ? 'warning' : 'success'],
-      ].map(([label, value, Icon, tone]) => <div className="park-kpi" key={label} title="Indicador calculado com a fila carregada">
-        <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span><span><b>{value}</b><small>{label}</small></span>
-      </div>)}
-    </section>
     <div className="park-data-note" role="status">
       <span><b>Fonte:</b> {data.summary?.dataSource || 'PrintGuard'} - janela de {Math.round((data.summary?.windowHours || 72) / 24)} dia(s)</span>
       <span>{data.summary?.affectedCustomers || 0} cliente(s) afetado(s) - {data.summary?.withoutCustomerPhone || 0} sem telefone - {data.summary?.withMeterHistory || 0} com histórico de contador</span>
     </div>
-    <section className="park-kpis" aria-label="Resumo executivo">
-      {kpis.map(([key, label, value, Icon, tone, definition]) => <button key={key} className={`park-kpi ${filter === key ? 'active' : ''}`} title={definition} aria-label={`${label}: ${fmtInt(value)}. ${definition}`} onClick={() => setFilter(filter === key ? 'all' : key)}>
-        <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span>
-        <span><b>{fmtInt(value)}</b><small>{label}</small></span>
-      </button>)}
-    </section>
+    <div className="park-kpi-groups">
+      <section className="park-kpi-group" aria-labelledby="park-management-title">
+        <header><div><b id="park-management-title">Gestão de hoje</b><span>Ritmo, SLA e distribuição do trabalho</span></div></header>
+        <div className="park-kpis management">
+          {[
+            ['Decisões hoje', management.completedToday, CheckCircle2, 'success'],
+            ['SLA no prazo', `${management.sla}%`, TimerReset, management.sla >= 90 ? 'success' : 'warning'],
+            ['Tempo médio decisão', management.avgDecision == null ? '—' : `${management.avgDecision} min`, CalendarClock, 'info'],
+            ['Sem responsável', management.unassigned, UsersRound, management.unassigned ? 'danger' : 'success'],
+            ['O.S. em andamento', management.openOs, ClipboardList, 'info'],
+            ['Reabertas', management.reopened, RefreshCw, management.reopened ? 'warning' : 'success'],
+          ].map(([label, value, Icon, tone]) => <div className="park-kpi" key={label} title="Indicador calculado com a fila carregada">
+            <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span><span><b>{value}</b><small>{label}</small></span>
+          </div>)}
+        </div>
+      </section>
+      <section className="park-kpi-group" aria-labelledby="park-alerts-title">
+        <header><div><b id="park-alerts-title">Alertas da fila</b><span>Clique em um indicador para filtrar as ocorrências</span></div></header>
+        <div className="park-kpis alerts">
+          {kpis.map(([key, label, value, Icon, tone, definition]) => <button key={key} className={`park-kpi ${filter === key ? 'active' : ''}`} title={definition} aria-label={`${label}: ${fmtInt(value)}. ${definition}`} onClick={() => setFilter(filter === key ? 'all' : key)}>
+            <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span>
+            <span><b>{fmtInt(value)}</b><small>{label}</small></span>
+          </button>)}
+        </div>
+      </section>
+    </div>
 
     <section className="park-toolbar">
       <div><b>Fila de decisão gerencial</b><span>{visible.length} de {all.length} ocorrência(s)</span></div>

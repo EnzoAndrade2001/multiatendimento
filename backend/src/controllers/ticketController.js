@@ -548,6 +548,20 @@ async function getMessages(req, res) {
     nextCursor: nextCursor ? new Date(nextCursor).toISOString() : null,
   });
 }
+
+async function detail(req, res) {
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: req.params.id, tenantId: req.user.tenantId },
+    include: {
+      contact: { include: { crmCustomer: true } },
+      agent: { select: { id: true, name: true } },
+      team: true,
+      instance: { select: { instanceName: true } },
+    },
+  });
+  if (!ticket) return res.status(404).json({ error: 'Ticket nao encontrado' });
+  return res.json(ticket);
+}
 async function assign(req, res) {
   const { id } = req.params;
   const { agentId, teamId, note } = req.body;
@@ -1613,4 +1627,4 @@ async function createNote(req, res) {
   }
 }
 
-module.exports = { list, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, deleteMessage, reopen, summarize, linkContact, forwardMessage, createNote, setIo };
+module.exports = { list, detail, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, deleteMessage, reopen, summarize, linkContact, forwardMessage, createNote, setIo };

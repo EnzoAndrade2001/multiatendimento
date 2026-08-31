@@ -169,6 +169,7 @@ export const importContacts = (formData) => api.post('/contacts/import', formDat
 
 // Tickets
 export const getTickets = (status, mine = false, filters = {}) => api.get('/tickets', { params: { status, mine, ...filters } });
+export const getTicket = (ticketId) => api.get(`/tickets/${ticketId}`);
 export const getMessages = (ticketId, params = {}) => api.get(`/tickets/${ticketId}/messages`, { params });
 export const getTicketOutboundOptions = (ticketId, instanceId) => api.get(`/tickets/${ticketId}/outbound-options`, { params: { instanceId } });
 export const sendMessage = (ticketId, body, quotedMsgId = null, options = {}) => api.post(`/tickets/${ticketId}/messages`, { body, quotedMsgId, ...options });
