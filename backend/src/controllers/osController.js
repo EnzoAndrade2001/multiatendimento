@@ -287,6 +287,23 @@ async function deleteEquipment(req, res) {
   }
 }
 
+// Mesmo critério de "em aberto" usado no cockpit Saúde do Parque.
+const CLOSED_OS_STATUS_RE = /^(FINALIZADA|FECHADA|CONCLUIDA|CONCLUÍDA|CANCELADA|C|F)$/i;
+
+async function getOpenOrdersForEquipment(req, res) {
+  const { tenantId } = req.user;
+  const { equipmentId } = req.params;
+  const equipment = await prisma.equipment.findFirst({ where: { id: equipmentId, tenantId }, select: { id: true } });
+  if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
+  const orders = await prisma.serviceOrder.findMany({
+    where: { tenantId, equipmentId, closedAt: null, resolvedAt: null },
+    select: { id: true, externalId: true, status: true, cdOstp: true, defect: true, createdAt: true, ticketId: true },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+  });
+  res.json(orders.filter((o) => !CLOSED_OS_STATUS_RE.test(String(o.status || ''))).slice(0, 6));
+}
+
 async function getOSList(req, res) {
   const { startDate, endDate, search, status } = req.query;
   const { tenantId } = req.user;
@@ -1735,4 +1752,4 @@ async function draftOS(req, res) {
   }
 }
 
-module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians };
+module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians };

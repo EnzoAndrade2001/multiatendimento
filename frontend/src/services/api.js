@@ -296,6 +296,7 @@ export const auditTicket = (ticketId) => api.post(`/revenue/audit/${ticketId}`);
 
 // OS & Equipments
 export const getEquipments = (contactId) => api.get(`/os/contacts/${contactId}/equipments`);
+export const getOpenOrdersForEquipment = (equipmentId) => api.get(`/os/equipments/${encodeURIComponent(equipmentId)}/open-orders`);
 export const updateEquipment = (id, data) => api.patch(`/os/equipments/${id}`, data);
 export const deleteEquipment = (id) => api.delete(`/os/equipments/${id}`);
 export const createOS = (data) => api.post('/os', data);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import api, { BACKEND_URL, getEquipments } from '../services/api';
-import { CheckCircle2, ChevronDown, FileText, LoaderCircle, MapPin, Printer, Wand2 } from 'lucide-react';
+import api, { BACKEND_URL, getEquipments, getOpenOrdersForEquipment } from '../services/api';
+import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, LoaderCircle, MapPin, Printer, Wand2 } from 'lucide-react';
 import EquipmentPickerModal, { equipmentAddress, equipmentOperationalLocation } from './EquipmentPickerModal';
 import { toast } from '../utils/toast';
 
@@ -20,8 +20,23 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     globalThis.crypto?.randomUUID?.() || `os-${Date.now()}-${Math.random().toString(16).slice(2)}`
   ));
   const [formData, setFormData] = useState({ equipmentId: '', defect: '', cdOstp: '', nmsuportet: '' });
+  const [openOrders, setOpenOrders] = useState([]);
+  const [checkingOpen, setCheckingOpen] = useState(false);
 
   const selectedEquipment = equipments.find((equipment) => equipment.id === formData.equipmentId);
+
+  // Ao escolher o equipamento, avisa se ele já tem O.S. em aberto (mesma
+  // checagem do cockpit Saúde do Parque). Não bloqueia — informa.
+  useEffect(() => {
+    if (!formData.equipmentId) { setOpenOrders([]); return; }
+    let active = true;
+    setCheckingOpen(true);
+    getOpenOrdersForEquipment(formData.equipmentId)
+      .then(({ data }) => { if (active) setOpenOrders(Array.isArray(data) ? data : []); })
+      .catch(() => { if (active) setOpenOrders([]); })
+      .finally(() => { if (active) setCheckingOpen(false); });
+    return () => { active = false; };
+  }, [formData.equipmentId]);
 
   function getPdfUrl(order) {
     const token = encodeURIComponent(localStorage.getItem('token') || '');
@@ -165,7 +180,10 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     label: { fontSize: 'var(--text-xs)', color: 'var(--accent)', fontWeight: 700, marginBottom: '6px', display: 'block' },
     btnGroup: { display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-2)' },
     saveBtn: { flex: 1, background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' },
-    cancelBtn: { flex: 1, background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' }
+    cancelBtn: { flex: 1, background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' },
+    openWarn: { padding: '10px 12px', marginBottom: 'var(--space-4)', borderRadius: '10px', background: 'var(--warning-light, rgba(245,158,11,0.08))', border: '1px solid var(--warning-border, rgba(245,158,11,0.3))', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
+    openWarnRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '5px 0', fontSize: 'var(--text-xs)', borderTop: '1px solid var(--border-color)' },
+    openWarnLink: { display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 700, flexShrink: 0 }
   };
 
   return (
@@ -228,6 +246,28 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               onSelect={(equipment) => setFormData((current) => ({ ...current, equipmentId: equipment.id }))}
             />
 
+            {openOrders.length > 0 ? (
+              <div style={s.openWarn}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, marginBottom: '6px' }}>
+                  <AlertTriangle size={16} /> Este equipamento já tem {openOrders.length} O.S. em aberto
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginBottom: '8px' }}>
+                  Revise antes de abrir outra para não duplicar o atendimento.
+                </div>
+                {openOrders.map((o) => (
+                  <div key={o.id} style={s.openWarnRow}>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <strong>O.S. {o.externalId || o.id}</strong> — {[o.status, o.defect].filter(Boolean).join(' · ') || 'sem descrição'}
+                    </span>
+                    <a href={`${BACKEND_URL}/api/os/${encodeURIComponent(o.externalId || o.id)}/pdf?token=${encodeURIComponent(localStorage.getItem('token') || '')}`}
+                      target="_blank" rel="noreferrer" style={s.openWarnLink}>
+                      <ExternalLink size={12} /> ver
+                    </a>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <label style={s.label}>TIPO DE O.S. / SERVIÇO</label>
             <select 
               style={s.input} 
@@ -281,7 +321,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                 </>
               ) : (
                 <button style={{ ...s.saveBtn, opacity: saving ? 0.65 : 1 }} onClick={handleSave} disabled={saving}>
-                  {saving ? <><LoaderCircle size={16} style={{ verticalAlign: 'middle', marginRight: '8px' }} />Abrindo no iLux...</> : 'Abrir O.S. no iLux'}
+                  {saving ? <><LoaderCircle size={16} style={{ verticalAlign: 'middle', marginRight: '8px' }} />Abrindo no iLux...</> : (openOrders.length > 0 ? 'Abrir outra mesmo assim' : 'Abrir O.S. no iLux')}
                 </button>
               )}
             </div>
