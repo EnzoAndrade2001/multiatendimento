@@ -9,14 +9,21 @@ const evolution = require('./evolutionService');
 async function sendSystemAlert(tenantId, message) {
   try {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-    if (!settings?.notificationPhone || !settings?.evolutionUrl || !settings?.evolutionKey) {
+    const targetPhone = settings?.serviceOrderManagerPhone || settings?.notificationPhone;
+    if (!targetPhone || !settings?.evolutionUrl || !settings?.evolutionKey) {
       console.log(`[alertService] Alerta ignorado para tenant=${tenantId}: Configurações incompletas.`);
       return false;
     }
 
-    // Busca qualquer instância conectada para disparar o alerta
-    const instance = await prisma.waInstance.findFirst({
-      where: { tenantId, status: 'connected' }
+    // O Sentinela usa o mesmo destinatário e a mesma instância configurados
+    // para cópias de O.S. O cadastro antigo de alertas permanece como fallback.
+    const configuredInstance = settings.serviceOrderManagerInstanceId
+      ? await prisma.waInstance.findFirst({
+          where: { id: settings.serviceOrderManagerInstanceId, tenantId, status: 'connected' },
+        })
+      : null;
+    const instance = configuredInstance || await prisma.waInstance.findFirst({
+      where: { tenantId, status: 'connected' },
     });
 
     if (!instance) {
@@ -24,7 +31,7 @@ async function sendSystemAlert(tenantId, message) {
       return false;
     }
 
-    const formattedPhone = settings.notificationPhone.replace(/\D/g, '');
+    const formattedPhone = targetPhone.replace(/\D/g, '');
 
     await evolution.sendText(
       settings.evolutionUrl,

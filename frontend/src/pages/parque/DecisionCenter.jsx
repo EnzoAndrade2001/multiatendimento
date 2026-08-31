@@ -256,7 +256,7 @@ export default function DecisionCenter({ osTypes = [] }) {
       } else {
         const { data: result } = await notifyParkIncident(item.id, { channel: 'manager', context: incidentContext(item) });
         if (result?.delivered) toast.success('Gestor notificado por WhatsApp.');
-        else toast.info('Registrado. Configure o telefone do gestor em Configurações para o envio automático.');
+        else toast.info('Registrado. Revise o WhatsApp e a instância em Configurações › Atendimento › Cópia automática de O.S.');
       }
     } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível notificar o gestor.'); }
     finally { setBusy(false); }

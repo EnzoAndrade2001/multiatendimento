@@ -2413,8 +2413,30 @@ export const MessageComposer = React.memo(function MessageComposer({
       )}
 
       <div style={{ ...styles.inputArea, padding: isMobile ? '0.75rem' : '1rem 1.5rem' }}>
-        {/* Toggle between Message and Note */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
+        {/* Canal e tipo de envio compartilham a mesma barra para poupar altura. */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
+          {!isNote && showInstancePicker ? (
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>ENVIAR POR</span>
+              <select
+                aria-label="Enviar mensagem pela instância"
+                value={outboundInstanceId || ''}
+                onChange={(event) => setOutboundInstanceId?.(event.target.value)}
+                style={{ ...outboundFieldStyle, maxWidth: isMobile ? 150 : 210 }}
+              >
+                <option value="">Selecione a instância…</option>
+                {(instances || [])
+                  .filter((item) => !String(item.instanceName || '').startsWith('DELETED_'))
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {(item.instanceName || item.id).replace(/^[a-z0-9]+_/i, '')}
+                      {item.provider === 'evolution_official' ? ' · Oficial' : ' · QR'}
+                    </option>
+                  ))}
+              </select>
+              {outboundOptionsLoading ? <span aria-label="Validando instância" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>…</span> : null}
+            </label>
+          ) : null}
           <button
             type="button"
             onClick={() => setIsNote(false)}
@@ -2452,37 +2474,8 @@ export const MessageComposer = React.memo(function MessageComposer({
           </button>
         </div>
 
-        {!isNote && (showInstancePicker || outboundOptions?.optedOut || outboundOptions?.mode === 'official') ? (
+        {!isNote && (outboundOptions?.optedOut || outboundOptions?.mode === 'official') ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-            {showInstancePicker ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)' }}>ENVIAR POR</span>
-                <select
-                  value={outboundInstanceId || ''}
-                  onChange={(event) => setOutboundInstanceId?.(event.target.value)}
-                  style={outboundFieldStyle}
-                >
-                  <option value="">Selecione a instância…</option>
-                  {(instances || [])
-                    .filter((item) => !String(item.instanceName || '').startsWith('DELETED_'))
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {(item.instanceName || item.id).replace(/^[a-z0-9]+_/i, '')}
-                        {item.provider === 'evolution_official' ? ' · Oficial' : ' · QR'}
-                      </option>
-                    ))}
-                </select>
-                {outboundOptionsLoading ? (
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>validando…</span>
-                ) : null}
-                {(instances || []).filter((item) => !String(item.instanceName || '').startsWith('DELETED_')).length === 0 ? (
-                  <span style={{ fontSize: '0.72rem', color: 'var(--warning, #9a6700)' }}>
-                    Instâncias não carregaram — recarregue a página (F5).
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-
             {outboundOptions?.optedOut ? (
               <div style={{ ...outboundBannerBase, background: 'var(--danger-light, #fdecec)', color: 'var(--danger, #b42318)', border: '1px solid var(--danger-border, #f3b9b3)' }}>
                 <span style={{ flex: '1 1 220px', minWidth: 0 }}>⛔ Este contato pediu para não receber mensagens (opt-out).</span>

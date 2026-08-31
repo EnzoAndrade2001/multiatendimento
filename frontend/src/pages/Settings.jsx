@@ -1135,14 +1135,14 @@ export default function Settings() {
               </div>
 
               <div style={s.field}>
-                <label style={s.label}>WhatsApp para alertas do sistema</label>
+                <label style={s.label}>WhatsApp para alertas técnicos (fallback)</label>
                 <input
                   style={s.input}
                   value={form.notificationPhone}
                   onChange={(e) => setForm({ ...form, notificationPhone: e.target.value })}
                   placeholder="5511999999999"
                 />
-                <p style={s.hint}>Você receberá avisos técnicos neste número.</p>
+                <p style={s.hint}>Usado apenas quando não houver um gestor configurado abaixo para receber cópias de O.S.</p>
               </div>
 
               <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
@@ -1182,7 +1182,7 @@ export default function Settings() {
                   onChange={(e) => setForm({ ...form, serviceOrderManagerPhone: e.target.value })}
                   placeholder="5551999999999"
                 />
-                <p style={s.hint}>Informe país, DDD e número. Exemplo: 5551999999999.</p>
+                <p style={s.hint}>Informe país, DDD e número. Este mesmo gestor receberá os alertas enviados pelo botão “Gestor” do Sentinela.</p>
               </div>
 
               <div style={s.field}>
