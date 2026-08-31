@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, BellRing, CalendarClock, CheckCircle2, ChevronRight, ClipboardList,
   ExternalLink, History, Link2, Loader2, MessageCircle, RefreshCw, ShieldAlert, UserRound,
   X,
 } from 'lucide-react';
 import {
-  BACKEND_URL, approveTelemetryEvent, assignParkIncident, consolidateParkServiceOrder, getCrmCustomer360,
+  BACKEND_URL, approveTelemetryEvent, assignParkIncident, consolidateParkServiceOrder,
   getParkBindingCandidates, getParkEquipmentTimeline, getParkQueue, getUsers, ignoreTelemetryEvent,
   monitorTelemetryEvent, notifyParkIncident, resolveParkBinding, sendOSManagerCopy,
 } from '../../services/api';
@@ -67,7 +67,8 @@ function recommendationOf(item) {
 }
 
 export default function DecisionCenter({ osTypes = [] }) {
-  const { user } = usePermissions();
+  const { user, can } = usePermissions();
+  const canManage = can('telemetry.manage');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
@@ -104,7 +105,7 @@ export default function DecisionCenter({ osTypes = [] }) {
         const due = i.workflow?.decisionDueAt || i.workflow?.monitoringUntil;
         return due && new Date(due).getTime() < now;
       }).length,
-      contact: all.filter((i) => ['P1', 'P2'].includes(i._priority.level) && i.customer?.phone).length,
+      contact: data?.summary?.contactableCustomers ?? new Set(all.filter((i) => i.contactable && i.customer?.id).map((i) => i.customer.id)).size,
       unlinked: data?.summary?.unlinked ?? all.filter((i) => i.mappingState !== 'MATCHED').length,
       openOs: data?.summary?.openServiceOrders ?? all.filter((i) => i.openServiceOrder).length,
       monitoring: data?.summary?.monitoring ?? all.filter((i) => i.state === 'MONITORING').length,
@@ -168,11 +169,11 @@ export default function DecisionCenter({ osTypes = [] }) {
     setBusy(true);
     try {
       if (dialog.items?.length > 1) {
-        await consolidateParkServiceOrder({ eventIds: dialog.items.map((i) => i.id), cdOstp: typeCode });
-        await refreshAfter('O.S. consolidada criada para a reposição.');
+        const { data: result } = await consolidateParkServiceOrder({ eventIds: dialog.items.map((i) => i.id), cdOstp: typeCode });
+        await refreshAfter(result?.reused ? 'O.S. já existente vinculada; nenhuma duplicata foi criada.' : 'O.S. consolidada criada para a reposição.');
       } else {
-        await approveTelemetryEvent(dialog.item.id, { cdOstp: typeCode });
-        await refreshAfter('O.S. criada e vinculada à ocorrência.');
+        const { data: result } = await approveTelemetryEvent(dialog.item.id, { cdOstp: typeCode });
+        await refreshAfter(result?.reused ? 'O.S. existente vinculada; nenhuma duplicata foi criada.' : 'O.S. criada e vinculada à ocorrência.');
       }
     } catch (error) { toast.error(error.response?.data?.error || 'Falha ao abrir a O.S.'); }
     finally { setBusy(false); }
@@ -193,38 +194,36 @@ export default function DecisionCenter({ osTypes = [] }) {
     finally { setBusy(false); }
   }
 
-  // Continua o atendimento dentro do inbox: se o cliente já tem conversa ativa,
-  // abre direto; senão leva à ficha para iniciar/vincular o contato.
   async function openConversation(item) {
     if (!item.customer?.id) { toast.error('Cliente não vinculado ao CRM — corrija o vínculo primeiro.'); return; }
-    setBusy(true);
-    try {
-      const { data: profile } = await getCrmCustomer360(item.customer.id);
-      const ticketId = profile?.quickActions?.ticketId;
-      if (ticketId) { window.location.assign(`/inbox?ticketId=${encodeURIComponent(ticketId)}`); return; }
-      toast.info('Sem conversa ativa com este cliente. Abrindo a ficha para iniciar o atendimento.');
-      setDialog({ type: 'crm360', item, tab: 'contacts' });
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Não foi possível localizar a conversa do cliente.');
-    } finally { setBusy(false); }
+    if (item.activeTicketId) {
+      window.location.assign(`/inbox?ticketId=${encodeURIComponent(item.activeTicketId)}`);
+      return;
+    }
+    setDialog({ type: 'crm360', item, tab: 'contacts' });
   }
 
   if (loading) return <div className="park-loading"><Loader2 className="spin" size={18} /> Montando fila gerencial…</div>;
   if (!data) return <div className="park-empty">Telemetria indisponível.</div>;
 
+  const windowLabel = `${data.summary?.windowHours || 72} horas`;
   const kpis = [
-    ['action', 'Ação hoje', summary.action, ShieldAlert, 'danger'],
-    ['risk', 'Risco em até 3 dias', summary.risk, AlertTriangle, 'warning'],
-    ['overdue', 'Decisões vencidas', summary.overdue, CalendarClock, 'danger'],
-    ['contact', 'Clientes a contatar', summary.contact, MessageCircle, 'info'],
-    ['unlinked', 'Vínculos pendentes', summary.unlinked, Link2, 'warning'],
-    ['openOs', 'Com O.S. aberta', summary.openOs, ClipboardList, 'success'],
-    ['monitoring', 'Em monitoramento', summary.monitoring, CheckCircle2, 'success'],
+    ['action', 'Ação hoje', summary.action, ShieldAlert, 'danger', `Ocorrências P1 sem O.S. aberta, entre ${all.length} ocorrências da janela de ${windowLabel}.`],
+    ['risk', 'Risco em até 3 dias', summary.risk, AlertTriangle, 'warning', 'Ocorrências com previsão de término do suprimento em até 3 dias, calculada pelo histórico de contador.'],
+    ['overdue', 'Decisões vencidas', summary.overdue, CalendarClock, 'danger', `Ocorrências cujo prazo de decisão venceu na janela de ${windowLabel}.`],
+    ['contact', 'Clientes com contato', summary.contact, MessageCircle, 'info', `Clientes distintos afetados com telefone preenchido; denominador: ${data.summary?.affectedCustomers || 0} clientes.`],
+    ['unlinked', 'Vínculos pendentes', summary.unlinked, Link2, 'warning', 'Ocorrências sem vínculo confirmado entre cliente e equipamento.'],
+    ['openOs', 'Com O.S. aberta', summary.openOs, ClipboardList, 'success', 'Ocorrências cujo equipamento possui O.S. ativa; não representa O.S. distintas.'],
+    ['monitoring', 'Em monitoramento', summary.monitoring, CheckCircle2, 'success', 'Ocorrências com prazo de monitoramento ainda vigente.'],
   ];
 
   return <div className="park-decision">
+    <div className="park-data-note" role="status">
+      <span><b>Fonte:</b> {data.summary?.dataSource || 'PrintGuard'} - janela de {Math.round((data.summary?.windowHours || 72) / 24)} dia(s)</span>
+      <span>{data.summary?.affectedCustomers || 0} cliente(s) afetado(s) - {data.summary?.withoutCustomerPhone || 0} sem telefone - {data.summary?.withMeterHistory || 0} com histórico de contador</span>
+    </div>
     <section className="park-kpis" aria-label="Resumo executivo">
-      {kpis.map(([key, label, value, Icon, tone]) => <button key={key} className={`park-kpi ${filter === key ? 'active' : ''}`} onClick={() => setFilter(filter === key ? 'all' : key)}>
+      {kpis.map(([key, label, value, Icon, tone, definition]) => <button key={key} className={`park-kpi ${filter === key ? 'active' : ''}`} title={definition} aria-label={`${label}: ${fmtInt(value)}. ${definition}`} onClick={() => setFilter(filter === key ? 'all' : key)}>
         <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span>
         <span><b>{fmtInt(value)}</b><small>{label}</small></span>
       </button>)}
@@ -254,18 +253,18 @@ export default function DecisionCenter({ osTypes = [] }) {
     <div className="park-workspace">
       <section className="park-list">
         {visible.length === 0 && <div className="park-empty">Nenhuma ocorrência neste filtro.</div>}
-        {visible.map((item) => <IncidentRow key={item.id} item={item} checked={Boolean(selected[item.id])}
+        {visible.map((item) => <IncidentRow key={item.id} item={item} checked={Boolean(selected[item.id])} canManage={canManage}
           onToggle={() => setSelected((prev) => { const next = { ...prev }; if (next[item.id]) delete next[item.id]; else next[item.id] = item; return next; })}
           onDialog={(type) => setDialog({ type, item })} onNotify={() => notifyManager(item)}
           onConversation={() => openConversation(item)} busy={busy} />)}
       </section>
-      <ReplenishmentPanel groups={data.replenishment || []} incidents={all} selected={selected} setSelected={setSelected} onOs={(items) => setDialog({ type: 'os', items, item: items[0] })} />
+      <ReplenishmentPanel groups={data.replenishment || []} incidents={all} selected={selected} setSelected={setSelected} canManage={canManage} onOs={(items) => setDialog({ type: 'os', items, item: items[0] })} />
     </div>
 
     {dialog?.type === 'monitor' && <MonitorDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onSave={saveMonitor} />}
     {dialog?.type === 'ignore' && <IgnoreDialog busy={busy} onClose={() => setDialog(null)} onSave={saveIgnore} />}
     {dialog?.type === 'os' && <OsDialog item={dialog.item} count={dialog.items?.length || 1} osTypes={osTypes} busy={busy} onClose={() => setDialog(null)} onSave={saveOs} />}
-    {dialog?.type === 'os-open' && <OpenOrdersDialog item={dialog.item} onClose={() => setDialog(null)} onProceed={() => setDialog({ type: 'os', item: dialog.item })} />}
+    {dialog?.type === 'os-open' && <OpenOrdersDialog item={dialog.item} onClose={() => setDialog(null)} />}
     {dialog?.type === 'binding' && <BindingDialog item={dialog.item} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Vínculo corrigido e fila recalculada.')} />}
     {dialog?.type === 'timeline' && <TimelineDialog item={dialog.item} onClose={() => setDialog(null)} />}
     {dialog?.type === 'assign' && <AssignDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Responsável notificado no chat interno.')} />}
@@ -281,7 +280,7 @@ export default function DecisionCenter({ osTypes = [] }) {
   </div>;
 }
 
-function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversation, busy }) {
+function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversation, busy, canManage }) {
   const priority = item._priority;
   const rec = item._recommendation;
   const hasCustomer = Boolean(item.customer?.id);
@@ -293,7 +292,7 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
   const showReceived = receivedMin != null && Math.abs((item.ageMinutes || 0) - receivedMin) > 36 * 60;
   return <article className={`park-incident priority-${priority.level.toLowerCase()}`}>
     <div className="park-inc-head">
-      <label><input type="checkbox" checked={checked} onChange={onToggle} /> <span className={`park-priority ${priority.level.toLowerCase()}`}>{priority.level}</span></label>
+      <label><input type="checkbox" checked={checked} disabled={!canManage} title={canManage ? '' : 'Requer permissão para gerenciar o Sentinela'} onChange={onToggle} /> <span className={`park-priority ${priority.level.toLowerCase()}`}>{priority.level}</span></label>
       <span className="park-event">{item.eventType}</span>
       <span className="park-age">detectado {ageLabel(item.ageMinutes)}{showReceived ? ` · recebido ${ageLabel(receivedMin)}` : ''}</span>
     </div>
@@ -302,7 +301,8 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
         <h3>{item.customerName || 'Cliente não identificado'}{linked ? '' : <em className="park-provisional-tag"> · provável, confirme o vínculo</em>}</h3>
         <b>{item.equipment?.model || 'Equipamento não identificado'}</b>
         <span>Série: {item.serialNumber || 'não informada'}{item.equipment?.sector ? ` · ${item.equipment.sector}` : ''}</span>
-        <span>{item.customer?.address || item.equipment?.address || 'Endereço não informado'}</span>
+        <span>{item.customer?.address || item.equipment?.installLocation || item.equipment?.address || 'Endereço não informado'}</span>
+        {(item.equipment?.city || item.equipment?.state) && <span>{[item.equipment.city, item.equipment.state].filter(Boolean).join(' / ')}</span>}
         {item.contract && <span>Contrato #{item.contract.number || item.contract.externalId || '—'}{item.franchise?.franchise ? ` · ${fmtInt(item.franchise.franchise)} pág.` : ''}</span>}
       </div>
       <div className="park-inc-evidence">
@@ -329,22 +329,24 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
     </div>
     <div className="park-inc-actions">
       {item.mappingState !== 'MATCHED'
-        ? <button className="park-btn primary" onClick={() => onDialog('binding')}><Link2 size={14} /> Corrigir vínculo</button>
+        ? <button className="park-btn primary" disabled={!canManage} onClick={() => onDialog('binding')}><Link2 size={14} /> Corrigir vínculo</button>
         : item.openServiceOrder
-          ? <button className="park-btn primary" title="Este equipamento já tem O.S. em aberto" onClick={() => onDialog('os-open')}><ClipboardList size={14} /> Abrir O.S. · {(item.openServiceOrders?.length || 1)} aberta(s)</button>
-          : <button className="park-btn primary" onClick={() => onDialog('os')}><ClipboardList size={14} /> Abrir O.S.</button>}
-      <button className="park-btn" onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar</button>
-      <button className="park-btn" onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir</button>
-      <button className="park-btn" onClick={() => onDialog('timeline')}><History size={14} /> Histórico</button>
-      <button className="park-btn" disabled={!hasCustomer} title={hasCustomer ? 'Abrir a ficha 360 sobreposta' : 'Cliente não vinculado ao CRM'} onClick={() => onDialog('crm360')}><ClipboardList size={14} /> CRM 360</button>
-      <button className="park-btn" disabled={!hasCustomer || busy} title={hasCustomer ? 'Continuar o atendimento no inbox' : 'Cliente não vinculado ao CRM'} onClick={onConversation}><MessageCircle size={14} /> Atendimento</button>
-      <button className="park-btn" disabled={busy} onClick={onNotify} title="Enviar alerta ao gestor por WhatsApp"><BellRing size={14} /> Gestor</button>
-      <button className="park-btn danger" onClick={() => onDialog('ignore')}>Ignorar</button>
+          ? <button className="park-btn primary" title="Este equipamento já tem O.S. em aberto; revise-a antes de criar outra" onClick={() => onDialog('os-open')}><ClipboardList size={14} /> Ver O.S. existente{(item.openServiceOrders?.length || 1) > 1 ? ` (${item.openServiceOrders.length})` : ''}</button>
+          : <button className="park-btn primary" disabled={!canManage} onClick={() => onDialog('os')}><ClipboardList size={14} /> Abrir O.S.</button>}
+      <button className="park-btn" disabled={!hasCustomer || busy} title={hasCustomer ? (item.activeTicketId ? 'Continuar conversa ativa' : 'Abrir ficha para iniciar atendimento') : 'Cliente não vinculado ao CRM'} onClick={onConversation}><MessageCircle size={14} /> {item.activeTicketId ? 'Atendimento' : 'Abrir ficha'}</button>
+      <details className="park-more-actions"><summary className="park-btn">Mais ações <ChevronRight size={14} /></summary><div>
+        <button className="park-btn" disabled={!canManage} onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar</button>
+        <button className="park-btn" disabled={!canManage} onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir</button>
+        <button className="park-btn" onClick={() => onDialog('timeline')}><History size={14} /> Histórico</button>
+        <button className="park-btn" disabled={!hasCustomer} onClick={() => onDialog('crm360')}><ClipboardList size={14} /> CRM 360</button>
+        <button className="park-btn" disabled={busy || !canManage} onClick={onNotify}><BellRing size={14} /> Gestor</button>
+        <button className="park-btn danger" disabled={!canManage} onClick={() => onDialog('ignore')}>Ignorar</button>
+      </div></details>
     </div>
   </article>;
 }
 
-function ReplenishmentPanel({ groups, incidents, selected, setSelected, onOs }) {
+function ReplenishmentPanel({ groups, incidents, selected, setSelected, onOs, canManage }) {
   return <aside className="park-replenishment">
     <header><div><b>Reposição da semana</b><span>Consolide por cliente e evite chamados duplicados.</span></div><span>{groups.length}</span></header>
     {!groups.length && <div className="park-empty">Sem reposição sugerida.</div>}
@@ -354,20 +356,33 @@ function ReplenishmentPanel({ groups, incidents, selected, setSelected, onOs }) 
       const allSelected = usable.length && usable.every((i) => selected[i.id]);
       return <div className="park-replenishment-group" key={group.customer?.id || group.customer?.name}>
         <b>{group.customer?.name}</b><span>{group.total} item(ns) · {group.urgent} urgente(s)</span>
-        <ul>{group.items?.slice(0, 5).map((i) => <li key={i.eventId}>{i.equipment?.model || i.serialNumber} {i.toner?.daysLeft != null && (i.toner.daysLeft <= 21 || i.trend?.reliable) ? `· ~${Math.max(0, Math.ceil(i.toner.daysLeft))}d${i.trend?.reliable ? '' : '?'}` : ''}{i.openServiceOrder ? ' · já tem O.S.' : ''}</li>)}</ul>
-        <small>Estoque e rota: fonte ainda não integrada.</small>
-        <div><button className="park-btn" disabled={!usable.length} onClick={() => setSelected((prev) => {
+        <ul>{group.items?.slice(0, 5).map((i) => <li key={i.eventId}>
+          <b>{[i.supply?.color, i.supply?.code].filter(Boolean).join(' / ') || 'Suprimento não identificado'}</b> · {i.equipment?.model || i.serialNumber}
+          {i.toner?.daysLeft != null && (i.toner.daysLeft <= 21 || i.trend?.reliable) ? ` · consumo em ~${Math.max(0, Math.ceil(i.toner.daysLeft))}d${i.trend?.reliable ? '' : '?'}` : ''}
+          {i.supply?.stockAvailable != null ? ` · estoque ${i.supply.stockAvailable}${i.supply.minimumStock != null ? ` (mín. ${i.supply.minimumStock})` : ''}` : ' · estoque não integrado'}
+          {i.supply?.technician ? ` · ${i.supply.technician}` : ''}{i.supply?.route ? ` · rota ${i.supply.route}` : ''}{i.openServiceOrder ? ' · já tem O.S.' : ''}
+        </li>)}</ul>
+        <small>{group.items?.some((i) => i.supply?.deliveryStatus || i.supply?.estimatedDeliveryAt) ? 'Status e prazo recebidos da telemetria; confirme antes do envio.' : 'Rota, prazo e status de entrega não integrados; confirme antes da O.S.'}</small>
+        <div><button className="park-btn" disabled={!usable.length || !canManage} onClick={() => setSelected((prev) => {
           const next = { ...prev }; usable.forEach((i) => { if (allSelected) delete next[i.id]; else next[i.id] = i; }); return next;
         })}>{allSelected ? 'Limpar seleção' : 'Selecionar itens'}</button>
-        <button className="park-btn primary" disabled={!usable.length} onClick={() => onOs(usable)}>Gerar 1 O.S.</button></div>
+        <button className="park-btn primary" disabled={!usable.length || !canManage} onClick={() => onOs(usable)}>Gerar 1 O.S.</button></div>
       </div>;
     })}
   </aside>;
 }
 
 function Modal({ title, eyebrow, onClose, children, footer }) {
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    const onKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKeyDown);
+    dialogRef.current?.querySelector('button, input, select, textarea')?.focus();
+    return () => { document.removeEventListener('keydown', onKeyDown); previous?.focus?.(); };
+  }, [onClose]);
   return <div className="park-modal-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-    <section className="park-modal" role="dialog" aria-modal="true" aria-label={title}>
+    <section ref={dialogRef} className="park-modal" role="dialog" aria-modal="true" aria-label={title}>
       <header><div><small>{eyebrow}</small><h2>{title}</h2></div><button onClick={onClose} aria-label="Fechar"><X size={19} /></button></header>
       <div className="park-modal-body">{children}</div>{footer && <footer>{footer}</footer>}
     </section>
@@ -394,12 +409,12 @@ function IgnoreDialog({ busy, onClose, onSave }) {
   </Modal>;
 }
 
-function OpenOrdersDialog({ item, onClose, onProceed }) {
+function OpenOrdersDialog({ item, onClose }) {
   const orders = item.openServiceOrders?.length ? item.openServiceOrders : (item.openServiceOrder ? [item.openServiceOrder] : []);
   const openPdf = (o) => window.open(`${BACKEND_URL}/api/os/${encodeURIComponent(o.number || o.id)}/pdf?token=${localStorage.getItem('token')}`, '_blank', 'noopener,noreferrer');
   return (
     <Modal eyebrow="Atenção" title="Este equipamento já tem O.S. em aberto" onClose={onClose}
-      footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" onClick={onProceed}>Abrir outra O.S. mesmo assim</button></>}>
+      footer={<button className="park-btn primary" onClick={onClose}>Fechar</button>}>
       <p>{item.equipment?.model || 'Equipamento'} · {item.serialNumber || 'sem série'} — evite duplicar o atendimento. Revise as O.S. abertas antes de abrir uma nova.</p>
       <div className="park-timeline">
         {orders.map((o) => (

@@ -5,7 +5,7 @@ export const PERMISSION_KEYS = [
   'campaigns.manage', 'leads.manage', 'connections.manage', 'revenue.view',
   'settings.bot.manage', 'settings.attendance.manage', 'users.manage', 'teams.manage',
   'settings.company.manage', 'quick_responses.manage', 'tags.manage',
-  'settings.agent.manage', 'privacy.manage', 'audit.view', 'telemetry.view', 'internal_chat.view',
+  'settings.agent.manage', 'privacy.manage', 'audit.view', 'telemetry.view', 'telemetry.manage', 'internal_chat.view',
 ];
 
 export const ACCESS_PROFILES = {
@@ -16,7 +16,7 @@ export const ACCESS_PROFILES = {
       'inbox.reopen', 'inbox.create_os', 'crm.view', 'quick_responses.manage',
       'tags.manage', 'internal_chat.view', 'inbox.view_all', 'inbox.delete_message',
       'crm.financial.view', 'billing.view', 'campaigns.manage', 'leads.manage',
-      'revenue.view', 'teams.manage', 'settings.attendance.manage', 'telemetry.view',
+      'revenue.view', 'teams.manage', 'settings.attendance.manage', 'telemetry.view', 'telemetry.manage',
     ],
   },
   agent: {
@@ -44,7 +44,7 @@ export const ACCESS_PROFILES = {
 export const PERMISSION_GROUPS = [
   { label: 'Atendimento', keys: PERMISSION_KEYS.filter((key) => key.startsWith('inbox.')) },
   { label: 'CRM e financeiro', keys: PERMISSION_KEYS.filter((key) => key.startsWith('crm.') || key.startsWith('billing.')) },
-  { label: 'Operação', keys: ['dashboard.view', 'campaigns.manage', 'leads.manage', 'connections.manage', 'revenue.view', 'telemetry.view', 'internal_chat.view'] },
+  { label: 'Operação', keys: ['dashboard.view', 'campaigns.manage', 'leads.manage', 'connections.manage', 'revenue.view', 'telemetry.view', 'telemetry.manage', 'internal_chat.view'] },
   { label: 'Administração', keys: PERMISSION_KEYS.filter((key) => key.startsWith('settings.') || ['users.manage', 'teams.manage', 'quick_responses.manage', 'tags.manage', 'privacy.manage', 'audit.view'].includes(key)) },
 ];
 
@@ -62,7 +62,7 @@ export const PERMISSION_LABELS = {
   'teams.manage': 'Gerenciar equipes', 'settings.company.manage': 'Configurar empresa',
   'quick_responses.manage': 'Gerenciar respostas rápidas', 'tags.manage': 'Gerenciar etiquetas',
   'settings.agent.manage': 'Configurar Agente Local', 'privacy.manage': 'Gerenciar privacidade e LGPD',
-  'internal_chat.view': 'Usar chat interno', 'audit.view': 'Consultar auditoria do sistema', 'telemetry.view': 'Acompanhar telemetria operacional',
+  'internal_chat.view': 'Usar chat interno', 'audit.view': 'Consultar auditoria do sistema', 'telemetry.view': 'Acompanhar telemetria operacional', 'telemetry.manage': 'Gerenciar decisões do Sentinela',
 };
 
 export function permissionsForUser(user = {}) {

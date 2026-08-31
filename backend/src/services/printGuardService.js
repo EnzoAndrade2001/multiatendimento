@@ -7,6 +7,7 @@ const SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
 const METER_HISTORY_PAGE_SIZE = 100;
 const METER_HISTORY_MAX_PAGES = 50;
+const CLOSED_OS_RE = /^(FINALIZADA|FECHADA|CONCLUIDA|CANCELADA|C|F)$/i;
 // Versioned API prefix shared by pairing and all authenticated resources.
 const PRINTGUARD_API_PREFIX = '/integrations/v1/multiatendimento';
 let io = null;
@@ -698,6 +699,9 @@ async function eventAction(tenantId, eventId, action, body = {}, actorId = null)
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId }, include: { connection: true } });
   if (!event) { const error = new Error('Evento nao encontrado.'); error.statusCode = 404; throw error; }
   if (action === 'approve') return approveEvent(tenantId, event, body);
+  if (!['RECEIVED', 'MONITORING', 'ERROR'].includes(event.state)) {
+    const error = new Error('Este evento ja foi encerrado e nao aceita novas decisoes.'); error.statusCode = 409; throw error;
+  }
 
   let assignedToId;
   if (action === 'monitor' && body.assignedToId) {
@@ -712,17 +716,25 @@ async function eventAction(tenantId, eventId, action, body = {}, actorId = null)
     const note = String(body.note ?? '').trim();
     // Motivo e opcional (a fila legada ignora sem motivo), mas quando vier tem
     // de ser um codigo conhecido; "OUTRO" exige a observacao como complemento.
-    if (reason && !IGNORE_REASONS.has(reason)) { const error = new Error('Motivo de descarte invalido.'); error.statusCode = 400; throw error; }
+    if (!reason) { const error = new Error('Selecione um motivo para ignorar o alerta.'); error.statusCode = 400; throw error; }
+    if (!IGNORE_REASONS.has(reason)) { const error = new Error('Motivo de descarte invalido.'); error.statusCode = 400; throw error; }
     if (reason === 'OTHER' && !note) { const error = new Error('Descreva o motivo na observacao para usar "Outro".'); error.statusCode = 400; throw error; }
     ignoredReason = clip([reason, note].filter(Boolean).join(' — '));
   }
 
+  let monitoringUntil = null;
+  if (action === 'monitor') {
+    if (!body.monitoringUntil) { const error = new Error('Informe ate quando o alerta deve ser monitorado.'); error.statusCode = 400; throw error; }
+    monitoringUntil = new Date(body.monitoringUntil);
+    if (Number.isNaN(monitoringUntil.getTime())) { const error = new Error('Prazo de monitoramento invalido.'); error.statusCode = 400; throw error; }
+    if (monitoringUntil.getTime() <= Date.now()) { const error = new Error('O prazo de monitoramento deve estar no futuro.'); error.statusCode = 400; throw error; }
+  }
   const base = { decisionAt: new Date(), decisionById: actorId || event.decisionById };
   const data = action === 'monitor'
     ? {
       ...base,
       state: 'MONITORING',
-      monitoringUntil: body.monitoringUntil ? new Date(body.monitoringUntil) : null,
+      monitoringUntil,
       monitoringCondition: clip(body.monitoringCondition),
       ...(body.nextStep !== undefined ? { nextStep: clip(body.nextStep) } : {}),
       ...(assignedToId ? { assignedToId } : {}),
@@ -766,7 +778,10 @@ async function eventAction(tenantId, eventId, action, body = {}, actorId = null)
 
 async function approveEvent(tenantId, event, body = {}) {
   if (event.state === 'IGNORED') { const error = new Error('Evento ignorado nao pode abrir O.S. sem reprocessamento.'); error.statusCode = 409; throw error; }
-  if (event.serviceOrderId) return prisma.serviceOrder.findFirst({ where: { id: event.serviceOrderId, tenantId } });
+  if (event.serviceOrderId) {
+    const linked = await prisma.serviceOrder.findFirst({ where: { id: event.serviceOrderId, tenantId } });
+    if (linked) return Object.assign(linked, { reused: true });
+  }
   if (event.state !== 'RECEIVED' && event.state !== 'MONITORING') { const error = new Error('Evento sem vinculo inequívoco de cliente/equipamento.'); error.statusCode = 409; throw error; }
 
   const binding = event.bindingId ? await prisma.printGuardBinding.findFirst({ where: { id: event.bindingId, tenantId } }) : null;
@@ -777,11 +792,6 @@ async function approveEvent(tenantId, event, body = {}) {
   const contact = await prisma.contact.findFirst({ where: { tenantId, id: localEquipment.contactId } });
   if (!contact) { const error = new Error('Contato do equipamento nao encontrado.'); error.statusCode = 409; throw error; }
   const requestKey = `printguard:${event.id}`;
-  const existing = await prisma.serviceOrder.findFirst({ where: { tenantId, requestKey } });
-  if (existing) {
-    await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', serviceOrderId: existing.id, ticketId: existing.ticketId } });
-    return existing;
-  }
   const requestedOsType = String(body.cdOstp || '').trim();
   if (!requestedOsType) {
     const error = new Error('Informe explicitamente o tipo de O.S. para aprovar este evento.');
@@ -792,21 +802,47 @@ async function approveEvent(tenantId, event, body = {}) {
   if (!osType) { const error = new Error('Nenhum tipo de O.S. sincronizado no iLux.'); error.statusCode = 409; throw error; }
   const defect = String(body.defect || event.payload?.description || event.payload?.message || `Alerta PrintGuard ${event.eventType}`).trim().slice(0, 4000);
   const result = await prisma.$transaction(async (tx) => {
+    // O lock por equipamento impede que dois alertas simultaneos criem O.S.
+    // concorrentes para a mesma impressora.
+    await tx.$executeRawUnsafe(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))',
+      `printguard-os:${tenantId}:${localEquipment.id}`,
+    );
+    const existingRequest = await tx.serviceOrder.findFirst({ where: { tenantId, requestKey } });
+    if (existingRequest) return { serviceOrder: existingRequest, reused: true };
+    const openOrder = await tx.serviceOrder.findFirst({
+      where: { tenantId, equipmentId: localEquipment.id, closedAt: null, resolvedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (openOrder && !CLOSED_OS_RE.test(String(openOrder.status || ''))) {
+      await tx.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', serviceOrderId: openOrder.id, ticketId: openOrder.ticketId, errorCode: null, errorMessage: null } });
+      return { serviceOrder: openOrder, reused: true };
+    }
     const ticket = await tx.ticket.create({ data: { tenantId, contactId: contact.id, subject: defect.slice(0, 240), status: 'pending', priority: body.priority || 'medium' } });
     const serviceOrder = await tx.serviceOrder.create({ data: { tenantId, contactId: contact.id, equipmentId: localEquipment.id, ticketId: ticket.id, requestKey, externalSource: 'firebird', status: 'AGUARDANDO_ILUX', cdOstp: osType.code, nmsuportet: body.nmsuportet || null, defect } });
     await tx.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', ticketId: ticket.id, serviceOrderId: serviceOrder.id, errorCode: null, errorMessage: null } });
-    return serviceOrder;
+    return { serviceOrder, reused: false };
   });
+  const serviceOrder = Object.assign(result.serviceOrder, { reused: result.reused });
+  if (result.reused) {
+    await notifyRemote(event.connection, event.externalEventId, 'outcome', {
+      status: 'resolved',
+      resolution: 'O.S. existente vinculada ao alerta; nenhuma O.S. duplicada foi criada.',
+      metadata: { serviceOrderId: serviceOrder.id, reused: true },
+    });
+    await notifyRemote(event.connection, event.externalEventId, 'ack', { status: 'acknowledged', note: 'APPROVED_EXISTING' });
+    return serviceOrder;
+  }
   await notifyRemote(event.connection, event.externalEventId, 'outcome', {
     status: 'resolved',
     resolution: 'Solicitacao de O.S. criada no Multiatendimento e enviada ao fluxo do iLux.',
-    metadata: { serviceOrderId: result.id },
+    metadata: { serviceOrderId: serviceOrder.id },
   });
   await notifyRemote(event.connection, event.externalEventId, 'ack', {
     status: 'acknowledged',
     note: 'APPROVED',
   });
-  return result;
+  return serviceOrder;
 }
 
 async function notifyRemote(connection, externalEventId, action, body = {}) {

@@ -5,7 +5,9 @@ const {
   tonerDaysLeft,
   franchiseProjection,
   daysUntilCycleClose,
+  equipmentInsights,
 } = require('../src/services/parkMetricsService');
+const prisma = require('../src/lib/prisma');
 
 test('linearPagesPerDay: reta perfeita retorna a inclinacao', () => {
   const points = [
@@ -65,4 +67,26 @@ test('daysUntilCycleClose: conta ate o ultimo dia do mes (data local)', () => {
   assert.equal(daysUntilCycleClose(new Date(2026, 7, 20)), 11); // 31 - 20
   assert.equal(daysUntilCycleClose(new Date(2026, 7, 31)), 0);
   assert.equal(daysUntilCycleClose(new Date(2026, 1, 10)), 18); // fev/2026 tem 28 dias
+});
+
+test('equipmentInsights consulta leituras e contratos uma vez para varios equipamentos', { concurrency: false }, async () => {
+  const originalReadings = prisma.crmMeterReading.findMany;
+  const originalContracts = prisma.crmContract.findMany;
+  let readingCalls = 0;
+  let contractCalls = 0;
+  prisma.crmMeterReading.findMany = async () => { readingCalls += 1; return []; };
+  prisma.crmContract.findMany = async () => { contractCalls += 1; return []; };
+  try {
+    const result = await equipmentInsights('tenant-1', [
+      { equipmentExternalId: 'eq-1', contractExternalId: 'c-1' },
+      { equipmentExternalId: 'eq-2', contractExternalId: 'c-2' },
+      { equipmentExternalId: 'eq-1', contractExternalId: 'c-1' },
+    ]);
+    assert.equal(result.size, 2);
+    assert.equal(readingCalls, 1);
+    assert.equal(contractCalls, 1);
+  } finally {
+    prisma.crmMeterReading.findMany = originalReadings;
+    prisma.crmContract.findMany = originalContracts;
+  }
 });

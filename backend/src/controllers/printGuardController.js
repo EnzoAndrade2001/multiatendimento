@@ -98,7 +98,7 @@ async function action(req, res) {
       return res.status(403).json({ error: 'Voce nao possui permissao para abrir O.S.' });
     }
     const result = await printGuard.eventAction(req.user.tenantId, req.params.eventId, action, req.body || {}, req.user.id);
-    return res.json({ event: result, serviceOrder: action === 'approve' ? result : undefined });
+    return res.json({ event: result, serviceOrder: action === 'approve' ? result : undefined, reused: action === 'approve' && Boolean(result?.reused) });
   } catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel atualizar o evento.' }); }
 }
 
@@ -129,7 +129,7 @@ async function parkConsolidate(req, res) {
     }
     const { eventIds, cdOstp, priority, defect, nmsuportet } = req.body || {};
     const serviceOrder = await parkService.consolidateToServiceOrder(req.user.tenantId, eventIds, { cdOstp, priority, defect, nmsuportet });
-    return res.json({ serviceOrder });
+    return res.json({ serviceOrder, reused: Boolean(serviceOrder?.reused) });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel consolidar a O.S.' });
   }

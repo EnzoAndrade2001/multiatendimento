@@ -18,6 +18,21 @@ function resolveValue(value, req, res) {
 module.exports = function auditEvent(action, resourceType, options = {}) {
   return (req, res, next) => {
     let recorded = false;
+    let responseSummary = null;
+    const originalJson = res.json.bind(res);
+    res.json = (body) => {
+      if (body && typeof body === 'object') {
+        responseSummary = {
+          result: res.statusCode < 400 ? (body.reused ? 'REUSED' : 'SUCCESS') : 'FAILED',
+          reason: res.statusCode >= 400 ? (body.error || body.message || null) : null,
+          eventId: body.event?.id || req.params?.eventId || null,
+          serviceOrderId: body.serviceOrder?.id || body.event?.serviceOrderId || null,
+          serviceOrderNumber: body.serviceOrder?.externalId || body.serviceOrder?.number || null,
+          reused: Boolean(body.reused),
+        };
+      }
+      return originalJson(body);
+    };
     const record = () => {
       if (recorded || !req.user) return;
       recorded = true;
@@ -28,6 +43,7 @@ module.exports = function auditEvent(action, resourceType, options = {}) {
           method: req.method,
           path: req.path,
           statusCode: res.statusCode,
+          ...responseSummary,
         };
       }
 

@@ -9,7 +9,9 @@ const {
   severityRank,
   priorityForIncident,
   recommendationForIncident,
+  reopenExpiredMonitoring,
 } = __testing;
+const prisma = require('../src/lib/prisma');
 
 test('computeHealth: penaliza chamados recentes e equipamento inativo', () => {
   assert.equal(computeHealth({ callCount90d: 0, ageMinutes: 0, equipmentActive: true }), 100);
@@ -141,4 +143,29 @@ test('recommendationForIncident: baixa evidencia recomenda monitoramento com pra
   });
   assert.equal(recommendation.action, 'MONITOR');
   assert.equal(recommendation.confidence, 'low');
+});
+
+test('monitoramento vencido reabre somente eventos encontrados e registra antes/depois', { concurrency: false }, async () => {
+  const originals = {
+    findMany: prisma.printGuardTelemetryEvent.findMany,
+    updateMany: prisma.printGuardTelemetryEvent.updateMany,
+    auditCreate: prisma.auditEvent.create,
+  };
+  const audits = [];
+  let updateArgs;
+  prisma.printGuardTelemetryEvent.findMany = async () => [{ id: 'evt-1', monitoringUntil: new Date('2026-08-01'), monitoringCondition: 'nova leitura', assignedToId: 'u-1' }];
+  prisma.printGuardTelemetryEvent.updateMany = async (args) => { updateArgs = args; return { count: 1 }; };
+  prisma.auditEvent.create = async ({ data }) => { audits.push(data); return data; };
+  try {
+    assert.equal(await reopenExpiredMonitoring('tenant-1', new Date('2026-08-02')), 1);
+    assert.deepEqual(updateArgs.where.id.in, ['evt-1']);
+    assert.equal(updateArgs.data.state, 'RECEIVED');
+    assert.equal(audits[0].action, 'PRINTGUARD_MONITORING_EXPIRED');
+    assert.equal(audits[0].metadata.before.state, 'MONITORING');
+    assert.equal(audits[0].metadata.after.state, 'RECEIVED');
+  } finally {
+    prisma.printGuardTelemetryEvent.findMany = originals.findMany;
+    prisma.printGuardTelemetryEvent.updateMany = originals.updateMany;
+    prisma.auditEvent.create = originals.auditCreate;
+  }
 });

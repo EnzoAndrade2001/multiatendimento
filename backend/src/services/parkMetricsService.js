@@ -161,6 +161,73 @@ async function equipmentInsight(tenantId, {
   };
 }
 
+// Versao em lote usada pelo cockpit. Le historico e contratos uma unica vez,
+// mesmo quando a fila contem centenas de alertas ou varios alertas da mesma
+// impressora.
+async function equipmentInsights(tenantId, requests = []) {
+  const unique = new Map();
+  for (const request of requests) {
+    if (!request?.equipmentExternalId) continue;
+    unique.set(String(request.equipmentExternalId), request);
+  }
+  if (!unique.size) return new Map();
+
+  const equipmentExternalIds = [...unique.keys()];
+  const contractExternalIds = [...new Set([...unique.values()].map((r) => r.contractExternalId).filter(Boolean).map(String))];
+  const since = new Date(Date.now() - 60 * DAY_MS);
+  const [readings, contracts] = await Promise.all([
+    prisma.crmMeterReading.findMany({
+      where: { tenantId, equipmentExternalId: { in: equipmentExternalIds }, readAt: { gte: since } },
+      orderBy: [{ equipmentExternalId: 'asc' }, { readAt: 'asc' }],
+      select: { equipmentExternalId: true, readAt: true, reading: true, meterCode: true, usageCounters: true },
+    }),
+    contractExternalIds.length
+      ? prisma.crmContract.findMany({ where: { tenantId, externalId: { in: contractExternalIds } } })
+      : [],
+  ]);
+  const readingsByEquipment = new Map();
+  for (const row of readings) {
+    const key = String(row.equipmentExternalId);
+    if (!readingsByEquipment.has(key)) readingsByEquipment.set(key, []);
+    readingsByEquipment.get(key).push(row);
+  }
+  const contractsByExternalId = new Map(contracts.map((contract) => [String(contract.externalId), contract]));
+  const result = new Map();
+
+  for (const [equipmentExternalId, request] of unique) {
+    const rows = (readingsByEquipment.get(equipmentExternalId) || [])
+      .filter((row) => !request.meterCode || String(row.meterCode) === String(request.meterCode));
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    const spanDays = first && last ? Math.max(0, (new Date(last.readAt).getTime() - new Date(first.readAt).getTime()) / DAY_MS) : 0;
+    const rate = linearPagesPerDay(rows);
+    const trend = rows.length ? {
+      pagesPerDay: rate == null ? null : Math.round(rate), points: rows.length, current: last.reading,
+      currentUsageCounters: last.usageCounters && typeof last.usageCounters === 'object' ? last.usageCounters : {},
+      firstAt: first.readAt, lastAt: last.readAt, spanDays: Math.round(spanDays), windowDays: 60,
+      reliable: rows.length >= 3 && spanDays >= 7,
+    } : { pagesPerDay: null, points: 0, current: null, currentUsageCounters: {}, windowDays: 60 };
+    const contract = request.contractExternalId ? contractsByExternalId.get(String(request.contractExternalId)) : null;
+    const toner = {
+      levelPct: request.tonerLevelPct == null ? null : Number(request.tonerLevelPct),
+      daysLeft: tonerDaysLeft({ levelPct: request.tonerLevelPct, pagesPerDay: trend.pagesPerDay, yieldPages: request.yieldPages }),
+    };
+    const franchise = contract?.pageFranchise ? franchiseProjection({
+      pageFranchise: contract.pageFranchise, producedThisCycle: request.producedThisCycle,
+      pagesPerDay: trend.pagesPerDay, cycleDaysLeft: daysUntilCycleClose(), excessPageValue: contract.excessPageValue,
+    }) : null;
+    result.set(equipmentExternalId, {
+      trend, toner, franchise,
+      contract: contract && {
+        externalId: contract.externalId, number: contract.number, type: contract.type, modality: contract.modality,
+        isActive: contract.isActive, pageFranchise: contract.pageFranchise, excessPageValue: contract.excessPageValue,
+        monthlyValue: contract.monthlyValue,
+      },
+    });
+  }
+  return result;
+}
+
 module.exports = {
   linearPagesPerDay,
   tonerDaysLeft,
@@ -169,4 +236,5 @@ module.exports = {
   meterTrend,
   resolveContract,
   equipmentInsight,
+  equipmentInsights,
 };

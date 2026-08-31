@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const parkMetrics = require('./parkMetricsService');
 const printGuard = require('./printGuardService');
+const { recordAuditEvent } = require('./auditEventService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LOW_TONER_RE = /toner|supply|cartucho|insumo|cilindro|drum|maintenance/i;
@@ -118,12 +119,41 @@ function recommendationForIncident(incident) {
 
 // ---------------------------------------------------------------------------
 
+// Monitamentos com prazo vencido voltam para a fila para uma nova decisao.
+// A operacao e idempotente e acontece antes da leitura da fila.
+async function reopenExpiredMonitoring(tenantId, now = new Date()) {
+  const expired = await prisma.printGuardTelemetryEvent.findMany({
+    where: { tenantId, state: 'MONITORING', monitoringUntil: { not: null, lte: now } },
+    select: { id: true, monitoringUntil: true, monitoringCondition: true, assignedToId: true },
+  });
+  if (!expired.length) return 0;
+  const result = await prisma.printGuardTelemetryEvent.updateMany({
+    where: { tenantId, id: { in: expired.map((event) => event.id) }, state: 'MONITORING' },
+    data: {
+      state: 'RECEIVED',
+      monitoringUntil: null,
+      monitoringCondition: null,
+      decisionAt: null,
+      decisionById: null,
+      nextStep: 'Monitoramento expirado; nova decisao necessaria.',
+    },
+  });
+  await Promise.all(expired.map((event) => recordAuditEvent({ tenantId }, {
+    action: 'PRINTGUARD_MONITORING_EXPIRED', resourceType: 'printguard_event', resourceId: event.id,
+    status: 'SUCCESS', metadata: {
+      result: 'REOPENED', before: { state: 'MONITORING', monitoringUntil: event.monitoringUntil, monitoringCondition: event.monitoringCondition, assignedToId: event.assignedToId },
+      after: { state: 'RECEIVED', monitoringUntil: null },
+    },
+  })));
+  return result.count || 0;
+}
+
 async function loadDecisionEvents(tenantId, { windowHours = 72, states = ['RECEIVED', 'MONITORING', 'ERROR'] } = {}) {
   const since = new Date(Date.now() - Math.min(720, Math.max(1, windowHours)) * 60 * 60 * 1000);
   const events = await prisma.printGuardTelemetryEvent.findMany({
-    where: { tenantId, createdAt: { gte: since }, state: { in: states } },
+    where: { tenantId, state: { in: states }, OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }] },
     select: {
-      id: true, eventType: true, severity: true, occurredAt: true, createdAt: true, state: true,
+      id: true, eventType: true, severity: true, occurredAt: true, createdAt: true, updatedAt: true, state: true,
       customerCode: true, serialNumber: true, payload: true, bindingId: true, errorCode: true,
       errorMessage: true, ticketId: true, serviceOrderId: true,
       assignedToId: true, decisionDueAt: true, monitoringUntil: true, monitoringCondition: true,
@@ -145,7 +175,7 @@ async function enrichEvents(tenantId, events) {
   const customerIds = [...new Set(bindings.map((b) => b.customerId).filter(Boolean))];
   const equipmentIds = [...new Set(bindings.map((b) => b.equipmentId).filter(Boolean))];
   const assigneeIds = [...new Set(events.map((e) => e.assignedToId).filter(Boolean))];
-  const [customers, crmEquipments, osTypes, assignees] = await Promise.all([
+  const [customers, crmEquipments, osTypes, assignees, activeTickets] = await Promise.all([
     customerIds.length ? prisma.crmCustomer.findMany({
       where: { tenantId, id: { in: customerIds } },
       select: { id: true, name: true, externalId: true, phone: true, address: true, neighborhood: true, city: true, state: true },
@@ -154,15 +184,25 @@ async function enrichEvents(tenantId, events) {
       where: { tenantId, id: { in: equipmentIds } },
       select: {
         id: true, model: true, manufacturer: true, serialNumber: true, externalId: true, sector: true,
-        isActive: true, contractExternalId: true, pageCounter: true, lastMeterReadAt: true, customerId: true,
+        installLocation: true, address: true, city: true, state: true,
+        isActive: true, contractExternalId: true, pageCounter: true, usageCounters: true, lastMeterReadAt: true, meterSource: true, customerId: true,
       },
     }) : [],
     prisma.crmOsType.findMany({ where: { tenantId }, select: { code: true, name: true, description: true } }).catch(() => []),
     assigneeIds.length ? prisma.user.findMany({ where: { tenantId, id: { in: assigneeIds }, active: true }, select: { id: true, name: true } }) : [],
+    customerIds.length ? prisma.ticket.findMany({
+      where: { tenantId, status: { in: ['pending', 'open', 'bot'] }, contact: { is: { crmCustomerId: { in: customerIds } } } },
+      select: { id: true, updatedAt: true, contact: { select: { crmCustomerId: true } } }, orderBy: { updatedAt: 'desc' },
+    }) : [],
   ]);
   const customerById = new Map(customers.map((c) => [c.id, c]));
   const crmEqById = new Map(crmEquipments.map((e) => [e.id, e]));
   const assigneeById = new Map(assignees.map((u) => [u.id, u]));
+  const activeTicketByCustomer = new Map();
+  for (const ticket of activeTickets) {
+    const crmCustomerId = ticket.contact?.crmCustomerId;
+    if (crmCustomerId && !activeTicketByCustomer.has(crmCustomerId)) activeTicketByCustomer.set(crmCustomerId, ticket.id);
+  }
 
   // O.S. locais por equipamento (para contagem de 90 dias) — resolvidas por externalId.
   const eqExternalIds = [...new Set(crmEquipments.map((e) => e.externalId).filter(Boolean))];
@@ -201,6 +241,11 @@ async function enrichEvents(tenantId, events) {
     openOrdersByEquipment.get(order.equipmentId).push(order);
   }
 
+  const insightRequests = crmEquipments.map((equipment) => ({
+    equipmentExternalId: equipment.externalId,
+    contractExternalId: equipment.contractExternalId,
+  })).filter((request) => request.equipmentExternalId);
+  const insightsByEquipment = await parkMetrics.equipmentInsights(tenantId, insightRequests);
   const incidents = [];
   for (const event of events) {
     const binding = bindingById.get(event.bindingId);
@@ -217,15 +262,18 @@ async function enrichEvents(tenantId, events) {
     const healthScore = crmEq ? computeHealth({ callCount90d, ageMinutes, equipmentActive: crmEq.isActive }) : null;
     const tonerLevelPct = LOW_TONER_RE.test(eventType) ? tonerLevelFromPayload(payload) : null;
 
-    let insight = null;
-    if (crmEq?.externalId) {
-      insight = await parkMetrics.equipmentInsight(tenantId, {
-        equipmentExternalId: crmEq.externalId,
-        contractExternalId: crmEq.contractExternalId,
-        tonerLevelPct,
+    const baseInsight = crmEq?.externalId ? insightsByEquipment.get(String(crmEq.externalId)) : null;
+    const insight = baseInsight ? {
+      ...baseInsight,
+      toner: { levelPct: tonerLevelPct, daysLeft: parkMetrics.tonerDaysLeft({ levelPct: tonerLevelPct, pagesPerDay: baseInsight.trend?.pagesPerDay }) },
+      franchise: baseInsight.contract?.pageFranchise ? parkMetrics.franchiseProjection({
+        pageFranchise: baseInsight.contract.pageFranchise,
         producedThisCycle: Number(payload.producedThisCycle ?? payload.qtproducao) || null,
-      });
-    }
+        pagesPerDay: baseInsight.trend?.pagesPerDay,
+        cycleDaysLeft: parkMetrics.daysUntilCycleClose(),
+        excessPageValue: baseInsight.contract.excessPageValue,
+      }) : null,
+    } : null;
     const suggested = pickOsType(osTypes, eventType);
     const equipmentOpenOrders = localEq ? (openOrdersByEquipment.get(localEq.id) || []) : [];
     const openOrder = equipmentOpenOrders[0] || null;
@@ -243,6 +291,10 @@ async function enrichEvents(tenantId, events) {
       canOpenServiceOrder: mappingState === 'MATCHED' && crmEq?.isActive !== false,
       isLowToner: LOW_TONER_RE.test(eventType),
       isHardware: HARDWARE_RE.test(eventType),
+      dataSource: 'PrintGuard',
+      lastSignalAt: signalAt,
+      contactable: Boolean(customer?.phone),
+      activeTicketId: customer?.id ? activeTicketByCustomer.get(customer.id) || null : null,
       customer: customer && {
         id: customer.id,
         name: customer.name,
@@ -258,9 +310,15 @@ async function enrichEvents(tenantId, events) {
         serialNumber: crmEq.serialNumber,
         externalId: crmEq.externalId,
         sector: crmEq.sector,
+        installLocation: crmEq.installLocation,
+        address: crmEq.address,
+        city: crmEq.city,
+        state: crmEq.state,
         isActive: crmEq.isActive,
         pageCounter: crmEq.pageCounter ?? null,
-        lastMeterReadAt: crmEq.lastMeterReadAt,
+        usageCounters: crmEq.usageCounters ?? null,
+        lastMeterReadAt: insight?.trend?.lastAt || crmEq.lastMeterReadAt || null,
+        meterSource: crmEq.meterSource || null,
         localEquipmentId: localEq?.id || null,
       },
       serialNumber: crmEq?.serialNumber || event.serialNumber || null,
@@ -269,6 +327,16 @@ async function enrichEvents(tenantId, events) {
       healthScore,
       callCount90d,
       toner: { levelPct: tonerLevelPct, daysLeft: insight?.toner?.daysLeft ?? null },
+      supply: {
+        code: payload.supplyCode || payload.consumableCode || payload.tonerCode || null,
+        color: payload.color || payload.supplyColor || payload.toner?.color || null,
+        stockAvailable: payload.stockAvailable ?? null,
+        minimumStock: payload.minimumStock ?? null,
+        deliveryStatus: payload.deliveryStatus || null,
+        estimatedDeliveryAt: payload.estimatedDeliveryAt || null,
+        technician: payload.technician || payload.technicianName || null,
+        route: payload.route || payload.routeName || null,
+      },
       trend: insight?.trend || null,
       contract: insight?.contract || null,
       franchise: insight?.franchise || null,
@@ -314,8 +382,8 @@ async function enrichEvents(tenantId, events) {
     });
     incident.priority = priority;
     incident.recommendation = recommendationForIncident(incident);
-    // Abrir O.S. continua permitido mesmo com O.S. em aberto — o frontend avisa
-    // e o atendente decide entre revisar as abertas ou abrir outra.
+    // A existência de uma O.S. ativa é refletida no incidente; a camada de
+    // criação também bloqueia duplicatas de forma idempotente.
     incidents.push(incident);
   }
 
@@ -328,6 +396,7 @@ async function enrichEvents(tenantId, events) {
 }
 
 async function parkQueue(tenantId, query = {}) {
+  const reopenedMonitoring = await reopenExpiredMonitoring(tenantId);
   const events = await loadDecisionEvents(tenantId, { windowHours: Number(query.windowHours) || 72 });
   let incidents = await enrichEvents(tenantId, events);
 
@@ -365,6 +434,15 @@ async function parkQueue(tenantId, query = {}) {
       return due && new Date(due).getTime() <= Date.now() && !i.openServiceOrder;
     }).length,
     openServiceOrders: incidents.filter((i) => i.openServiceOrder).length,
+    affectedCustomers: new Set(incidents.map((i) => i.customer?.id).filter(Boolean)).size,
+    contactableCustomers: new Set(incidents.filter((i) => i.contactable).map((i) => i.customer?.id).filter(Boolean)).size,
+    withoutCustomerPhone: new Set(incidents.filter((i) => !i.contactable).map((i) => i.customer?.id || `event:${i.id}`)).size,
+    withMeterHistory: incidents.filter((i) => (i.trend?.points || 0) >= 2).length,
+    withoutMeterHistory: incidents.filter((i) => (i.trend?.points || 0) < 2).length,
+    reopenedMonitoring,
+    windowHours: Math.min(720, Math.max(1, Number(query.windowHours) || 72)),
+    generatedAt: new Date().toISOString(),
+    dataSource: 'PrintGuard',
   };
 
   const replenishmentMap = new Map();
@@ -376,6 +454,7 @@ async function parkQueue(tenantId, query = {}) {
       urgent: 0,
       monitoring: 0,
       withOpenServiceOrder: 0,
+      contactable: false,
     };
     group.items.push({
       eventId: incident.id,
@@ -383,6 +462,8 @@ async function parkQueue(tenantId, query = {}) {
       serialNumber: incident.serialNumber,
       measurement: incident.measurement,
       toner: incident.toner,
+      trend: incident.trend,
+      supply: incident.supply,
       priority: incident.priority,
       recommendation: incident.recommendation,
       openServiceOrder: incident.openServiceOrder,
@@ -390,6 +471,7 @@ async function parkQueue(tenantId, query = {}) {
     if (incident.priority.level === 'P1' || incident.priority.level === 'P2') group.urgent += 1;
     if (incident.state === 'MONITORING') group.monitoring += 1;
     if (incident.openServiceOrder) group.withOpenServiceOrder += 1;
+    if (incident.contactable) group.contactable = true;
     replenishmentMap.set(key, group);
   }
   const replenishment = [...replenishmentMap.values()]
@@ -428,7 +510,7 @@ async function updateDecisionWorkflow(tenantId, eventId, input = {}, actorId = n
     decisionById: actorId || event.decisionById,
     decisionAt: new Date(),
   };
-  if (Object.prototype.hasOwnProperty.call(input, 'decisionDueAt')) data.decisionDueAt = parseOptionalDate(input.decisionDueAt, 'Prazo da decisao');
+  if (Object.prototype.hasOwnProperty.call(input, 'decisionDueAt')) data.decisionDueAt = parseOptionalDate(input.decisionDueAt, 'Prazo da decisao', { future: true });
   if (Object.prototype.hasOwnProperty.call(input, 'nextStep')) data.nextStep = String(input.nextStep || '').trim().slice(0, 2000) || null;
   const updated = await prisma.printGuardTelemetryEvent.update({ where: { id: event.id }, data });
 
@@ -496,6 +578,9 @@ async function correctBinding(tenantId, eventId, { customerId, equipmentId } = {
   if (!customerId || !equipmentId) { const e = new Error('Informe cliente e equipamento para corrigir o vinculo.'); e.statusCode = 400; throw e; }
   const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId } });
   if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+  if (!['RECEIVED', 'MONITORING', 'ERROR'].includes(event.state)) {
+    const e = new Error('Este evento ja foi encerrado e nao pode ter o vinculo alterado.'); e.statusCode = 409; throw e;
+  }
   const [customer, equipment] = await Promise.all([
     prisma.crmCustomer.findFirst({ where: { tenantId, id: customerId } }),
     prisma.crmEquipment.findFirst({ where: { tenantId, id: equipmentId } }),
@@ -511,17 +596,11 @@ async function correctBinding(tenantId, eventId, { customerId, equipmentId } = {
     ? await prisma.printGuardBinding.update({ where: { id: existing.id }, data: { customerId: customer.id, equipmentId: equipment.id, state: 'MATCHED', source: 'MANUAL', confirmedAt: new Date(), confirmedById: actorId, lastSeenAt: new Date() } })
     : await prisma.printGuardBinding.create({ data: { tenantId, connectionId: event.connectionId, ...key, customerId: customer.id, equipmentId: equipment.id, state: 'MATCHED', source: 'MANUAL', confirmedAt: new Date(), confirmedById: actorId, lastSeenAt: new Date() } });
 
-  await prisma.printGuardTelemetryEvent.updateMany({
-    where: {
-      tenantId,
-      connectionId: event.connectionId,
-      state: { in: ['RECEIVED', 'MONITORING', 'ERROR'] },
-      OR: [
-        ...(key.serialNumber ? [{ serialNumber: key.serialNumber }] : []),
-        ...(key.customerCode ? [{ customerCode: key.customerCode }] : []),
-        { id: event.id },
-      ],
-    },
+  // Corrige somente o alerta selecionado. Atualizar outros eventos pelo
+  // mesmo serial/codigo fazia uma correcao manual vazar para equipamentos
+  // parecidos e podia gerar O.S. para o chamado errado.
+  await prisma.printGuardTelemetryEvent.update({
+    where: { id: event.id },
     data: { bindingId: binding.id, state: 'RECEIVED', errorCode: null, errorMessage: null, decisionAt: new Date(), decisionById: actorId },
   });
   return { binding, customer: { id: customer.id, name: customer.name }, equipment: { id: equipment.id, model: equipment.model, serialNumber: equipment.serialNumber, externalId: equipment.externalId } };
@@ -762,10 +841,22 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
   const existing = await prisma.serviceOrder.findFirst({ where: { tenantId, requestKey } });
   if (existing) {
     await prisma.printGuardTelemetryEvent.updateMany({ where: { tenantId, id: { in: ids } }, data: { state: 'APPROVED', serviceOrderId: existing.id, ticketId: existing.ticketId } });
-    return existing;
+    return Object.assign(existing, { reused: true });
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))',
+      `printguard-os:${tenantId}:${localEquipment.id}`,
+    );
+    const openOrder = await tx.serviceOrder.findFirst({
+      where: { tenantId, equipmentId: localEquipment.id, closedAt: null, resolvedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (openOrder && !CLOSED_OS_RE.test(String(openOrder.status || ''))) {
+      await tx.printGuardTelemetryEvent.updateMany({ where: { tenantId, id: { in: ids } }, data: { state: 'APPROVED', serviceOrderId: openOrder.id, ticketId: openOrder.ticketId } });
+      return Object.assign(openOrder, { reused: true });
+    }
     const ticket = await tx.ticket.create({ data: { tenantId, contactId: contact.id, subject: body.slice(0, 240), status: 'pending', priority: priority || 'medium' } });
     const serviceOrder = await tx.serviceOrder.create({
       data: {
@@ -778,7 +869,7 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
       where: { tenantId, id: { in: ids } },
       data: { state: 'APPROVED', ticketId: ticket.id, serviceOrderId: serviceOrder.id, errorCode: null, errorMessage: null },
     });
-    return serviceOrder;
+    return Object.assign(serviceOrder, { reused: false });
   });
 
   // Ack por evento para o PrintGuard, quando o helper estiver exposto.
@@ -808,6 +899,6 @@ module.exports = {
   notifyManagerIncident,
   __testing: {
     computeHealth, healthBucket, pickOsType, tonerLevelFromPayload, severityRank,
-    priorityForIncident, recommendationForIncident,
+    priorityForIncident, recommendationForIncident, reopenExpiredMonitoring,
   },
 };
