@@ -145,6 +145,9 @@ export const getParkBindingCandidates = (eventId, params = {}) => api.get(`/tele
 export const resolveParkBinding = (eventId, data = {}) => api.post(`/telemetry/park/events/${encodeURIComponent(eventId)}/binding`, data);
 export const assignParkIncident = (eventId, data = {}) => api.post(`/telemetry/park/events/${encodeURIComponent(eventId)}/assign`, data);
 export const notifyParkIncident = (eventId, data = {}) => api.post(`/telemetry/park/events/${encodeURIComponent(eventId)}/notify`, data);
+export const bulkParkIncidents = (data = {}) => api.post('/telemetry/park/bulk', data);
+export const getParkManagementMetrics = (params = {}, signal) => api.get('/telemetry/park/management-metrics', { params, signal });
+export const getParkDecisionHistory = (eventId, params = {}) => api.get(`/telemetry/park/events/${encodeURIComponent(eventId)}/history`, { params });
 export const getOsTypes = () => api.get('/os/types');
 
 // Instance

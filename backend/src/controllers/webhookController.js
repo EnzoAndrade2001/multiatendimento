@@ -31,6 +31,29 @@ const TECHNICIAN_MODE_MENU_TEXT = [
 const pendingConnectionChecks = new Map();
 const DISCONNECT_CONFIRMATION_MS = Number(process.env.EVOLUTION_DISCONNECT_CONFIRMATION_MS || 45000);
 
+function messageOccurredAt(msg, fallback = new Date()) {
+  const raw = msg?.messageTimestamp ?? msg?.timestamp ?? msg?.key?.messageTimestamp;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    const parsed = new Date(raw || '');
+    return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+  }
+  // Evolution/Meta normalmente entrega segundos; tolera também epoch em ms.
+  const date = new Date(numeric < 1e12 ? numeric * 1000 : numeric);
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
+function shouldReopenResolvedTicket({ isHistorical, fromMe }) {
+  // Histórico apenas recompõe a conversa. Eco de saída (CSAT, bot ou agente)
+  // também não representa uma nova solicitação do cliente.
+  return !isHistorical && !fromMe;
+}
+
+function isHistoricalMessage(msg, eventName, nowMs = Date.now()) {
+  return String(eventName || '').toLowerCase() === 'messages.set'
+    || nowMs - messageOccurredAt(msg, new Date(nowMs)).getTime() > 5 * 60 * 1000;
+}
+
 function clearPendingConnectionCheck(instanceName) {
   const timer = pendingConnectionChecks.get(instanceName);
   if (timer) {
@@ -319,9 +342,12 @@ async function downloadMedia(settings, instanceName, msg, messageId) {
 async function processSingleMessage(msg, instance, waInstance, tenant, isHistorical) {
   const externalId = msg.key?.id;
   const fromMe = msg.key?.fromMe === true;
+  const occurredAt = messageOccurredAt(msg);
 
   // Se já existe no banco, ignora (evita duplicar o que o sistema enviou)
-  const existing = await prisma.message.findFirst({ where: { externalId } });
+  const existing = externalId ? await prisma.message.findFirst({
+    where: { externalId, ticket: { tenantId: tenant.id } },
+  }) : null;
   if (existing) return;
 
   const remoteJid = msg.key?.remoteJid || '';
@@ -471,7 +497,6 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
       where: { 
         contactId: contact.id, 
         status: 'resolved',
-        rating: null,
         tenantId: tenant.id
       },
       orderBy: { resolvedAt: 'desc' }
@@ -479,17 +504,56 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
 
     // Se foi encerrado nas últimas 24h, gravamos a nota
     if (lastResolved && (new Date() - new Date(lastResolved.resolvedAt) < 24 * 60 * 60 * 1000)) {
+      // Redelivery concorrente da API Oficial: a nota já foi registrada e não
+      // deve cair no fluxo normal nem gerar outro agradecimento.
+      if (lastResolved.rating === parseInt(bodyTrim, 10)) return;
       await prisma.ticket.update({
         where: { id: lastResolved.id },
         data: { 
-          rating: parseInt(bodyTrim),
+          rating: parseInt(bodyTrim, 10),
           ratingAt: new Date()
         }
       });
+
+      // A nota faz parte do atendimento encerrado; aparece no histórico sem
+      // reabrir a fila nem iniciar uma nova sessão.
+      const ratingMessage = await prisma.message.create({
+        data: {
+          ticketId: lastResolved.id,
+          body: bodyTrim,
+          fromMe: false,
+          fromBot: false,
+          automationType: 'CSAT',
+          externalId,
+          createdAt: occurredAt,
+        },
+      });
+      if (io) io.to(tenant.id).emit('new_message', { ticketId: lastResolved.id, message: ratingMessage });
       
       const csatGate = await whatsappComplianceService.canAutomatedSend({ tenantId: tenant.id, contactId: contact.id, instance: waInstance });
       if (csatGate.allowed) {
-        await evolutionService.sendText(tenant.settings.evolutionUrl, tenant.settings.evolutionKey, instance, phone, "Obrigado por sua avaliação! 🙏 Sua nota é muito importante para nós.");
+        const thankYouText = "Obrigado por sua avaliação! 🙏 Sua nota é muito importante para nós.";
+        const sent = await evolutionService.sendText(tenant.settings.evolutionUrl, tenant.settings.evolutionKey, instance, phone, thankYouText);
+        const sentExternalId = sent?.key?.id || sent?.message?.key?.id || null;
+        const echoed = sentExternalId ? await prisma.message.findFirst({
+          where: { externalId: sentExternalId, ticket: { tenantId: tenant.id } },
+        }) : null;
+        const thankYouMessage = echoed
+          ? await prisma.message.update({
+              where: { id: echoed.id },
+              data: { fromMe: true, fromBot: true, automationType: 'CSAT' },
+            })
+          : await prisma.message.create({
+              data: {
+                ticketId: lastResolved.id,
+                body: thankYouText,
+                fromMe: true,
+                fromBot: true,
+                automationType: 'CSAT',
+                externalId: sentExternalId,
+              },
+            });
+        if (io) io.to(tenant.id).emit('new_message', { ticketId: lastResolved.id, message: thankYouMessage });
       }
       return;
     }
@@ -528,38 +592,38 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
       const actor = await technicalAssistantService.resolveWhatsAppActor({ tenantId: tenant.id, phone: contact.phone });
       if (actor?.type === 'TECHNICIAN') inactivityMs = technicalAssistantService.TECHNICIAN_SESSION_INACTIVITY_MS;
     } catch { /* identificação nunca bloqueia o fluxo */ }
-    const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket, new Date(), { inactivityMs });
+    const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket, occurredAt, { inactivityMs });
     if (sessionResult.startedNew) ticket.sessionStartedAt = sessionResult.session.startedAt;
   }
 
-  if (ticket.status === 'resolved') {
+  if (ticket.status === 'resolved' && shouldReopenResolvedTicket({ isHistorical, fromMe })) {
     // Se o ticket já existia mas estava resolvido, REABRE ele para evitar duplicação na lista.
     // Reinicia sessionStartedAt: começa uma nova conversa reaproveitando a mesma linha.
     const useBotForInstance = shouldUseBotForInstance(instance, tenant.settings);
     ticket = await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: new Date(), lastMessageAt: new Date(), unreadCount: { increment: 1 } }
+      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: occurredAt, lastMessageAt: occurredAt, unreadCount: { increment: 1 } }
     });
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
     console.log(`[webhook] Ticket ${ticket.id} reaberto para evitar duplicação.`);
-  } else if (!fromMe) {
+  } else if (!isHistorical && ticket.status !== 'resolved' && !fromMe) {
     // Incrementa unreadCount para mensagens de clientes em tickets já abertos
     const useBotForInstance = shouldUseBotForInstance(instance, tenant.settings);
     ticket = await prisma.ticket.update({
       where: { id: ticket.id },
       data: {
         unreadCount: { increment: 1 },
-        updatedAt: new Date(),
-        lastMessageAt: new Date(),
+        updatedAt: occurredAt,
+        lastMessageAt: occurredAt,
         ...(ticket.status === 'bot' && !useBotForInstance ? { status: 'pending' } : {}),
       }
     });
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
-  } else {
+  } else if (!isHistorical && ticket.status !== 'resolved') {
     // Mensagem enviada pelo agente (ex: pelo celular)
     ticket = await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { updatedAt: new Date(), lastMessageAt: new Date() }
+      data: { updatedAt: occurredAt, lastMessageAt: occurredAt }
     });
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
   }
@@ -589,11 +653,12 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
       fileName: media?.fileName || null,
       externalId,
       quotedMsgId,
-      quotedMsgBody
+      quotedMsgBody,
+      createdAt: occurredAt,
     },
   });
 
-  if (fromMe && ticket.status !== 'open') {
+  if (!isHistorical && fromMe && ticket.status !== 'resolved' && ticket.status !== 'open') {
     const isBotMsg = await prisma.message.findFirst({
       where: { externalId, fromBot: true }
     });
@@ -782,7 +847,7 @@ async function handleWebhook(req, res) {
         });
         
         // Se a conexão foi estabelecida (reconexão), dispara rotina de sincronização de mensagens perdidas (em background)
-        if (isConnected && waInstance.status === 'disconnected') {
+        if (isConnected && waInstance.status === 'disconnected' && waInstance.provider !== 'evolution_official') {
           const { syncMissedMessages } = require('../services/syncMissedMessagesService');
           syncMissedMessages(instance).catch(e => console.error('[webhook] Falha no sync automático:', e.message));
         }
@@ -832,8 +897,10 @@ async function handleWebhook(req, res) {
     const maxAgeMs = 2 * 24 * 60 * 60 * 1000; // 2 dias (48 horas)
 
     for (const msg of messages) {
-      const msgTimeSec = msg.messageTimestamp || msg.key?.messageTimestamp || null;
-      const msgTimeMs = msgTimeSec ? (parseInt(msgTimeSec) * 1000) : Date.now();
+      // Cloud API pode usar `timestamp`; Evolution QR costuma usar
+      // `messageTimestamp`. Centralizar a leitura evita classificar replay da
+      // Oficial como mensagem nova.
+      const msgTimeMs = messageOccurredAt(msg).getTime();
       const ageMs = Date.now() - msgTimeMs;
 
       const isForwarded = JSON.stringify(msg.message || {}).includes('"isForwarded":true');
@@ -846,7 +913,7 @@ async function handleWebhook(req, res) {
       }
 
       // Se o evento for messages.set ou a mensagem tiver mais de 5 minutos, é considerada histórica
-      const isHistorical = ev === 'messages.set' || ageMs > 5 * 60 * 1000;
+      const isHistorical = isHistoricalMessage(msg, ev);
       await processSingleMessage(msg, instance, waInstance, tenant, isHistorical);
     }
   } catch (err) {
@@ -1274,4 +1341,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   }
 }
 
-module.exports = { handleWebhook, setIo, processSingleMessage };
+module.exports = {
+  handleWebhook, setIo, processSingleMessage,
+  __testing: { isHistoricalMessage, messageOccurredAt, shouldReopenResolvedTicket },
+};

@@ -159,8 +159,23 @@ async function parkNotify(req, res) {
   catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel notificar o gestor.' }); }
 }
 
+async function parkManagementMetrics(req, res) {
+  try { return res.json(await parkService.parkManagementMetrics(req.user.tenantId, req.query)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel carregar os indicadores gerenciais.' }); }
+}
+
+async function parkBulk(req, res) {
+  try { return res.json(await parkService.bulkDecisionWorkflow(req.user.tenantId, req.body || {}, req.user.id)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel executar a acao em lote.' }); }
+}
+
+async function parkDecisionHistory(req, res) {
+  try { return res.json(await parkService.decisionHistory(req.user.tenantId, req.params.eventId, req.query)); }
+  catch (error) { return res.status(error.statusCode || 500).json({ error: error.message || 'Nao foi possivel carregar o historico decisorio.' }); }
+}
+
 module.exports = {
   status, pair, test, disconnect, getMetrics, sync, remotePage, webhook, queue, action,
   parkQueue, parkCoverage, parkRanking, parkTimeline, parkConsolidate,
-  parkBindingCandidates, parkResolveBinding, parkAssign, parkNotify,
+  parkBindingCandidates, parkResolveBinding, parkAssign, parkNotify, parkManagementMetrics, parkBulk, parkDecisionHistory,
 };

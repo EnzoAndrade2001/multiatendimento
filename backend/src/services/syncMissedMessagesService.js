@@ -68,7 +68,9 @@ async function syncMissedMessages(instanceName) {
         const ageHours = (Date.now() - (timeSec * 1000)) / (1000 * 60 * 60);
         if (ageHours > 24) continue;
 
-        const exists = await prisma.message.findFirst({ where: { externalId } });
+        const exists = await prisma.message.findFirst({
+          where: { externalId, ticket: { tenantId: waInstance.tenantId } },
+        });
         
         if (!exists) {
           console.log(`[syncMissedMessages] Mensagem recuperada via sync automático: ${externalId} (${require('../utils/privacy').maskPhone(contact.phone)})`);

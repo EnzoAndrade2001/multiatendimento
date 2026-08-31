@@ -10,6 +10,9 @@ const {
   priorityForIncident,
   recommendationForIncident,
   reopenExpiredMonitoring,
+  recommendationEvidence,
+  matchesManagerFilters,
+  managerMetrics,
 } = __testing;
 const prisma = require('../src/lib/prisma');
 
@@ -143,6 +146,43 @@ test('recommendationForIncident: baixa evidencia recomenda monitoramento com pra
   });
   assert.equal(recommendation.action, 'MONITOR');
   assert.equal(recommendation.confidence, 'low');
+});
+
+test('recommendationEvidence: explica regra, entradas e dados ausentes sem inventar estoque', () => {
+  const evidence = recommendationEvidence({
+    recommendation: { action: 'OPEN_SERVICE_ORDER', confidence: 'medium' },
+    priority: { reasons: ['Insumo previsto para acabar'] }, severity: 'WARNING', mappingState: 'MATCHED',
+    isLowToner: true, toner: { levelPct: 8, daysLeft: 2 }, trend: { points: 1 }, supply: {},
+    customer: { id: 'c1' }, equipment: { id: 'e1' }, ageMinutes: 20, lastSignalAt: '2026-08-31T12:00:00Z',
+  });
+  assert.equal(evidence.rule, 'OPEN_SERVICE_ORDER');
+  assert.equal(evidence.inputs.tonerDaysLeft, 2);
+  assert.ok(evidence.missing.includes('stock'));
+  assert.ok(evidence.missing.includes('route'));
+  assert.ok(evidence.missing.includes('meterHistory'));
+});
+
+test('matchesManagerFilters: combina prioridade, sem responsavel, prazo e reincidencia', () => {
+  const incident = { priority: { level: 'P1' }, workflow: { assignedTo: null, decisionDueAt: null }, callCount90d: 3, supply: {}, equipment: {} };
+  assert.equal(matchesManagerFilters(incident, { priority: 'P1,P2', unassigned: 'true', withoutDeadline: 'true', recurrent: 'true' }), true);
+  assert.equal(matchesManagerFilters(incident, { priority: 'P3' }), false);
+  assert.equal(matchesManagerFilters({ ...incident, workflow: { assignedTo: { id: 'u1' } } }, { assignedToId: 'none' }), false);
+});
+
+test('managerMetrics: calcula SLA, tempo medio e carga por responsavel', () => {
+  const now = new Date('2026-08-31T15:00:00Z');
+  const incidents = [
+    { state: 'RECEIVED', receivedAt: '2026-08-31T12:00:00Z', priority: { level: 'P1' }, workflow: { assignedTo: { id: 'u1', name: 'Ana' }, decisionDueAt: '2026-08-31T14:00:00Z' }, recommendation: {} },
+    { state: 'MONITORING', receivedAt: '2026-08-31T13:00:00Z', priority: { level: 'P3' }, workflow: { assignedTo: null, decisionAt: '2026-08-31T14:00:00Z', monitoringUntil: '2026-09-01T12:00:00Z' }, recommendation: { action: 'VIEW_SERVICE_ORDER' }, openServiceOrder: { id: 'os1' } },
+  ];
+  const metrics = managerMetrics(incidents, { now });
+  assert.equal(metrics.pending, 2);
+  assert.equal(metrics.overdue, 1);
+  assert.equal(metrics.slaCompliancePct, 50);
+  assert.equal(metrics.avgDecisionMinutes, 60);
+  assert.equal(metrics.duplicatesAvoided, 1);
+  assert.equal(metrics.unassigned, 1);
+  assert.equal(metrics.byAssignee[0].overdue, 1);
 });
 
 test('monitoramento vencido reabre somente eventos encontrados e registra antes/depois', { concurrency: false }, async () => {

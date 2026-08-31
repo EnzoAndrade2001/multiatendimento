@@ -117,6 +117,80 @@ function recommendationForIncident(incident) {
   return { action: 'MONITOR', label: 'Monitorar com prazo', explanation: 'Não há evidência suficiente para abertura imediata; defina prazo e condição de escalonamento.', confidence: incident.trend?.points >= 2 ? 'medium' : 'low' };
 }
 
+function recommendationEvidence(incident) {
+  const missing = [];
+  if (!incident.customer) missing.push('customer');
+  if (!incident.equipment) missing.push('equipment');
+  if ((incident.trend?.points || 0) < 2) missing.push('meterHistory');
+  if (incident.isLowToner && incident.supply?.stockAvailable == null) missing.push('stock');
+  if (incident.isLowToner && !incident.supply?.route) missing.push('route');
+  return {
+    rule: incident.recommendation?.action || 'MONITOR',
+    confidence: incident.recommendation?.confidence || 'low',
+    reasons: incident.priority?.reasons || [],
+    inputs: {
+      severity: incident.severity, mappingState: incident.mappingState,
+      tonerLevelPct: incident.toner?.levelPct ?? null, tonerDaysLeft: incident.toner?.daysLeft ?? null,
+      trendPoints: incident.trend?.points || 0, openServiceOrder: Boolean(incident.openServiceOrder),
+      signalAgeMinutes: incident.ageMinutes,
+    },
+    missing,
+    lastUpdatedAt: incident.lastSignalAt || null,
+  };
+}
+
+function matchesManagerFilters(incident, query = {}, now = Date.now()) {
+  const csv = (value) => String(value || '').split(',').map((v) => v.trim().toUpperCase()).filter(Boolean);
+  if (query.priority && !csv(query.priority).includes(String(incident.priority?.level || '').toUpperCase())) return false;
+  if (query.assignedToId === 'none' && incident.workflow?.assignedTo) return false;
+  if (query.assignedToId && query.assignedToId !== 'none' && incident.workflow?.assignedTo?.id !== query.assignedToId) return false;
+  if (String(query.unassigned || '').toLowerCase() === 'true' && incident.workflow?.assignedTo) return false;
+  if (String(query.withoutDeadline || '').toLowerCase() === 'true' && (incident.workflow?.decisionDueAt || incident.workflow?.monitoringUntil)) return false;
+  if (String(query.overdue || '').toLowerCase() === 'true') {
+    const due = incident.workflow?.decisionDueAt || incident.workflow?.monitoringUntil;
+    if (!due || new Date(due).getTime() > now) return false;
+  }
+  if (String(query.recurrent || '').toLowerCase() === 'true' && (incident.callCount90d || 0) < 2) return false;
+  if (query.city && String(incident.equipment?.city || incident.customer?.address || '').toLowerCase().indexOf(String(query.city).toLowerCase()) < 0) return false;
+  if (query.route && String(incident.supply?.route || '').toLowerCase().indexOf(String(query.route).toLowerCase()) < 0) return false;
+  if (query.serviceOrderStatus && String(incident.openServiceOrder?.status || '').toUpperCase() !== String(query.serviceOrderStatus).toUpperCase()) return false;
+  return true;
+}
+
+function managerMetrics(incidents, { now = new Date() } = {}) {
+  const nowMs = now.getTime();
+  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const decided = incidents.filter((i) => i.workflow?.decisionAt);
+  const decisionMinutes = decided.map((i) => Math.max(0, (new Date(i.workflow.decisionAt) - new Date(i.receivedAt)) / 60000)).filter(Number.isFinite);
+  const overdue = incidents.filter((i) => {
+    const due = i.workflow?.decisionDueAt || i.workflow?.monitoringUntil;
+    return due && new Date(due).getTime() <= nowMs && !i.openServiceOrder;
+  });
+  const byAssignee = {};
+  for (const i of incidents) {
+    const key = i.workflow?.assignedTo?.id || 'unassigned';
+    const row = byAssignee[key] || { id: key === 'unassigned' ? null : key, name: i.workflow?.assignedTo?.name || 'Sem responsavel', total: 0, overdue: 0, p1: 0 };
+    row.total += 1;
+    if (overdue.includes(i)) row.overdue += 1;
+    if (i.priority?.level === 'P1') row.p1 += 1;
+    byAssignee[key] = row;
+  }
+  return {
+    pending: incidents.filter((i) => ['RECEIVED', 'MONITORING', 'ERROR'].includes(i.state)).length,
+    decided: decided.length,
+    completedToday: decided.filter((i) => new Date(i.workflow.decisionAt).getTime() >= todayStart.getTime()).length,
+    overdue: overdue.length,
+    slaCompliancePct: incidents.length ? Math.round(((incidents.length - overdue.length) / incidents.length) * 100) : 100,
+    avgDecisionMinutes: decisionMinutes.length ? Math.round(decisionMinutes.reduce((a, b) => a + b, 0) / decisionMinutes.length) : null,
+    serviceOrdersOpen: incidents.filter((i) => i.openServiceOrder).length,
+    duplicatesAvoided: incidents.filter((i) => i.recommendation?.action === 'VIEW_SERVICE_ORDER').length,
+    reopenedMonitoring: incidents.filter((i) => /Monitoramento expirado/i.test(i.workflow?.nextStep || '')).length,
+    unassigned: incidents.filter((i) => !i.workflow?.assignedTo).length,
+    withoutDeadline: incidents.filter((i) => !i.workflow?.decisionDueAt && !i.workflow?.monitoringUntil).length,
+    byAssignee: Object.values(byAssignee).sort((a, b) => b.overdue - a.overdue || b.total - a.total),
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 // Monitamentos com prazo vencido voltam para a fila para uma nova decisao.
@@ -230,7 +304,7 @@ async function enrichEvents(tenantId, events) {
         closedAt: null,
         resolvedAt: null,
       },
-      select: { id: true, externalId: true, equipmentId: true, status: true, cdOstp: true, defect: true, createdAt: true, ticketId: true },
+      select: { id: true, externalId: true, equipmentId: true, status: true, cdOstp: true, defect: true, technicalNotes: true, createdAt: true, updatedAt: true, resolvedAt: true, closedAt: true, ticketId: true },
       orderBy: { createdAt: 'desc' },
     })
     : [];
@@ -357,6 +431,10 @@ async function enrichEvents(tenantId, events) {
         typeCode: openOrder.cdOstp,
         defect: openOrder.defect,
         createdAt: openOrder.createdAt,
+        updatedAt: openOrder.updatedAt,
+        resolvedAt: openOrder.resolvedAt,
+        closedAt: openOrder.closedAt,
+        technicalNotes: openOrder.technicalNotes,
         ticketId: openOrder.ticketId,
       },
       openServiceOrders: equipmentOpenOrders.slice(0, 6).map((o) => ({
@@ -366,6 +444,10 @@ async function enrichEvents(tenantId, events) {
         typeCode: o.cdOstp,
         defect: o.defect,
         createdAt: o.createdAt,
+        updatedAt: o.updatedAt,
+        resolvedAt: o.resolvedAt,
+        closedAt: o.closedAt,
+        technicalNotes: o.technicalNotes,
         ticketId: o.ticketId,
       })),
     };
@@ -382,6 +464,7 @@ async function enrichEvents(tenantId, events) {
     });
     incident.priority = priority;
     incident.recommendation = recommendationForIncident(incident);
+    incident.explainability = recommendationEvidence(incident);
     // A existência de uma O.S. ativa é refletida no incidente; a camada de
     // criação também bloqueia duplicatas de forma idempotente.
     incidents.push(incident);
@@ -414,8 +497,9 @@ async function parkQueue(tenantId, query = {}) {
   }
   if (query.q) {
     const q = String(query.q).toLowerCase();
-    incidents = incidents.filter((i) => `${i.customerName} ${i.serialNumber || ''} ${i.eventType}`.toLowerCase().includes(q));
+    incidents = incidents.filter((i) => `${i.customerName} ${i.serialNumber || ''} ${i.eventType} ${i.equipment?.model || ''} ${i.equipment?.externalId || ''} ${i.contract?.number || i.contract?.externalId || ''} ${i.openServiceOrder?.number || ''}`.toLowerCase().includes(q));
   }
+  incidents = incidents.filter((incident) => matchesManagerFilters(incident, query));
 
   const summary = {
     total: incidents.length,
@@ -479,7 +563,63 @@ async function parkQueue(tenantId, query = {}) {
     .sort((a, b) => b.urgent - a.urgent || b.total - a.total);
 
   const limit = Math.max(1, Math.min(Number(query.limit) || 60, 200));
-  return { incidents: incidents.slice(0, limit), summary, replenishment, truncated: incidents.length > limit };
+  return { incidents: incidents.slice(0, limit), summary, management: managerMetrics(incidents), replenishment, truncated: incidents.length > limit };
+}
+
+async function parkManagementMetrics(tenantId, query = {}) {
+  const events = await loadDecisionEvents(tenantId, { windowHours: Number(query.windowHours) || 168 });
+  let incidents = await enrichEvents(tenantId, events);
+  incidents = incidents.filter((incident) => matchesManagerFilters(incident, query));
+  return { metrics: managerMetrics(incidents), generatedAt: new Date().toISOString(), windowHours: Math.min(720, Math.max(1, Number(query.windowHours) || 168)) };
+}
+
+async function bulkDecisionWorkflow(tenantId, { eventIds, action, assignedToId, decisionDueAt, monitoringUntil, monitoringCondition, nextStep, reason } = {}, actorId = null) {
+  const ids = [...new Set((Array.isArray(eventIds) ? eventIds : []).map(String).filter(Boolean))].slice(0, 100);
+  if (!ids.length) { const e = new Error('Selecione ao menos uma ocorrencia.'); e.statusCode = 400; throw e; }
+  const allowed = ['ASSIGN', 'MONITOR', 'IGNORE'];
+  const normalizedAction = String(action || 'ASSIGN').toUpperCase();
+  if (!allowed.includes(normalizedAction)) { const e = new Error('Acao em lote invalida.'); e.statusCode = 400; throw e; }
+  const existing = await prisma.printGuardTelemetryEvent.findMany({ where: { tenantId, id: { in: ids }, state: { in: ['RECEIVED', 'MONITORING', 'ERROR'] } }, select: { id: true } });
+  if (existing.length !== ids.length) { const e = new Error('Uma ou mais ocorrencias nao existem, pertencem a outra empresa ou ja foram encerradas.'); e.statusCode = 409; throw e; }
+  if (assignedToId) {
+    const user = await prisma.user.findFirst({ where: { tenantId, id: assignedToId, active: true }, select: { id: true } });
+    if (!user) { const e = new Error('Responsavel invalido para esta empresa.'); e.statusCode = 400; throw e; }
+  }
+  const now = new Date();
+  const data = { decisionAt: now, decisionById: actorId || null };
+  if (normalizedAction === 'ASSIGN' && !assignedToId) {
+    const e = new Error('Informe o responsavel para atribuir as ocorrencias.'); e.statusCode = 400; throw e;
+  }
+  if (assignedToId !== undefined) data.assignedToId = assignedToId || null;
+  if (decisionDueAt !== undefined) data.decisionDueAt = parseOptionalDate(decisionDueAt, 'Prazo da decisao', { future: true });
+  if (nextStep !== undefined) data.nextStep = String(nextStep || '').trim().slice(0, 2000) || null;
+  if (normalizedAction === 'MONITOR') {
+    data.state = 'MONITORING';
+    data.monitoringUntil = parseOptionalDate(monitoringUntil, 'Prazo do monitoramento', { future: true });
+    if (!data.monitoringUntil) { const e = new Error('Informe o prazo do monitoramento.'); e.statusCode = 400; throw e; }
+    data.monitoringCondition = String(monitoringCondition || '').trim().slice(0, 2000) || null;
+    if (!data.monitoringCondition) { const e = new Error('Informe a condicao de reavaliacao do monitoramento.'); e.statusCode = 400; throw e; }
+  }
+  if (normalizedAction === 'IGNORE') {
+    const ignoredReason = String(reason || '').trim().slice(0, 2000);
+    if (!ignoredReason) { const e = new Error('Informe o motivo para ignorar.'); e.statusCode = 400; throw e; }
+    const allowedReasons = ['FALSE_POSITIVE', 'ALREADY_SUPPLIED', 'OPEN_ORDER', 'DUPLICATE', 'EQUIPMENT_INACTIVE', 'NO_CONTRACT', 'NO_ACTION_REQUIRED', 'OTHER'];
+    if (!allowedReasons.includes(ignoredReason)) { const e = new Error('Motivo invalido para ignorar ocorrencias.'); e.statusCode = 400; throw e; }
+    data.state = 'IGNORED'; data.ignoredReason = ignoredReason; data.monitoringUntil = null; data.monitoringCondition = null;
+  }
+  const result = await prisma.printGuardTelemetryEvent.updateMany({ where: { tenantId, id: { in: ids }, state: { in: ['RECEIVED', 'MONITORING', 'ERROR'] } }, data });
+  await Promise.all(ids.map((id) => recordAuditEvent({ tenantId }, { actorId, action: `PRINTGUARD_BULK_${normalizedAction}`, resourceType: 'printguard_event', resourceId: id, metadata: { action: normalizedAction, fields: Object.keys(data), batchSize: ids.length } })));
+  return { action: normalizedAction, requested: ids.length, updated: result.count || 0, eventIds: ids };
+}
+
+async function decisionHistory(tenantId, eventId, { limit = 50 } = {}) {
+  const event = await prisma.printGuardTelemetryEvent.findFirst({ where: { tenantId, id: eventId }, select: { id: true, state: true, serviceOrderId: true, assignedToId: true, decisionDueAt: true, monitoringUntil: true, monitoringCondition: true, nextStep: true, ignoredReason: true, decisionAt: true, decisionById: true, createdAt: true, updatedAt: true } });
+  if (!event) { const e = new Error('Evento nao encontrado.'); e.statusCode = 404; throw e; }
+  const audits = await prisma.auditEvent.findMany({ where: { tenantId, resourceType: 'printguard_event', resourceId: eventId }, orderBy: { createdAt: 'desc' }, take: Math.min(100, Math.max(1, Number(limit) || 50)), select: { id: true, actorId: true, action: true, status: true, metadata: true, createdAt: true } });
+  const actorIds = [...new Set(audits.map((a) => a.actorId).filter(Boolean))];
+  const actors = actorIds.length ? await prisma.user.findMany({ where: { tenantId, id: { in: actorIds } }, select: { id: true, name: true } }) : [];
+  const names = new Map(actors.map((u) => [u.id, u.name]));
+  return { event, history: audits.map((a) => ({ ...a, actorName: a.actorId ? names.get(a.actorId) || null : 'Sistema' })) };
 }
 
 function parseOptionalDate(value, field, { future = false } = {}) {
@@ -897,8 +1037,11 @@ module.exports = {
   correctBinding,
   updateDecisionWorkflow,
   notifyManagerIncident,
+  parkManagementMetrics,
+  bulkDecisionWorkflow,
+  decisionHistory,
   __testing: {
     computeHealth, healthBucket, pickOsType, tonerLevelFromPayload, severityRank,
-    priorityForIncident, recommendationForIncident, reopenExpiredMonitoring,
+    priorityForIncident, recommendationForIncident, recommendationEvidence, matchesManagerFilters, managerMetrics, reopenExpiredMonitoring,
   },
 };

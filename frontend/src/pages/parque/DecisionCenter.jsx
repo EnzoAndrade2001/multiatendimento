@@ -2,16 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, BellRing, CalendarClock, CheckCircle2, ChevronRight, ClipboardList,
   ExternalLink, History, Link2, Loader2, MessageCircle, RefreshCw, ShieldAlert, UserRound,
-  X,
+  X, Search, SlidersHorizontal, Save, UsersRound, TimerReset,
 } from 'lucide-react';
 import {
   BACKEND_URL, approveTelemetryEvent, assignParkIncident, consolidateParkServiceOrder,
   getParkBindingCandidates, getParkEquipmentTimeline, getParkQueue, getUsers, ignoreTelemetryEvent,
-  monitorTelemetryEvent, notifyParkIncident, resolveParkBinding, sendOSManagerCopy,
+  monitorTelemetryEvent, notifyParkIncident, resolveParkBinding, sendOSManagerCopy, bulkParkIncidents,
 } from '../../services/api';
 import { toast } from '../../utils/toast';
 import { usePermissions } from '../../auth/PermissionContext';
 import { CrmCustomerProfileModal } from '../CRM';
+import IncidentInsights from './IncidentInsights';
 import './DecisionCenter.css';
 
 const incidentContext = (item) => ({
@@ -47,6 +48,24 @@ const tomorrowAtTen = () => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
+const EMPTY_ADVANCED_FILTERS = {
+  query: '', assignee: 'all', priority: 'all', eventType: 'all', location: '',
+  ownership: 'all', deadline: 'all', recurrence: 'all', dateFrom: '', dateTo: '',
+};
+const SAVED_VIEWS_KEY = 'sentinela.decision.savedViews.v1';
+
+function safeSavedViews() {
+  try { return JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) || '[]'); } catch { return []; }
+}
+
+function itemDueAt(item) {
+  return item.workflow?.decisionDueAt || item.workflow?.monitoringUntil || null;
+}
+
+function itemAssigneeId(item) {
+  return String(item.workflow?.assignedTo?.id || item.workflow?.assignedToId || '');
+}
+
 function priorityOf(item) {
   if (item.priority?.level) return item.priority;
   let score = String(item.severity).toUpperCase() === 'CRITICAL' ? 55 : 20;
@@ -77,6 +96,9 @@ export default function DecisionCenter({ osTypes = [] }) {
   const [selected, setSelected] = useState({});
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [advanced, setAdvanced] = useState(EMPTY_ADVANCED_FILTERS);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [savedViews, setSavedViews] = useState(safeSavedViews);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -113,6 +135,30 @@ export default function DecisionCenter({ osTypes = [] }) {
     };
   }, [all, data, user]);
 
+  const management = useMemo(() => {
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const resolved = all.filter((i) => ['RESOLVED', 'IGNORED', 'APPROVED', 'CLOSED'].includes(String(i.state).toUpperCase()));
+    const completedToday = resolved.filter((i) => new Date(i.workflow?.resolvedAt || i.updatedAt || 0) >= todayStart).length;
+    const withDue = all.filter((i) => itemDueAt(i));
+    const onTime = withDue.filter((i) => new Date(itemDueAt(i)).getTime() >= now || resolved.includes(i)).length;
+    const decisionMinutes = resolved.map((i) => {
+      const start = new Date(i.receivedAt || i.createdAt || 0).getTime();
+      const end = new Date(i.workflow?.resolvedAt || i.updatedAt || 0).getTime();
+      return start && end > start ? (end - start) / 60000 : null;
+    }).filter(Number.isFinite);
+    // IncidentInsights pode fornecer estes campos no payload sem quebrar instalações antigas.
+    const insights = data?.management || data?.incidentInsights || data?.insights || {};
+    return {
+      completedToday: insights.completedToday ?? completedToday,
+      sla: insights.slaCompliancePct ?? insights.slaPercent ?? (withDue.length ? Math.round((onTime / withDue.length) * 100) : 100),
+      avgDecision: insights.avgDecisionMinutes ?? insights.averageDecisionMinutes ?? (decisionMinutes.length ? Math.round(decisionMinutes.reduce((a, b) => a + b, 0) / decisionMinutes.length) : null),
+      unassigned: insights.unassigned ?? all.filter((i) => !itemAssigneeId(i)).length,
+      openOs: insights.openServiceOrders ?? all.filter((i) => i.openServiceOrder).length,
+      reopened: insights.reopened ?? all.filter((i) => Number(i.workflow?.reopenCount || i.reopenCount || 0) > 0).length,
+    };
+  }, [all, data]);
+
   const visible = useMemo(() => {
     const now = Date.now();
     let list = all.filter((i) => {
@@ -128,12 +174,34 @@ export default function DecisionCenter({ osTypes = [] }) {
       if (filter === 'openOs') return Boolean(i.openServiceOrder);
       if (filter === 'monitoring') return i.state === 'MONITORING';
       return true;
+    }).filter((i) => {
+      const q = advanced.query.trim().toLocaleLowerCase('pt-BR');
+      const haystack = [i.customerName, i.serialNumber, i.equipment?.model, i.contract?.number,
+        i.contract?.externalId, i.openServiceOrder?.number, i.eventType].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR');
+      if (q && !haystack.includes(q)) return false;
+      if (advanced.assignee !== 'all' && itemAssigneeId(i) !== advanced.assignee) return false;
+      if (advanced.priority !== 'all' && i._priority.level !== advanced.priority) return false;
+      if (advanced.eventType !== 'all' && i.eventType !== advanced.eventType) return false;
+      const place = [i.equipment?.city, i.equipment?.state, i.customer?.city, i.customer?.state, i.equipment?.installLocation].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR');
+      if (advanced.location && !place.includes(advanced.location.toLocaleLowerCase('pt-BR'))) return false;
+      if (advanced.ownership === 'unassigned' && itemAssigneeId(i)) return false;
+      if (advanced.ownership === 'assigned' && !itemAssigneeId(i)) return false;
+      const due = itemDueAt(i) ? new Date(itemDueAt(i)) : null;
+      if (advanced.deadline === 'none' && due) return false;
+      if (advanced.deadline === 'overdue' && (!due || due.getTime() >= now)) return false;
+      if (advanced.deadline === 'today' && (!due || due.toDateString() !== new Date().toDateString())) return false;
+      const recurrence = Number(i.callCount90d || i.workflow?.reopenCount || i.reopenCount || 0);
+      if (advanced.recurrence === 'yes' && recurrence < 2) return false;
+      const detected = new Date(i.detectedAt || i.createdAt || i.receivedAt || 0);
+      if (advanced.dateFrom && detected < new Date(`${advanced.dateFrom}T00:00:00`)) return false;
+      if (advanced.dateTo && detected > new Date(`${advanced.dateTo}T23:59:59`)) return false;
+      return true;
     });
     list = [...list].sort((a, b) => sort === 'age'
       ? Number(b.ageMinutes || 0) - Number(a.ageMinutes || 0)
       : Number(b._priority.score || 0) - Number(a._priority.score || 0));
     return list;
-  }, [all, filter, sort, user]);
+  }, [all, filter, sort, user, advanced]);
 
   const selectedList = Object.values(selected);
   const sameCustomer = selectedList.length > 1 && new Set(selectedList.map((i) => i.customer?.id)).size === 1;
@@ -194,6 +262,55 @@ export default function DecisionCenter({ osTypes = [] }) {
     finally { setBusy(false); }
   }
 
+  function saveCurrentView() {
+    const name = window.prompt('Nome da visão gerencial:');
+    if (!name?.trim()) return;
+    const view = { id: `${Date.now()}`, name: name.trim(), filter, sort, advanced };
+    const next = [...savedViews.filter((v) => v.name !== view.name), view];
+    setSavedViews(next);
+    localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(next));
+    toast.success('Visão salva neste navegador.');
+  }
+
+  function applySavedView(id) {
+    if (!id) return;
+    const view = savedViews.find((v) => v.id === id);
+    if (!view) return;
+    setFilter(view.filter || 'all'); setSort(view.sort || 'priority');
+    setAdvanced({ ...EMPTY_ADVANCED_FILTERS, ...view.advanced }); setShowAdvanced(true);
+  }
+
+  async function runBulk(form) {
+    setBusy(true);
+    const items = selectedList;
+    if (form.action !== 'notify') {
+      try {
+        await bulkParkIncidents({
+          eventIds: items.map((item) => item.id), action: form.action.toUpperCase(),
+          assignedToId: form.assignedToId || null,
+          decisionDueAt: form.action === 'assign' && form.until ? new Date(form.until).toISOString() : undefined,
+          monitoringUntil: form.action === 'monitor' && form.until ? new Date(form.until).toISOString() : undefined,
+          monitoringCondition: form.condition, nextStep: form.note, reason: form.reason,
+        });
+        await refreshAfter(`Ação aplicada a ${items.length} ocorrência(s).`);
+      } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível aplicar a ação em lote.'); }
+      finally { setBusy(false); }
+      return;
+    }
+    const tasks = items.map((item) => {
+      return notifyParkIncident(item.id, { channel: 'manager', context: incidentContext(item) });
+    });
+    try {
+      const results = await Promise.allSettled(tasks);
+      const failures = results.filter((r) => r.status === 'rejected').length;
+      if (failures) toast.error(`${items.length - failures} concluída(s); ${failures} falharam e permanecerão selecionadas.`);
+      else toast.success(`Ação aplicada a ${items.length} ocorrência(s).`);
+      setDialog(null);
+      if (!failures) setSelected({});
+      await load();
+    } finally { setBusy(false); }
+  }
+
   async function openConversation(item) {
     if (!item.customer?.id) { toast.error('Cliente não vinculado ao CRM — corrija o vínculo primeiro.'); return; }
     if (item.activeTicketId) {
@@ -218,6 +335,18 @@ export default function DecisionCenter({ osTypes = [] }) {
   ];
 
   return <div className="park-decision">
+    <section className="park-kpis" aria-label="Gestão de hoje" style={{ marginBottom: 10 }}>
+      {[
+        ['Decisões hoje', management.completedToday, CheckCircle2, 'success'],
+        ['SLA no prazo', `${management.sla}%`, TimerReset, management.sla >= 90 ? 'success' : 'warning'],
+        ['Tempo médio decisão', management.avgDecision == null ? '—' : `${management.avgDecision} min`, CalendarClock, 'info'],
+        ['Sem responsável', management.unassigned, UsersRound, management.unassigned ? 'danger' : 'success'],
+        ['O.S. em andamento', management.openOs, ClipboardList, 'info'],
+        ['Reabertas', management.reopened, RefreshCw, management.reopened ? 'warning' : 'success'],
+      ].map(([label, value, Icon, tone]) => <div className="park-kpi" key={label} title="Indicador calculado com a fila carregada">
+        <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span><span><b>{value}</b><small>{label}</small></span>
+      </div>)}
+    </section>
     <div className="park-data-note" role="status">
       <span><b>Fonte:</b> {data.summary?.dataSource || 'PrintGuard'} - janela de {Math.round((data.summary?.windowHours || 72) / 24)} dia(s)</span>
       <span>{data.summary?.affectedCustomers || 0} cliente(s) afetado(s) - {data.summary?.withoutCustomerPhone || 0} sem telefone - {data.summary?.withMeterHistory || 0} com histórico de contador</span>
@@ -232,6 +361,11 @@ export default function DecisionCenter({ osTypes = [] }) {
     <section className="park-toolbar">
       <div><b>Fila de decisão gerencial</b><span>{visible.length} de {all.length} ocorrência(s)</span></div>
       <div className="park-toolbar-actions">
+        <select defaultValue="" onChange={(e) => applySavedView(e.target.value)} aria-label="Visões salvas">
+          <option value="">Visões salvas</option>{savedViews.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </select>
+        <button className="park-btn" onClick={saveCurrentView} title="Salvar filtros atuais"><Save size={14} /> Salvar visão</button>
+        <button className={`park-btn ${showAdvanced ? 'primary' : ''}`} onClick={() => setShowAdvanced((v) => !v)}><SlidersHorizontal size={14} /> Filtros</button>
         {user?.id && (
           <button className={`park-btn ${filter === 'mine' ? 'primary' : ''}`} onClick={() => setFilter(filter === 'mine' ? 'all' : 'mine')}>
             <UserRound size={14} /> Minha fila{summary.mine ? ` (${summary.mine})` : ''}
@@ -245,9 +379,16 @@ export default function DecisionCenter({ osTypes = [] }) {
       </div>
     </section>
 
-    {selectedList.length > 1 && <section className={`park-selection ${selectionReady ? '' : 'blocked'}`}>
-      <span><b>{selectedList.length} selecionados.</b> {selectionReady ? 'Podem ser consolidados em uma única O.S. de reposição.' : 'Para consolidar, selecione ocorrências vinculadas do mesmo cliente e sem O.S. aberta.'}</span>
-      <button disabled={!selectionReady} className="park-btn primary" onClick={() => setDialog({ type: 'os', items: selectedList, item: selectedList[0] })}>Gerar 1 O.S.</button>
+    {showAdvanced && <AdvancedFilters value={advanced} onChange={setAdvanced} users={users} incidents={all}
+      onClear={() => { setAdvanced(EMPTY_ADVANCED_FILTERS); setFilter('all'); }} />}
+
+    {selectedList.length > 0 && <section className={`park-selection ${selectionReady ? '' : 'blocked'}`}>
+      <span><b>{selectedList.length} selecionado(s).</b> Atribua, monitore, notifique ou encerre ocorrências em conjunto.</span>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="park-btn" onClick={() => setSelected({})}>Limpar</button>
+        <button className="park-btn primary" onClick={() => setDialog({ type: 'bulk', items: selectedList })}>Ação em lote</button>
+        {selectedList.length > 1 && <button disabled={!selectionReady} className="park-btn primary" onClick={() => setDialog({ type: 'os', items: selectedList, item: selectedList[0] })}>Gerar 1 O.S.</button>}
+      </div>
     </section>}
 
     <div className="park-workspace">
@@ -268,6 +409,7 @@ export default function DecisionCenter({ osTypes = [] }) {
     {dialog?.type === 'binding' && <BindingDialog item={dialog.item} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Vínculo corrigido e fila recalculada.')} />}
     {dialog?.type === 'timeline' && <TimelineDialog item={dialog.item} onClose={() => setDialog(null)} />}
     {dialog?.type === 'assign' && <AssignDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Responsável notificado no chat interno.')} />}
+    {dialog?.type === 'bulk' && <BulkActionDialog count={dialog.items.length} users={users} busy={busy} onClose={() => setDialog(null)} onSave={runBulk} />}
     {dialog?.type === 'crm360' && dialog.item.customer?.id && (
       <CrmCustomerProfileModal
         customerId={dialog.item.customer.id}
@@ -278,6 +420,43 @@ export default function DecisionCenter({ osTypes = [] }) {
       />
     )}
   </div>;
+}
+
+function AdvancedFilters({ value, onChange, users, incidents, onClear }) {
+  const set = (key, next) => onChange((old) => ({ ...old, [key]: next }));
+  const eventTypes = [...new Set(incidents.map((i) => i.eventType).filter(Boolean))].sort();
+  return <section className="park-selection" aria-label="Filtros avançados" style={{ alignItems: 'stretch', flexDirection: 'column' }}>
+    <div className="park-advanced-grid">
+      <label style={{ position: 'relative' }}><Search size={14} style={{ position: 'absolute', left: 9, top: 11 }} />
+        <input style={{ paddingLeft: 30, width: '100%' }} value={value.query} onChange={(e) => set('query', e.target.value)} placeholder="Cliente, série, equipamento, contrato ou O.S." />
+      </label>
+      <select value={value.assignee} onChange={(e) => set('assignee', e.target.value)} aria-label="Responsável"><option value="all">Todos responsáveis</option>{users.map((u) => <option key={u.id} value={String(u.id)}>{u.name}</option>)}</select>
+      <select value={value.priority} onChange={(e) => set('priority', e.target.value)} aria-label="Prioridade"><option value="all">Todas prioridades</option>{['P1', 'P2', 'P3', 'P4'].map((p) => <option key={p}>{p}</option>)}</select>
+      <select value={value.eventType} onChange={(e) => set('eventType', e.target.value)} aria-label="Tipo"><option value="all">Todos os tipos</option>{eventTypes.map((t) => <option key={t}>{t}</option>)}</select>
+      <input value={value.location} onChange={(e) => set('location', e.target.value)} placeholder="Cidade, UF ou rota" />
+      <select aria-label="Situação de atribuição" value={value.ownership} onChange={(e) => set('ownership', e.target.value)}><option value="all">Com ou sem responsável</option><option value="unassigned">Sem responsável</option><option value="assigned">Com responsável</option></select>
+      <select aria-label="Situação do prazo" value={value.deadline} onChange={(e) => set('deadline', e.target.value)}><option value="all">Todos os prazos</option><option value="overdue">Prazo vencido</option><option value="today">Vence hoje</option><option value="none">Sem prazo</option></select>
+      <select aria-label="Reincidência" value={value.recurrence} onChange={(e) => set('recurrence', e.target.value)}><option value="all">Todos os históricos</option><option value="yes">Somente reincidentes</option></select>
+      <input type="date" title="Detectado a partir de" value={value.dateFrom} onChange={(e) => set('dateFrom', e.target.value)} />
+      <div style={{ display: 'flex', gap: 6 }}><input type="date" title="Detectado até" value={value.dateTo} onChange={(e) => set('dateTo', e.target.value)} /><button className="park-btn ghost" onClick={onClear}>Limpar</button></div>
+    </div>
+  </section>;
+}
+
+function BulkActionDialog({ count, users, busy, onClose, onSave }) {
+  const [form, setForm] = useState({ action: 'assign', assignedToId: '', until: tomorrowAtTen(), condition: '', reason: 'DUPLICATE', note: '' });
+  const set = (key, value) => setForm((old) => ({ ...old, [key]: value }));
+  const needsDue = ['assign', 'monitor'].includes(form.action);
+  const invalid = (needsDue && !form.until) || (form.action === 'assign' && !form.assignedToId) || (form.action === 'monitor' && !form.condition.trim());
+  return <Modal eyebrow="Gestão em lote" title={`Agir sobre ${count} ocorrência(s)`} onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || invalid} onClick={() => onSave(form)}>{busy ? 'Aplicando…' : 'Aplicar a todos'}</button></>}>
+    <p>A ação será registrada individualmente na auditoria de cada ocorrência.</p>
+    <label>Ação<select value={form.action} onChange={(e) => set('action', e.target.value)}><option value="assign">Atribuir responsável e prazo</option><option value="monitor">Iniciar monitoramento</option><option value="notify">Notificar gestor</option><option value="ignore">Ignorar duplicadas/sem ação</option></select></label>
+    {['assign', 'monitor'].includes(form.action) && <label>Responsável<select value={form.assignedToId} onChange={(e) => set('assignedToId', e.target.value)}><option value="">{form.action === 'assign' ? 'Selecione…' : 'Sem responsável definido'}</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
+    {needsDue && <label>Prazo<input type="datetime-local" value={form.until} onChange={(e) => set('until', e.target.value)} /></label>}
+    {form.action === 'monitor' && <label>Condição para reavaliar<input value={form.condition} onChange={(e) => set('condition', e.target.value)} placeholder="Ex.: confirmar próxima leitura" /></label>}
+    {form.action === 'ignore' && <label>Motivo<select value={form.reason} onChange={(e) => set('reason', e.target.value)}><option value="DUPLICATE">Ocorrência duplicada</option><option value="FALSE_POSITIVE">Falso positivo</option><option value="NO_ACTION_REQUIRED">Sem ação necessária</option></select></label>}
+    {form.action !== 'notify' && <label>Próximo passo / justificativa<textarea rows="3" value={form.note} onChange={(e) => set('note', e.target.value)} /></label>}
+  </Modal>;
 }
 
 function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversation, busy, canManage }) {
@@ -343,6 +522,7 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
         <button className="park-btn danger" disabled={!canManage} onClick={() => onDialog('ignore')}>Ignorar</button>
       </div></details>
     </div>
+    <IncidentInsights incident={item} />
   </article>;
 }
 
