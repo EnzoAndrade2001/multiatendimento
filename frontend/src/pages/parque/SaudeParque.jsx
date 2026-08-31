@@ -1,32 +1,40 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowUpRight, RefreshCw, X } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import {
   getParkQueue, getParkCoverage, getParkRanking, getParkEquipmentTimeline,
   getOsTypes,
 } from '../../services/api';
-import { toast } from '../../utils/toast';
 import DecisionCenter from './DecisionCenter';
+import { useSearchParams } from 'react-router-dom';
 
 const SUBTABS = [
-  { key: 'fila', label: 'Fila de decisão' },
-  { key: 'franquia', label: 'Contadores & Franquia' },
-  { key: 'cobertura', label: 'Cobertura' },
-  { key: 'problema', label: 'Equipamentos-problema' },
-  { key: 'auditoria', label: 'Auditoria' },
+  { key: 'fila', label: 'Operação diária', description: 'Decida, atribua e acompanhe as ocorrências que exigem ação agora.' },
+  { key: 'franquia', label: 'Consumo & Franquia', description: 'Projete consumo, franquia e possível excedente no ciclo atual.' },
+  { key: 'cobertura', label: 'Cobertura da Telemetria', description: 'Acompanhe vínculos, conectividade e equipamentos sem sinal recente.' },
+  { key: 'problema', label: 'Recorrência & Troca', description: 'Identifique reincidência e equipamentos que merecem avaliação de troca.' },
 ];
 
 const money = (v) => (v == null ? '—' : `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const int = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR'));
 
 export default function SaudeParque() {
-  const [tab, setTab] = useState('fila');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedSection = searchParams.get('section');
+  const tab = SUBTABS.some((item) => item.key === requestedSection) ? requestedSection : 'fila';
+  const setTab = (key) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('area', 'parque');
+    next.set('section', key);
+    setSearchParams(next, { replace: true });
+  };
   const [osTypes, setOsTypes] = useState([]);
 
   useEffect(() => { getOsTypes().then(({ data }) => setOsTypes(Array.isArray(data) ? data : [])).catch(() => {}); }, []);
+  const currentTab = SUBTABS.find((item) => item.key === tab) || SUBTABS[0];
 
   return (
     <div style={s.wrap}>
-      <div style={s.subtabs} role="tablist">
+      <div style={s.subtabs} role="tablist" aria-label="Áreas da Saúde do Parque">
         {SUBTABS.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key}
             style={{ ...s.subtab, ...(tab === t.key ? s.subtabActive : {}) }}
@@ -35,17 +43,17 @@ export default function SaudeParque() {
           </button>
         ))}
       </div>
+      <div style={s.sectionPurpose} role="status"><strong>{currentTab.label}</strong><span>{currentTab.description}</span></div>
 
       {tab === 'fila' && <DecisionCenter osTypes={osTypes} />}
       {tab === 'franquia' && <ContadoresFranquia />}
       {tab === 'cobertura' && <Cobertura />}
       {tab === 'problema' && <EquipamentosProblema />}
-      {tab === 'auditoria' && <Auditoria />}
     </div>
   );
 }
 
-/* -------------------- CONTADORES & FRANQUIA -------------------- */
+/* -------------------- CONSUMO & FRANQUIA -------------------- */
 
 function ContadoresFranquia() {
   const [rows, setRows] = useState(null);
@@ -103,7 +111,7 @@ function ContadoresFranquia() {
   );
 }
 
-/* -------------------- COBERTURA -------------------- */
+/* -------------------- COBERTURA DA TELEMETRIA -------------------- */
 
 function Cobertura() {
   const [data, setData] = useState(null);
@@ -144,7 +152,7 @@ function Cobertura() {
   );
 }
 
-/* -------------------- EQUIPAMENTOS-PROBLEMA -------------------- */
+/* -------------------- RECORRÊNCIA & TROCA -------------------- */
 
 function EquipamentosProblema() {
   const [data, setData] = useState(null);
@@ -182,7 +190,7 @@ function EquipamentosProblema() {
                   <td style={s.tdNum} title={r.problemsPer1k == null ? 'Sem histórico de contador suficiente para normalizar por volume.' : 'Alertas + O.S. por 1.000 páginas'}>{r.problemsPer1k ?? '—'}</td>
                   <td style={s.tdNum}>{r.pagesPerDay != null ? int(r.pagesPerDay) : '—'}</td>
                   <td style={s.td}><span style={{ ...s.pill, ...(r.candidate ? s.pillCrit : s.pillWarn) }}>{r.candidate ? 'candidata a troca' : 'acompanhar'}</span></td>
-                  <td style={s.td}><button style={s.linkBtn} onClick={() => openTimeline(r.equipmentId)}>Timeline</button></td>
+                  <td style={s.td}><button style={s.linkBtn} onClick={() => openTimeline(r.equipmentId)}>Timeline do equipamento</button></td>
                 </tr>
               ))}
               {data.rows.length === 0 && <tr><td style={s.td} colSpan={9}>Nenhum alerta ou O.S. recorrente encontrado nos equipamentos vinculados no período.</td></tr>}
@@ -223,27 +231,6 @@ function EquipamentosProblema() {
   );
 }
 
-/* -------------------- AUDITORIA -------------------- */
-
-function Auditoria() {
-  return (
-    <div style={s.card}>
-      <div style={s.cardH}><strong>Trilha de decisões do parque</strong></div>
-      <div style={{ padding: 18 }}>
-        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 13 }}>
-          As decisões (aprovar, consolidar, ignorar, vincular) são registradas na auditoria central com ação <code>PRINTGUARD_*</code>.
-        </p>
-        <a href="/audit?resource=printguard_event" style={{ ...s.linkBtn, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 10 }}>
-          Abrir na Auditoria do sistema <ArrowUpRight size={14} />
-        </a>
-        <p style={{ marginTop: 14, fontSize: 12, color: 'var(--text-muted)' }}>
-          Painel dedicado (MTTR, % auto-resolvido, falso-positivo por tipo) — próxima entrega.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 /* -------------------- estilos -------------------- */
 
 const s = {
@@ -251,6 +238,7 @@ const s = {
   subtabs: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   subtab: { font: 'inherit', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', padding: '7px 13px', borderRadius: 'var(--radius-pill)' },
   subtabActive: { background: 'var(--accent-light)', borderColor: 'var(--accent-border)', color: 'var(--accent)' },
+  sectionPurpose: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', padding: '1px 2px', color: 'var(--text-muted)', fontSize: 12.5 },
 
   kpis: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 },
   kpi: { textAlign: 'left', font: 'inherit', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '12px 13px', display: 'flex', flexDirection: 'column', gap: 2 },

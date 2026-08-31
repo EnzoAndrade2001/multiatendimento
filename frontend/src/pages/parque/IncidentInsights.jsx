@@ -32,7 +32,7 @@ export default function IncidentInsights({ incident, defaultOpen = false }) {
   return (
     <section className={`park-insights ${open ? 'open' : ''}`}>
       <button className="park-insights-toggle" type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span><CircleHelp size={14} /> Contexto para decidir e acompanhar</span>
+        <span><CircleHelp size={14} /> Acompanhamento da ocorrência</span>
         <ChevronDown size={15} />
       </button>
       {open && <div className="park-insights-body">
@@ -40,7 +40,7 @@ export default function IncidentInsights({ incident, defaultOpen = false }) {
           <TabButton active={tab === 'execution'} onClick={() => setTab('execution')}>Pós-O.S.</TabButton>
           <TabButton active={tab === 'logistics'} onClick={() => setTab('logistics')}>Logística</TabButton>
           <TabButton active={tab === 'why'} onClick={() => setTab('why')}>Por que?</TabButton>
-          <TabButton active={tab === 'audit'} onClick={() => setTab('audit')}>Histórico</TabButton>
+          <TabButton active={tab === 'audit'} onClick={() => setTab('audit')}>Decisões da ocorrência</TabButton>
         </div>
 
         {tab === 'execution' && (os ? <div className="park-execution-grid">

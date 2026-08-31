@@ -128,6 +128,7 @@ function recommendationOf(item) {
 export default function DecisionCenter({ osTypes = [] }) {
   const { user, can } = usePermissions();
   const canManage = can('telemetry.manage');
+  const canAudit = can('audit.view');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
@@ -156,7 +157,7 @@ export default function DecisionCenter({ osTypes = [] }) {
       setUsers(Array.isArray(usersResult.data) ? usersResult.data.filter((u) => u.active !== false) : []);
       setLastUpdatedAt(new Date());
     } catch (error) {
-      if (!silent) toast.error(error.response?.data?.error || 'Não foi possível carregar a fila gerencial.');
+      if (!silent) toast.error(error.response?.data?.error || 'Não foi possível carregar a operação diária.');
     } finally {
       loadingRef.current = false;
       if (silent) setRefreshing(false); else setLoading(false);
@@ -373,7 +374,7 @@ export default function DecisionCenter({ osTypes = [] }) {
     setDialog({ type: 'crm360', item, tab: 'contacts' });
   }
 
-  if (loading) return <div className="park-loading"><Loader2 className="spin" size={18} /> Montando fila gerencial…</div>;
+  if (loading) return <div className="park-loading"><Loader2 className="spin" size={18} /> Montando operação diária…</div>;
   if (!data) return <div className="park-empty">Telemetria indisponível.</div>;
 
   const windowLabel = `${data.summary?.windowHours || 72} horas`;
@@ -420,7 +421,7 @@ export default function DecisionCenter({ osTypes = [] }) {
     </div>
 
     <section className="park-toolbar">
-      <div><b>Fila de decisão gerencial</b><span>{visible.length} de {all.length} ocorrência(s)</span></div>
+      <div><b>Ocorrências que exigem decisão</b><span>{visible.length} de {all.length} ocorrência(s)</span></div>
       <div className="park-toolbar-actions">
         <select defaultValue="" onChange={(e) => applySavedView(e.target.value)} aria-label="Visões salvas">
           <option value="">Visões salvas</option>{savedViews.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -440,6 +441,7 @@ export default function DecisionCenter({ osTypes = [] }) {
           {lastUpdatedAt ? `Atualizado às ${lastUpdatedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Aguardando atualização'}
         </span>
         <button className="park-btn" disabled={refreshing} onClick={() => load({ silent: true })}><RefreshCw className={refreshing ? 'spin' : ''} size={15} /> Atualizar</button>
+        {canAudit && <a className="park-btn" href="/audit?resource=printguard_event" title="Abrir a trilha completa das decisões do parque"><ExternalLink size={14} /> Auditoria completa</a>}
       </div>
     </section>
 
@@ -581,7 +583,7 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
       <details className="park-more-actions"><summary className="park-btn">Mais ações <ChevronRight size={14} /></summary><div>
         <button className="park-btn" title="Definir responsável, prazo e condição para a ocorrência voltar à decisão" disabled={!canManage} onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar com prazo</button>
         <button className="park-btn" title="Enviar a ocorrência para a Minha fila de um responsável e avisá-lo no chat interno" disabled={!canManage} onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir responsável</button>
-        <button className="park-btn" onClick={() => onDialog('timeline')}><History size={14} /> Histórico</button>
+        <button className="park-btn" onClick={() => onDialog('timeline')}><History size={14} /> Timeline do equipamento</button>
         <button className="park-btn" disabled={!hasCustomer} onClick={() => onDialog('crm360')}><ClipboardList size={14} /> CRM 360</button>
         <button className="park-btn" disabled={busy || !canManage} onClick={onNotify}><BellRing size={14} /> Gestor</button>
         <button className="park-btn danger" disabled={!canManage} onClick={() => onDialog('ignore')}>Ignorar</button>
@@ -704,7 +706,7 @@ function BindingDialog({ item, busy, onClose, onDone }) {
 function TimelineDialog({ item, onClose }) {
   const [data, setData] = useState(null);
   useEffect(() => { if (item.equipment?.id) getParkEquipmentTimeline(item.equipment.id, { days: 90 }).then(({ data: value }) => setData(value)).catch(() => setData({ events: [] })); }, [item.equipment?.id]);
-  return <Modal eyebrow="Visão consolidada" title="Histórico do equipamento" onClose={onClose} footer={<button className="park-btn" onClick={onClose}>Fechar</button>}>
+  return <Modal eyebrow="Visão consolidada" title="Timeline do equipamento" onClose={onClose} footer={<button className="park-btn" onClick={onClose}>Fechar</button>}>
     {!data ? <div className="park-loading"><Loader2 className="spin" /> Carregando…</div> : <div className="park-timeline">{(data.events || data.timeline || []).length === 0 && <p>Sem eventos no período.</p>}{(data.events || data.timeline || []).map((e, idx) => <div key={e.id || idx}><b title={`Código PrintGuard: ${e.eventType || e.type || 'Evento'}`}>{eventLabel(e.eventType || e.type || 'Evento')}</b><span>{fmtDate(e.occurredAt || e.createdAt)}</span><p>{e.description || e.status || e.state}</p></div>)}</div>}
   </Modal>;
 }

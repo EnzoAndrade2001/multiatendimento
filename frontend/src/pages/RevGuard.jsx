@@ -35,18 +35,27 @@ import {
 } from 'lucide-react';
 import { toast } from '../utils/toast';
 import SaudeParque from './parque/SaudeParque';
+import { useSearchParams } from 'react-router-dom';
 
 const TABS = [
-  { key: 'parque', label: 'Saúde do Parque' },
-  { key: 'crise', label: 'Centro de Crise' },
-  { key: 'funil', label: 'Vazamento do Funil' },
-  { key: 'benchmark', label: 'Benchmark Interno' },
-  { key: 'detetive', label: 'Detetive IA' },
-  { key: 'auditoria', label: 'Auditoria por IA' },
+  { key: 'parque', label: 'Saúde do Parque', description: 'Equipamentos, telemetria e decisões operacionais.' },
+  { key: 'crise', label: 'Risco de Receita & SLA', description: 'Impacto financeiro, SLAs rompidos e prioridades executivas.' },
+  { key: 'funil', label: 'Fluxo de O.S.', description: 'Evolução, gargalos e ordens paradas no processo de atendimento.' },
+  { key: 'benchmark', label: 'Benchmark Interno', description: 'Comparação de desempenho entre equipes e períodos.' },
+  { key: 'detetive', label: 'Detetive IA', description: 'Investigação assistida de padrões e causas operacionais.' },
+  { key: 'auditoria', label: 'Qualidade dos Atendimentos', description: 'Avaliação por IA da qualidade das conversas resolvidas.' },
 ];
 
 export default function RevGuard() {
-  const [activeTab, setActiveTab] = useState('parque');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedArea = searchParams.get('area');
+  const activeTab = TABS.some((tab) => tab.key === requestedArea) ? requestedArea : 'parque';
+  const setActiveTab = (key) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('area', key);
+    if (key !== 'parque') next.delete('section');
+    setSearchParams(next, { replace: true });
+  };
   
   // States para cada aba
   const [crisisData, setCrisisData] = useState(null);
@@ -79,7 +88,7 @@ export default function RevGuard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'crise') loadCrisis();
+    if (activeTab === 'crise' || activeTab === 'funil') loadCrisis();
     if (activeTab === 'benchmark') loadBenchmark();
     if (activeTab === 'detetive') loadDetective();
     if (activeTab === 'auditoria') loadAuditList();
@@ -292,8 +301,8 @@ export default function RevGuard() {
             <span style={s.kicker}>iLux Sentinela</span>
             <span style={s.intelligenceBadge}>Inteligência sobre dados reais do iLux</span>
           </div>
-          <h1 style={s.title}>Painel de Inteligência de Receita</h1>
-          <p style={s.subtitle}>Monitore SLAs técnicos, gargalos operacionais e audite atendimentos automaticamente.</p>
+          <h1 style={s.title}>Cockpit de Operações e Receita</h1>
+          <p style={s.subtitle}>Decida sobre o parque, acompanhe O.S., proteja SLAs e melhore a qualidade dos atendimentos.</p>
         </div>
         <div style={s.statusBadge} title={syncState?.error || undefined}>
           <span style={{ ...s.dot, background: syncIsHealthy === false ? '#f59e0b' : '#10b981', boxShadow: syncIsHealthy === false ? '0 0 10px rgba(245,158,11,0.4)' : '0 0 10px rgba(16,185,129,0.4)' }} /> {syncStatusLabel}
@@ -305,6 +314,8 @@ export default function RevGuard() {
         {TABS.map((t) => (
           <button
             key={t.key}
+            title={t.description}
+            aria-label={`${t.label}. ${t.description}`}
             style={{ ...s.tab, ...(activeTab === t.key ? s.tabActive : {}) }}
             onClick={() => setActiveTab(t.key)}
           >
@@ -312,6 +323,7 @@ export default function RevGuard() {
           </button>
         ))}
       </div>
+      <div style={s.tabPurpose}><strong>{TABS.find((tab) => tab.key === activeTab)?.label}</strong><span>{TABS.find((tab) => tab.key === activeTab)?.description}</span></div>
 
       {syncState && (
         <div style={{ ...s.syncBanner, ...(syncState.stale ? s.syncBannerStale : {}) }}>
@@ -333,7 +345,7 @@ export default function RevGuard() {
       {activeTab === 'crise' && (
         loadingCrisis ? (
           <div style={s.loadingBox}>
-            <div style={s.spinner} /> Carregando centro de crise...
+            <div style={s.spinner} /> Carregando riscos de receita e SLA...
           </div>
         ) : !crisisData ? (
           <div style={s.errorBox}>Erro ao carregar dados do iLux Sentinela.</div>
@@ -562,7 +574,7 @@ export default function RevGuard() {
             <div style={s.sectionHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <TrendingUp size={20} color="#10b981" />
-                <h2 style={s.sectionTitle}>Pipeline e Vazamento de Ordens de Serviço</h2>
+                <h2 style={s.sectionTitle}>Pipeline e Gargalos de Ordens de Serviço</h2>
               </div>
               <span style={s.badge}>Leitura Sincronizada (Firebird)</span>
             </div>
@@ -798,7 +810,7 @@ export default function RevGuard() {
                   </span>
                 </div>
               </div>
-              <div style={s.detectiveCard} title="Registros internos do sistema — não é o mesmo total do Firebird usado no Centro de Crise/Benchmark">
+              <div style={s.detectiveCard} title="Registros internos do sistema — não é o mesmo total do Firebird usado em Risco de Receita & SLA ou Benchmark">
                 <h3 style={s.detectiveCardTitle}>O.S. (sistema interno)</h3>
                 <div style={s.detectiveCardValue}>
                   {detectiveData.stats.atual.os}
@@ -1154,6 +1166,7 @@ const s = {
   syncError: { color: '#f59e0b', fontWeight: 800, cursor: 'help', flexShrink: 0 },
   
   tabs: { display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border-color)', marginBottom: '2rem', overflowX: 'auto', scrollbarWidth: 'none' },
+  tabPurpose: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginTop: '-1.35rem', marginBottom: '1.5rem', color: 'var(--text-muted)', fontSize: '0.8rem' },
   tab: { padding: '0.8rem 1.1rem', border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-muted)', borderBottom: '2px solid transparent', transition: 'all 0.2s', fontWeight: 600, whiteSpace: 'nowrap' },
   tabActive: { color: 'var(--accent)', borderBottom: '2px solid var(--accent)', fontWeight: 800 },
   periodBtn: { padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-pill)', border: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
