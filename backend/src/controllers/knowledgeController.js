@@ -172,8 +172,7 @@ async function create(req, res) {
     if (!question || !answer) return res.status(400).json({ error: 'Pergunta e resposta são obrigatórias.' });
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-    const geminiKey = settings?.geminiKey || null;
-    const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' }) : null;
+    const embedding = await aiService.getEmbedding(settings, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' });
     const knowledge = await prisma.knowledge.create({
       data: { tenantId, question, answer, tags, active, embedding: embedding || Prisma.DbNull },
     });
@@ -204,8 +203,8 @@ async function update(req, res) {
       ...(typeof req.body.active === 'boolean' ? { active: req.body.active } : {}),
     };
     if (contentChanged) {
-      const geminiKey = await getGeminiKey(tenantId);
-      const embedding = geminiKey ? await geminiService.getEmbedding(geminiKey, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' }) : null;
+      const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
+      const embedding = await aiService.getEmbedding(settings, `${question}\n${answer}\n${tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' });
       data.embedding = embedding || Prisma.DbNull;
     }
 
@@ -220,14 +219,16 @@ async function update(req, res) {
 async function reindex(req, res) {
   try {
     const tenantId = req.user.tenantId;
-    const geminiKey = await getGeminiKey(tenantId);
-    if (!geminiKey) return res.status(409).json({ error: 'Configure a chave do Gemini antes de indexar a base.' });
+    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
+    if (aiService.resolveCapabilityEngine(settings, 'embedding').engine === null) {
+      return res.status(409).json({ error: 'Nenhum motor de embeddings configurado. Use OpenAI ou Gemini como provedor, ou defina um motor auxiliar quando o provedor for o Claude.' });
+    }
 
     const knowledges = await prisma.knowledge.findMany({ where: { tenantId, active: true } });
     let indexed = 0;
     let failed = 0;
     for (const item of knowledges) {
-      const embedding = await geminiService.getEmbedding(geminiKey, `${item.question}\n${item.answer}\n${item.tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' });
+      const embedding = await aiService.getEmbedding(settings, `${item.question}\n${item.answer}\n${item.tags || ''}`, { taskType: 'RETRIEVAL_DOCUMENT' });
       if (embedding) {
         await prisma.knowledge.update({ where: { id: item.id }, data: { embedding } });
         indexed += 1;
@@ -250,8 +251,7 @@ async function testSearch(req, res) {
     if (!['CUSTOMER', 'AGENT', 'TECHNICIAN'].includes(audience)) return res.status(400).json({ error: 'Público de consulta inválido.' });
     const tenantId = req.user.tenantId;
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-    const geminiKey = settings?.geminiKey || null;
-    const result = await knowledgeSearchService.searchTenantKnowledge({ tenantId, apiKey: geminiKey, query, limit: 5, audience });
+    const result = await knowledgeSearchService.searchTenantKnowledge({ tenantId, settings, query, limit: 5, audience });
     let simulatedAnswer = null;
     let simulationError = null;
     if (result.matches.length && aiService.hasConfiguredProvider(settings)) {

@@ -77,6 +77,14 @@ model TenantSettings {
   aiModel                        String?
   openaiKey                      String?
   anthropicKey                   String?
+  // Motor auxiliar só para embeddings/áudio quando o provedor principal é
+  // Anthropic (Claude não tem essas APIs). "openai" | "gemini" | null (= sem
+  // auxiliar: base de conhecimento cai para busca por palavra-chave e áudio
+  // fica sem transcrição).
+  aiAuxProvider                  String?
+  // Catálogo de modelos descoberto por provedor na tela de configurações:
+  // { openai: { models: [{id,label}], at: ISO }, anthropic: {...}, gemini: {...} }
+  aiModelCatalog                 Json?
   botEnabled                     Boolean @default(false)
   botName                        String? @default("LCD Bot")
   botSystemPrompt                String? @db.Text

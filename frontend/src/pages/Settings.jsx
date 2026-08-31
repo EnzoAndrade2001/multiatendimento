@@ -101,6 +101,8 @@ export default function Settings() {
     botEnabled: false,
     aiProvider: 'gemini',
     aiModel: '',
+    aiAuxProvider: null,
+    aiModelCatalog: null,
     botName: '',
     geminiKey: '',
     openaiKey: '',
@@ -376,11 +378,25 @@ export default function Settings() {
       const { data } = await testAiProvider({
         aiProvider: form.aiProvider,
         aiModel: form.aiModel,
+        aiAuxProvider: form.aiAuxProvider,
         geminiKey: form.geminiKey,
         openaiKey: form.openaiKey,
         anthropicKey: form.anthropicKey,
       });
-      toast.success(`Conexão com ${data.provider} validada em ${data.latencyMs} ms.`);
+      setForm((current) => {
+        const next = { ...current };
+        if (Array.isArray(data.models) && data.models.length) {
+          next.aiModelCatalog = {
+            ...(current.aiModelCatalog && typeof current.aiModelCatalog === 'object' ? current.aiModelCatalog : {}),
+            [data.provider]: { models: data.models, at: new Date().toISOString() },
+          };
+          // Sem escolha manual ainda: adota o modelo recomendado.
+          if (!current.aiModel && data.recommended) next.aiModel = data.recommended;
+        }
+        return next;
+      });
+      const count = Array.isArray(data.models) ? data.models.length : 0;
+      toast.success(`${data.provider} validado em ${data.latencyMs} ms${count ? ` · ${count} modelo(s) disponível(is)` : ''}.`);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Não foi possível validar o provedor de IA.');
     } finally {
@@ -864,14 +880,6 @@ export default function Settings() {
                 <p style={s.hint}>A escolha vale para respostas, resumos e classificações. Pode ser alterada sem afetar o histórico.</p>
               </div>
 
-              {form.aiProvider !== 'gemini' && (
-                <div style={s.field}>
-                  <label style={s.label}>Modelo do provedor</label>
-                  <input style={s.input} value={form.aiModel || ''} onChange={(e) => setForm({ ...form, aiModel: e.target.value })} placeholder={form.aiProvider === 'openai' ? 'Ex.: gpt-5-mini' : 'Ex.: claude-sonnet-4-6'} />
-                  <p style={s.hint}>Informe exatamente um modelo habilitado na sua conta.</p>
-                </div>
-              )}
-
               <div style={s.field}>
                 <label style={s.label}>{form.aiProvider === 'openai' ? 'Chave da OpenAI' : form.aiProvider === 'anthropic' ? 'Chave da Anthropic' : 'Chave Gemini'}</label>
                 <input
@@ -882,19 +890,70 @@ export default function Settings() {
                   onChange={(e) => setForm({ ...form, [form.aiProvider === 'openai' ? 'openaiKey' : form.aiProvider === 'anthropic' ? 'anthropicKey' : 'geminiKey']: e.target.value })}
                   placeholder={form.aiProvider === 'openai' ? 'sk-...' : form.aiProvider === 'anthropic' ? 'sk-ant-...' : 'AIza...'}
                 />
+                <p style={s.hint}>Cole a chave e clique em <strong>Validar e listar modelos</strong> abaixo.</p>
               </div>
 
-              {form.aiProvider !== 'gemini' && (
+              <button type="button" style={{ ...s.saveBtn, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={handleTestAi} disabled={testingAi}>
+                {testingAi ? 'Validando...' : 'Validar e listar modelos'}
+              </button>
+
+              {form.aiProvider !== 'gemini' && (() => {
+                const catalog = form.aiModelCatalog?.[form.aiProvider]?.models || [];
+                const known = catalog.some((m) => (typeof m === 'string' ? m : m.id) === form.aiModel);
+                return (
+                  <div style={s.field}>
+                    <label style={s.label}>Modelo</label>
+                    {catalog.length > 0 ? (
+                      <>
+                        <select style={s.input} value={known ? form.aiModel : (form.aiModel ? '__custom__' : '')} onChange={(e) => setForm({ ...form, aiModel: e.target.value === '__custom__' ? (form.aiModel || '') : e.target.value })}>
+                          <option value="">Automático (recomendado)</option>
+                          {catalog.map((m) => {
+                            const id = typeof m === 'string' ? m : m.id;
+                            const label = typeof m === 'string' ? m : (m.label || m.id);
+                            return <option key={id} value={id}>{label}</option>;
+                          })}
+                          <option value="__custom__">Outro (digitar manualmente)…</option>
+                        </select>
+                        {(!known && form.aiModel) && (
+                          <input style={{ ...s.input, marginTop: 8 }} value={form.aiModel} onChange={(e) => setForm({ ...form, aiModel: e.target.value })} placeholder="ID exato do modelo" />
+                        )}
+                        <p style={s.hint}>"Automático" usa o modelo mais capaz que a sua conta liberou. {form.aiModelCatalog?.[form.aiProvider]?.at ? `Lista atualizada em ${new Date(form.aiModelCatalog[form.aiProvider].at).toLocaleString('pt-BR')}.` : ''}</p>
+                      </>
+                    ) : (
+                      <>
+                        <input style={s.input} value={form.aiModel || ''} onChange={(e) => setForm({ ...form, aiModel: e.target.value })} placeholder="Deixe vazio para automático, ou o ID exato do modelo" />
+                        <p style={s.hint}>Valide a chave acima para escolher o modelo numa lista. Vazio = automático.</p>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {form.aiProvider === 'anthropic' && (
                 <div style={s.field}>
-                  <label style={s.label}>Gemini para RAG e mídia (recomendado)</label>
-                  <input style={s.input} type="password" autoComplete="new-password" value={form.geminiKey || ''} onChange={(e) => setForm({ ...form, geminiKey: e.target.value })} placeholder="AIza..." />
-                  <p style={s.hint}>Manuais, busca vetorial, áudio e imagens continuam no Gemini para preservar a base já indexada. A conversa usa o provedor escolhido acima.</p>
+                  <label style={s.label}>Motor auxiliar (embeddings e áudio)</label>
+                  <select style={s.input} value={form.aiAuxProvider || ''} onChange={(e) => setForm({ ...form, aiAuxProvider: e.target.value || null })}>
+                    <option value="">Nenhum — Claude puro</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Google Gemini</option>
+                  </select>
+                  {!form.aiAuxProvider ? (
+                    <p style={s.hint}>O Claude não tem API de embeddings nem de transcrição. Sem motor auxiliar, a <strong>base de conhecimento passa a buscar só por palavra-chave</strong> e áudios ficam sem transcrição. Leitura de imagem e PDF continua funcionando pelo próprio Claude.</p>
+                  ) : (
+                    <>
+                      <input
+                        style={{ ...s.input, marginTop: 8 }}
+                        type="password"
+                        autoComplete="new-password"
+                        value={form.aiAuxProvider === 'openai' ? (form.openaiKey || '') : (form.geminiKey || '')}
+                        onChange={(e) => setForm({ ...form, [form.aiAuxProvider === 'openai' ? 'openaiKey' : 'geminiKey']: e.target.value })}
+                        placeholder={form.aiAuxProvider === 'openai' ? 'sk-... (chave OpenAI só para embeddings/áudio)' : 'AIza... (chave Gemini só para embeddings/áudio)'}
+                      />
+                      <p style={s.hint}>Trocar o motor de embeddings exige re-indexar a base de conhecimento (botão em Base de Conhecimento).</p>
+                    </>
+                  )}
                 </div>
               )}
-
-              <button type="button" style={{ ...s.saveBtn, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={handleTestAi} disabled={testingAi}>
-                {testingAi ? 'Testando provedor...' : 'Testar provedor de IA'}
-              </button>
 
               <div style={s.field}>
                 <label style={s.label}>Chave SerpAPI (Prospecção de Leads)</label>

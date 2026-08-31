@@ -655,7 +655,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
       let transcription = null;
       const fullPath = path.join(__dirname, '../../', mediaUrl);
 
-      if (media.type === 'audio' && tenant.settings?.geminiKey) {
+      if (media.type === 'audio' && geminiService.resolveCapabilityEngine(tenant.settings, 'audio').engine) {
         try {
           if (fs.existsSync(fullPath)) {
             const audioBase64 = (await fs.promises.readFile(fullPath)).toString('base64');
@@ -665,7 +665,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
         } catch (err) { console.error('[transcription] erro:', err.message); }
       }
 
-      if (media.type === 'image' && tenant.settings?.geminiKey) {
+      if (media.type === 'image' && geminiService.resolveCapabilityEngine(tenant.settings, 'vision').engine) {
         try {
           if (fs.existsSync(fullPath)) {
             const imgBase64 = (await fs.promises.readFile(fullPath)).toString('base64');
@@ -1055,7 +1055,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   try {
     const knowledgeResult = await knowledgeSearchService.searchTenantKnowledge({
       tenantId: tenant.id,
-      apiKey: settings.geminiKey,
+      settings,
       query: currentUserTurn,
       equipments,
       audience: knowledgeAudience,

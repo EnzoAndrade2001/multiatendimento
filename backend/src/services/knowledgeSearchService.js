@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const geminiService = require('./geminiService');
+const aiService = require('./aiService');
 
 const STOP_WORDS = new Set(['a', 'ao', 'aos', 'as', 'com', 'da', 'das', 'de', 'do', 'dos', 'e', 'ela', 'ele', 'em', 'essa', 'esse', 'esta', 'este', 'eu', 'me', 'meu', 'minha', 'na', 'nas', 'no', 'nos', 'o', 'os', 'ou', 'para', 'por', 'pra', 'que', 'se', 'sem', 'um', 'uma']);
 
@@ -66,12 +67,12 @@ function isPortuguese(value) {
 // Pergunta chega em portugues, mas ha manuais so em ingles. Traduzimos a
 // consulta apenas para a busca (nao afeta a resposta enviada ao usuario). Se a
 // traducao falhar ou nao mudar nada, seguimos so com a consulta original.
-async function translateForRetrieval(apiKey, query) {
+async function translateForRetrieval(aiTarget, query) {
   const text = String(query || '').trim();
   if (!text) return null;
   try {
-    const translated = await geminiService.generateText(
-      apiKey,
+    const translated = await aiService.generateText(
+      aiTarget,
       `Translate the text below to English. Output only the translation, with no quotes and no extra words.\n\n${text}`,
       { profile: 'light', maxOutputTokens: 60 },
     );
@@ -111,7 +112,10 @@ function selectRelevantKnowledge(items, query, queryEmbedding, { limit = 3, extr
   }).filter((item) => item.relevant).sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equipments = [], audience = 'CUSTOMER' }) {
+async function searchTenantKnowledge({ tenantId, settings, apiKey, query, limit = 3, equipments = [], audience = 'CUSTOMER' }) {
+  // `settings` (objeto completo) é o caminho novo — roteia o embedding pelo
+  // provedor ativo. `apiKey` (string do Gemini) fica como fallback legado.
+  const aiTarget = settings || apiKey || null;
   const requestedAudience = String(audience || 'CUSTOMER').toUpperCase();
   // Atendentes e técnicos podem consultar respostas gerais do cliente, além
   // do material reservado ao seu público. Clientes continuam isolados.
@@ -160,14 +164,14 @@ async function searchTenantKnowledge({ tenantId, apiKey, query, limit = 3, equip
   let queryEmbedding = null;
   let embeddingError = null;
   const extraEmbeddings = [];
-  if (apiKey && searchable.some((item) => Array.isArray(item.embedding))) {
-    try { queryEmbedding = await geminiService.getEmbedding(apiKey, query, { taskType: 'RETRIEVAL_QUERY' }); if (!queryEmbedding) embeddingError = 'Embedding indisponível; busca por palavras aplicada.'; }
+  if (aiTarget && searchable.some((item) => Array.isArray(item.embedding))) {
+    try { queryEmbedding = await aiService.getEmbedding(aiTarget, query, { taskType: 'RETRIEVAL_QUERY' }); if (!queryEmbedding) embeddingError = 'Embedding indisponível; busca por palavras aplicada.'; }
     catch (error) { embeddingError = error.message; }
     if (queryEmbedding && hasForeignDoc) {
-      const englishQuery = await translateForRetrieval(apiKey, query);
+      const englishQuery = await translateForRetrieval(aiTarget, query);
       if (englishQuery) {
         try {
-          const englishEmbedding = await geminiService.getEmbedding(apiKey, englishQuery, { taskType: 'RETRIEVAL_QUERY' });
+          const englishEmbedding = await aiService.getEmbedding(aiTarget, englishQuery, { taskType: 'RETRIEVAL_QUERY' });
           if (englishEmbedding) extraEmbeddings.push(englishEmbedding);
         } catch (error) { console.warn('[knowledge] falha ao embutir traducao da consulta:', error.message); }
       }

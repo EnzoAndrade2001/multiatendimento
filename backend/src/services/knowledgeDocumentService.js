@@ -10,6 +10,7 @@ const { PDFParse } = require('pdf-parse');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../lib/prisma');
 const geminiService = require('./geminiService');
+const aiService = require('./aiService');
 const { knowledgePath } = require('../utils/uploads');
 
 function integerSetting(name, fallback, minimum) {
@@ -118,7 +119,7 @@ async function extractPdfPagesInBatches(buffer, batchSize = KNOWLEDGE_PDF_PAGE_B
   return { pageCount, pages };
 }
 
-async function extractPages(buffer, mimeType, apiKey) {
+async function extractPages(buffer, mimeType, aiSettings) {
   if (mimeType === 'application/pdf') {
     try {
       const extracted = await extractPdfPagesInBatches(buffer);
@@ -135,14 +136,16 @@ async function extractPages(buffer, mimeType, apiKey) {
     return [{ page: null, text: cleanText(buffer.toString('utf8')) }];
   }
 
-  if (!apiKey) throw new Error('O documento exige OCR, mas a chave do Gemini não está configurada.');
+  if (aiService.resolveCapabilityEngine(aiSettings, 'document').engine === null) {
+    throw new Error('O documento exige leitura por IA (OCR), mas nenhum provedor de IA com essa capacidade está configurado.');
+  }
   if (buffer.length > KNOWLEDGE_OCR_MAX_BYTES) {
     const limitMb = Math.floor(KNOWLEDGE_OCR_MAX_BYTES / 1024 / 1024);
     const error = new Error(`O arquivo não possui texto pesquisável e excede o limite seguro de ${limitMb} MB para OCR. Envie um PDF pesquisável ou divida o manual em partes menores.`);
     error.publicMessage = true;
     throw error;
   }
-  const extracted = await geminiService.extractDocumentText(apiKey, buffer.toString('base64'), mimeType);
+  const extracted = await aiService.extractDocumentText(aiSettings, buffer.toString('base64'), mimeType);
   if (!cleanText(extracted)) throw new Error('Não foi possível extrair texto legível do arquivo.');
   return parseOcrPages(extracted);
 }
@@ -251,9 +254,10 @@ async function processDocument(documentId) {
   if (!document) return;
   await prisma.knowledgeDocument.update({ where: { id: documentId }, data: { status: 'PROCESSING', processingError: null } });
   try {
-    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: document.tenantId }, select: { geminiKey: true } });
+    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: document.tenantId } });
     const buffer = await fs.readFile(resolveStorageKey(document.storageKey));
-    const pages = await extractPages(buffer, document.mimeType, settings?.geminiKey);
+    const pages = await extractPages(buffer, document.mimeType, settings);
+    const canEmbed = aiService.resolveCapabilityEngine(settings, 'embedding').engine !== null;
     const totalChars = pages.reduce((sum, item) => sum + String(item.text || '').length, 0);
     if (totalChars > KNOWLEDGE_MAX_EXTRACTED_CHARS) {
       const error = new Error('O documento possui conteúdo demais para uma única indexação. Divida o manual em volumes menores.');
@@ -270,8 +274,8 @@ async function processDocument(documentId) {
 
     for (let index = 0; index < chunks.length; index += 3) {
       const group = chunks.slice(index, index + 3);
-      const embeddings = settings?.geminiKey
-        ? await Promise.all(group.map((chunk) => geminiService.getEmbedding(settings.geminiKey, chunk.content, { taskType: 'RETRIEVAL_DOCUMENT' }).catch(() => null)))
+      const embeddings = canEmbed
+        ? await Promise.all(group.map((chunk) => aiService.getEmbedding(settings, chunk.content, { taskType: 'RETRIEVAL_DOCUMENT' }).catch(() => null)))
         : group.map(() => null);
       group.forEach((chunk, offset) => { chunk.embedding = embeddings[offset] || Prisma.DbNull; });
     }

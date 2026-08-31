@@ -1142,7 +1142,7 @@ async function sendMediaMessage(req, res) {
     await prisma.ticket.update({ where: { id }, data: { lastMessageAt: new Date(), instanceId: usedInstance.id } });
     if (usedInstance.id !== ticket.instanceId && io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
 
-    if (mediaType === 'audio' && settings?.geminiKey) {
+    if (mediaType === 'audio' && require('../services/aiService').resolveCapabilityEngine(settings, 'audio').engine) {
       (async () => {
         try {
           const geminiService = require('../services/aiService');

@@ -64,10 +64,20 @@ async function testAiProvider(req, res) {
       ...current,
       aiProvider: requested.aiProvider || current?.aiProvider || 'gemini',
       aiModel: requested.aiModel !== undefined ? requested.aiModel : current?.aiModel,
+      aiAuxProvider: requested.aiAuxProvider !== undefined ? requested.aiAuxProvider : current?.aiAuxProvider,
       geminiKey: secretValue('geminiKey'),
       openaiKey: secretValue('openaiKey'),
       anthropicKey: secretValue('anthropicKey'),
     });
+
+    // Guarda o catálogo descoberto para a tela reabrir com os modelos já
+    // listados, sem precisar validar de novo.
+    if (result.provider && Array.isArray(result.models) && result.models.length && current) {
+      const catalog = { ...(current.aiModelCatalog && typeof current.aiModelCatalog === 'object' ? current.aiModelCatalog : {}) };
+      catalog[result.provider] = { models: result.models, at: new Date().toISOString() };
+      await prisma.tenantSettings.update({ where: { tenantId: req.user.tenantId }, data: { aiModelCatalog: catalog } });
+    }
+
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.response?.data?.error?.message || err.response?.data?.error || err.message });
@@ -75,8 +85,8 @@ async function testAiProvider(req, res) {
 }
 
 async function saveSettings(req, res) {
-  const { 
-    botEnabled, aiProvider, aiModel, geminiKey, openaiKey, anthropicKey, botName, systemPrompt, transferKeyword,
+  const {
+    botEnabled, aiProvider, aiModel, aiAuxProvider, geminiKey, openaiKey, anthropicKey, botName, systemPrompt, transferKeyword,
     evolutionUrl, evolutionKey, webhookUrl, outOfOfficeMessage,
     ratingEnabled, ratingMessage, notificationPhone,
     serviceOrderManagerCopyEnabled, serviceOrderManagerPhone, serviceOrderManagerInstanceId,
@@ -100,6 +110,12 @@ async function saveSettings(req, res) {
   const parsedBillingInstanceId = billingInstanceId === undefined
     ? undefined
     : (billingInstanceId || null);
+
+  // Motor auxiliar só existe quando o provedor é Anthropic (Claude não tem
+  // embeddings nem transcrição). Fora disso, zera para não deixar lixo.
+  const resolvedAuxProvider = aiAuxProvider === undefined
+    ? undefined
+    : (aiService.normalizeProvider(aiProvider) === 'anthropic' ? (aiService.normalizeAuxProvider(aiAuxProvider) || null) : null);
 
   const parsedContractValue = kpiContractValue !== undefined && kpiContractValue !== '' ? parseFloat(kpiContractValue) : null;
   const parsedServiceValue = kpiServiceValue !== undefined && kpiServiceValue !== '' ? parseFloat(kpiServiceValue) : null;
@@ -134,9 +150,10 @@ async function saveSettings(req, res) {
   const settings = await prisma.tenantSettings.upsert({
     where: { tenantId: req.user.tenantId },
     update: { 
-      botEnabled, 
+      botEnabled,
       aiProvider,
       aiModel: aiModel === undefined ? undefined : (aiModel || null),
+      aiAuxProvider: resolvedAuxProvider,
       geminiKey,
       openaiKey,
       anthropicKey,
@@ -181,10 +198,11 @@ async function saveSettings(req, res) {
       billingInstanceId: parsedBillingInstanceId
     },
     create: {
-      tenantId: req.user.tenantId, 
-      botEnabled, 
+      tenantId: req.user.tenantId,
+      botEnabled,
       aiProvider: aiProvider || 'gemini',
       aiModel: aiModel || null,
+      aiAuxProvider: resolvedAuxProvider ?? null,
       geminiKey,
       openaiKey,
       anthropicKey,
