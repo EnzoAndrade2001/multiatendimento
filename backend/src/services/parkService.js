@@ -237,6 +237,7 @@ async function enrichEvents(tenantId, events) {
       severity: String(event.severity || 'INFO').toUpperCase(),
       state: event.state,
       occurredAt: signalAt,
+      receivedAt: event.createdAt,
       ageMinutes,
       mappingState,
       canOpenServiceOrder: mappingState === 'MATCHED' && crmEq?.isActive !== false,

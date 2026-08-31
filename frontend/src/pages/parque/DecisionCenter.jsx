@@ -285,16 +285,21 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
   const priority = item._priority;
   const rec = item._recommendation;
   const hasCustomer = Boolean(item.customer?.id);
+  const linked = item.mappingState === 'MATCHED';
   const reasons = priority.reasons?.length ? priority.reasons : [rec.explanation];
   const due = item.workflow?.decisionDueAt || item.workflow?.monitoringUntil;
+  // Detecção antiga que só chegou agora (re-sync do PrintGuard): mostra os dois.
+  const receivedMin = item.receivedAt ? Math.max(0, Math.round((Date.now() - new Date(item.receivedAt).getTime()) / 60000)) : null;
+  const showReceived = receivedMin != null && Math.abs((item.ageMinutes || 0) - receivedMin) > 36 * 60;
   return <article className={`park-incident priority-${priority.level.toLowerCase()}`}>
     <div className="park-inc-head">
       <label><input type="checkbox" checked={checked} onChange={onToggle} /> <span className={`park-priority ${priority.level.toLowerCase()}`}>{priority.level}</span></label>
-      <span className="park-event">{item.eventType}</span><span className="park-age">{ageLabel(item.ageMinutes)}</span>
+      <span className="park-event">{item.eventType}</span>
+      <span className="park-age">detectado {ageLabel(item.ageMinutes)}{showReceived ? ` · recebido ${ageLabel(receivedMin)}` : ''}</span>
     </div>
     <div className="park-inc-grid">
-      <div className="park-inc-identity">
-        <h3>{item.customerName || 'Cliente não identificado'}</h3>
+      <div className={`park-inc-identity${linked ? '' : ' provisional'}`}>
+        <h3>{item.customerName || 'Cliente não identificado'}{linked ? '' : <em className="park-provisional-tag"> · provável, confirme o vínculo</em>}</h3>
         <b>{item.equipment?.model || 'Equipamento não identificado'}</b>
         <span>Série: {item.serialNumber || 'não informada'}{item.equipment?.sector ? ` · ${item.equipment.sector}` : ''}</span>
         <span>{item.customer?.address || item.equipment?.address || 'Endereço não informado'}</span>
