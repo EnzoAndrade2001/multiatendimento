@@ -27,6 +27,7 @@ import {
   BarChart2,
   ClipboardCheck,
   Activity,
+  LayoutGrid,
 } from 'lucide-react';
 import { getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
@@ -35,7 +36,10 @@ import ToastContainer from './ToastContainer';
 import InternalChatDrawer from './InternalChatDrawer';
 import { usePermissions } from '../auth/PermissionContext';
 
-const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm'];
+const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm', '/revenue'];
+
+// Ordem das seções no menu "Operação".
+const NAV_SECTION_ORDER = ['Clientes & conversas', 'Aquisição', 'Inteligência & gestão', 'Sistema'];
 
 const MOBILE_LINKS = [
   { to: '/dashboard', icon: <LayoutDashboard size={22} />, label: 'Dash', permission: 'dashboard.view' },
@@ -307,23 +311,28 @@ export default function Layout() {
   );
 
   const desktopLinks = React.useMemo(() => [
+    // Barra principal
     { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard', permission: 'dashboard.view', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/inbox', icon: <MessageSquare size={18} />, label: 'Chat', permission: 'inbox.view', roles: ['admin', 'agent', 'superadmin'] },
-    { action: () => setIsChatOpen(true), icon: <MessageCircle size={18} />, label: 'Chat Interno', permission: 'internal_chat.view', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/connections', icon: <LinkIcon size={18} />, label: 'Conexões', permission: 'connections.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/crm', icon: <Database size={18} />, label: 'CRM', permission: 'crm.view', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/campaigns', icon: <Megaphone size={18} />, label: 'Campanhas', permission: 'campaigns.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/quick-responses', icon: <Zap size={18} />, label: 'Respostas Rápidas', permission: 'quick_responses.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', roles: ['admin', 'superadmin'] },
     { to: '/revenue', icon: <Coins size={18} />, label: 'iLux Sentinela', permission: 'revenue.view', roles: ['admin', 'superadmin'] },
-    { to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', roles: ['admin', 'superadmin'] },
-    { to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
-    { to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/superadmin', icon: <ShieldCheck size={18} />, label: 'Painel Admin', roles: ['superadmin'] },
+    // Operação › Clientes & conversas
+    { section: 'Clientes & conversas', action: () => setIsChatOpen(true), icon: <MessageCircle size={18} />, label: 'Chat Interno', permission: 'internal_chat.view', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Clientes & conversas', to: '/quick-responses', icon: <Zap size={18} />, label: 'Respostas Rápidas', permission: 'quick_responses.manage', roles: ['admin', 'agent', 'superadmin'] },
+    // Operação › Aquisição
+    { section: 'Aquisição', to: '/campaigns', icon: <Megaphone size={18} />, label: 'Campanhas', permission: 'campaigns.manage', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', roles: ['admin', 'agent', 'superadmin'] },
+    // Operação › Inteligência & gestão
+    { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', roles: ['admin', 'superadmin'] },
+    // Operação › Sistema
+    { section: 'Sistema', to: '/connections', icon: <LinkIcon size={18} />, label: 'Conexões', permission: 'connections.manage', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', roles: ['admin', 'superadmin'] },
+    { section: 'Sistema', to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Sistema', to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Sistema', to: '/superadmin', icon: <ShieldCheck size={18} />, label: 'Painel Admin', roles: ['superadmin'] },
   ], [setIsChatOpen]);
 
   const visibleDesktopLinks = desktopLinks.filter((link) => (
@@ -400,23 +409,32 @@ export default function Layout() {
                   aria-expanded={desktopMenuOpen}
                   aria-haspopup="menu"
                 >
-                  <LayoutDashboard size={18} />
+                  <LayoutGrid size={18} />
                   <span>Operação</span>
                   <ChevronDown size={15} />
                 </button>
                 {desktopMenuOpen ? (
                   <div style={styles.moreMenuDropdown} role="menu">
-                    {secondaryDesktopLinks.map((link) => (
-                      <button
-                        key={link.to || link.label}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => activateNavigationItem(link)}
-                        style={{ ...styles.moreMenuItem, ...(link.to === location.pathname ? styles.moreMenuItemActive : {}) }}
-                      >
-                        {link.icon}<span>{link.label}</span>
-                      </button>
-                    ))}
+                    {NAV_SECTION_ORDER.map((section) => {
+                      const items = secondaryDesktopLinks.filter((link) => (link.section || 'Sistema') === section);
+                      if (!items.length) return null;
+                      return (
+                        <div key={section} style={styles.moreMenuGroup}>
+                          <div style={styles.moreMenuGroupLabel}>{section}</div>
+                          {items.map((link) => (
+                            <button
+                              key={link.to || link.label}
+                              type="button"
+                              role="menuitem"
+                              onClick={() => activateNavigationItem(link)}
+                              style={{ ...styles.moreMenuItem, ...(link.to === location.pathname ? styles.moreMenuItemActive : {}) }}
+                            >
+                              {link.icon}<span>{link.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
@@ -670,7 +688,7 @@ const styles = {
     position: 'absolute',
     top: 'calc(100% + 0.6rem)',
     right: 0,
-    minWidth: '220px',
+    minWidth: '236px',
     background: 'var(--bg-surface)',
     border: '1px solid var(--border-color)',
     borderRadius: '18px',
@@ -678,8 +696,26 @@ const styles = {
     boxShadow: '0 20px 40px rgba(0,0,0,0.22)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '0.35rem',
+    gap: '0.15rem',
     zIndex: 1200,
+    maxHeight: 'calc(100vh - 120px)',
+    overflowY: 'auto',
+  },
+  moreMenuGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.1rem',
+    paddingTop: '0.35rem',
+    marginTop: '0.15rem',
+    borderTop: '1px solid var(--border-color)',
+  },
+  moreMenuGroupLabel: {
+    fontSize: '0.66rem',
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    color: 'var(--text-dim)',
+    padding: '0.25rem 0.9rem 0.35rem',
   },
   moreMenuItem: {
     display: 'flex',
