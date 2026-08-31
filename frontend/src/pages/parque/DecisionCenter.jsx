@@ -15,13 +15,53 @@ import { CrmCustomerProfileModal } from '../CRM';
 import IncidentInsights from './IncidentInsights';
 import './DecisionCenter.css';
 
+const PRIORITY_LABELS = { P1: 'Crítica', P2: 'Alta', P3: 'Média', P4: 'Baixa' };
+const EVENT_LABELS = {
+  'toner.low': 'Toner baixo', 'toner.empty': 'Toner esgotado',
+  'supply.low': 'Suprimento baixo', 'supply.empty': 'Suprimento esgotado',
+  'printer.offline': 'Equipamento offline', 'device.offline': 'Equipamento offline',
+  'hardware.error': 'Falha no equipamento', 'paper.jam': 'Atolamento de papel',
+  'meter.reading': 'Leitura do contador', telemetry: 'Alerta de telemetria',
+};
+const EVENT_WORDS = {
+  toner: 'toner', supply: 'suprimento', printer: 'equipamento', device: 'equipamento',
+  hardware: 'equipamento', meter: 'contador', reading: 'leitura', low: 'baixo',
+  empty: 'esgotado', offline: 'offline', error: 'com falha', warning: 'em atenção',
+  jam: 'atolamento', paper: 'papel', cover: 'tampa', open: 'aberta', maintenance: 'manutenção',
+};
+const priorityLabel = (level) => PRIORITY_LABELS[String(level || '').toUpperCase()] || 'Não definida';
+const eventLabel = (type) => {
+  const raw = String(type || 'telemetry').trim();
+  if (EVENT_LABELS[raw.toLowerCase()]) return EVENT_LABELS[raw.toLowerCase()];
+  const readable = raw.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ')
+    .map((word) => EVENT_WORDS[word.toLowerCase()] || word).join(' ');
+  return readable ? readable.charAt(0).toLocaleUpperCase('pt-BR') + readable.slice(1) : 'Alerta de telemetria';
+};
+
+function healthPresentation(item) {
+  if (item.healthScore === null || item.healthScore === undefined || item.healthScore === '') return { label: 'Saúde não calculada', tone: 'unknown', detail: 'Não há dados suficientes para calcular a saúde do equipamento.' };
+  const score = Number(item.healthScore);
+  if (!Number.isFinite(score)) return { label: 'Saúde não calculada', tone: 'unknown', detail: 'Não há dados suficientes para calcular a saúde do equipamento.' };
+  const tone = score >= 75 ? 'ok' : score >= 50 ? 'warn' : 'bad';
+  const status = tone === 'ok' ? 'Saudável' : tone === 'warn' ? 'Atenção' : 'Crítico';
+  const calls = Number(item.callCount90d || 0);
+  const callPenalty = Math.min(60, calls * 9);
+  const agePenalty = Math.min(20, Math.floor(Number(item.ageMinutes || 0) / 1440) * 3);
+  const inactivePenalty = item.equipment?.isActive === false ? 25 : 0;
+  const parts = ['Nota inicial: 100', `${calls} chamado(s) em 90 dias: -${callPenalty}`];
+  if (agePenalty) parts.push(`tempo pendente: -${agePenalty}`);
+  if (inactivePenalty) parts.push('equipamento inativo: -25');
+  parts.push(`resultado: ${score}/100`);
+  return { label: `${status} — ${score}/100`, tone, detail: parts.join('; ') };
+}
+
 const incidentContext = (item) => ({
   customer: item.customerName,
   equipment: item.equipment?.model
     ? `${item.equipment.model}${item.serialNumber ? ` (série ${item.serialNumber})` : ''}`
     : (item.serialNumber || null),
-  eventType: item.eventType,
-  priority: item._priority?.level,
+  eventType: eventLabel(item.eventType),
+  priority: item._priority?.level ? `${priorityLabel(item._priority.level)} (${item._priority.level})` : null,
   recommendation: item._recommendation?.label,
 });
 
@@ -99,9 +139,14 @@ export default function DecisionCenter({ osTypes = [] }) {
   const [advanced, setAdvanced] = useState(EMPTY_ADVANCED_FILTERS);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [savedViews, setSavedViews] = useState(safeSavedViews);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const loadingRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (silent) setRefreshing(true); else setLoading(true);
     try {
       const [{ data: queue }, usersResult] = await Promise.all([
         getParkQueue({ windowHours: 168, limit: 200 }),
@@ -109,11 +154,19 @@ export default function DecisionCenter({ osTypes = [] }) {
       ]);
       setData(queue);
       setUsers(Array.isArray(usersResult.data) ? usersResult.data.filter((u) => u.active !== false) : []);
+      setLastUpdatedAt(new Date());
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Não foi possível carregar a fila gerencial.');
-    } finally { setLoading(false); }
+      if (!silent) toast.error(error.response?.data?.error || 'Não foi possível carregar a fila gerencial.');
+    } finally {
+      loadingRef.current = false;
+      if (silent) setRefreshing(false); else setLoading(false);
+    }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(() => load({ silent: true }), 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const all = useMemo(() => (data?.incidents || []).map((item) => ({
     ...item, _priority: priorityOf(item), _recommendation: recommendationOf(item),
@@ -325,7 +378,7 @@ export default function DecisionCenter({ osTypes = [] }) {
 
   const windowLabel = `${data.summary?.windowHours || 72} horas`;
   const kpis = [
-    ['action', 'Ação hoje', summary.action, ShieldAlert, 'danger', `Ocorrências P1 sem O.S. aberta, entre ${all.length} ocorrências da janela de ${windowLabel}.`],
+    ['action', 'Ação hoje', summary.action, ShieldAlert, 'danger', `Ocorrências críticas (P1) ou de alta prioridade (P2) sem O.S. aberta, entre ${all.length} ocorrências da janela de ${windowLabel}.`],
     ['risk', 'Risco em até 3 dias', summary.risk, AlertTriangle, 'warning', 'Ocorrências com previsão de término do suprimento em até 3 dias, calculada pelo histórico de contador.'],
     ['overdue', 'Decisões vencidas', summary.overdue, CalendarClock, 'danger', `Ocorrências cujo prazo de decisão venceu na janela de ${windowLabel}.`],
     ['contact', 'Clientes com contato', summary.contact, MessageCircle, 'info', `Clientes distintos afetados com telefone preenchido; denominador: ${data.summary?.affectedCustomers || 0} clientes.`],
@@ -383,7 +436,10 @@ export default function DecisionCenter({ osTypes = [] }) {
           <option value="priority">Maior prioridade</option><option value="age">Mais antigas</option>
         </select>
         {filter !== 'all' && <button className="park-btn ghost" onClick={() => setFilter('all')}>Limpar filtro</button>}
-        <button className="park-btn" onClick={load}><RefreshCw size={15} /> Atualizar</button>
+        <span className="park-last-update" title="Novos alertas chegam pelo PrintGuard em tempo real; esta fila é relida automaticamente a cada 60 segundos.">
+          {lastUpdatedAt ? `Atualizado às ${lastUpdatedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Aguardando atualização'}
+        </span>
+        <button className="park-btn" disabled={refreshing} onClick={() => load({ silent: true })}><RefreshCw className={refreshing ? 'spin' : ''} size={15} /> Atualizar</button>
       </div>
     </section>
 
@@ -439,8 +495,8 @@ function AdvancedFilters({ value, onChange, users, incidents, onClear }) {
         <input style={{ paddingLeft: 30, width: '100%' }} value={value.query} onChange={(e) => set('query', e.target.value)} placeholder="Cliente, série, equipamento, contrato ou O.S." />
       </label>
       <select value={value.assignee} onChange={(e) => set('assignee', e.target.value)} aria-label="Responsável"><option value="all">Todos responsáveis</option>{users.map((u) => <option key={u.id} value={String(u.id)}>{u.name}</option>)}</select>
-      <select value={value.priority} onChange={(e) => set('priority', e.target.value)} aria-label="Prioridade"><option value="all">Todas prioridades</option>{['P1', 'P2', 'P3', 'P4'].map((p) => <option key={p}>{p}</option>)}</select>
-      <select value={value.eventType} onChange={(e) => set('eventType', e.target.value)} aria-label="Tipo"><option value="all">Todos os tipos</option>{eventTypes.map((t) => <option key={t}>{t}</option>)}</select>
+      <select value={value.priority} onChange={(e) => set('priority', e.target.value)} aria-label="Prioridade"><option value="all">Todas prioridades</option>{['P1', 'P2', 'P3', 'P4'].map((p) => <option key={p} value={p}>{priorityLabel(p)} ({p})</option>)}</select>
+      <select value={value.eventType} onChange={(e) => set('eventType', e.target.value)} aria-label="Tipo"><option value="all">Todos os tipos</option>{eventTypes.map((t) => <option key={t} value={t}>{eventLabel(t)}</option>)}</select>
       <input value={value.location} onChange={(e) => set('location', e.target.value)} placeholder="Cidade, UF ou rota" />
       <select aria-label="Situação de atribuição" value={value.ownership} onChange={(e) => set('ownership', e.target.value)}><option value="all">Com ou sem responsável</option><option value="unassigned">Sem responsável</option><option value="assigned">Com responsável</option></select>
       <select aria-label="Situação do prazo" value={value.deadline} onChange={(e) => set('deadline', e.target.value)}><option value="all">Todos os prazos</option><option value="overdue">Prazo vencido</option><option value="today">Vence hoje</option><option value="none">Sem prazo</option></select>
@@ -477,10 +533,11 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
   // Detecção antiga que só chegou agora (re-sync do PrintGuard): mostra os dois.
   const receivedMin = item.receivedAt ? Math.max(0, Math.round((Date.now() - new Date(item.receivedAt).getTime()) / 60000)) : null;
   const showReceived = receivedMin != null && Math.abs((item.ageMinutes || 0) - receivedMin) > 36 * 60;
+  const health = healthPresentation(item);
   return <article className={`park-incident priority-${priority.level.toLowerCase()}`}>
     <div className="park-inc-head">
-      <label><input type="checkbox" checked={checked} disabled={!canManage} title={canManage ? '' : 'Requer permissão para gerenciar o Sentinela'} onChange={onToggle} /> <span className={`park-priority ${priority.level.toLowerCase()}`}>{priority.level}</span></label>
-      <span className="park-event">{item.eventType}</span>
+      <label><input type="checkbox" checked={checked} disabled={!canManage} title={canManage ? '' : 'Requer permissão para gerenciar o Sentinela'} onChange={onToggle} /> <span className={`park-priority ${priority.level.toLowerCase()}`} title={`Código operacional ${priority.level}`}>{priorityLabel(priority.level)} <small>{priority.level}</small></span></label>
+      <span className="park-event" title={`Código PrintGuard: ${item.eventType}`}>{eventLabel(item.eventType)}</span>
       <span className="park-age">detectado {ageLabel(item.ageMinutes)}{showReceived ? ` · recebido ${ageLabel(receivedMin)}` : ''}</span>
     </div>
     <div className="park-inc-grid">
@@ -495,7 +552,7 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
       <div className="park-inc-evidence">
         <small>EVIDÊNCIA E IMPACTO</small>
         <b>{reasons[0]}</b>
-        <span>Saúde {item.healthScore ?? '—'} · {item.callCount90d || 0} chamado(s)/90d</span>
+        <span className={`park-health ${health.tone}`} title={health.detail}>{health.label} <small>ⓘ</small> · {item.callCount90d || 0} chamado(s)/90d</span>
         {item.toner?.daysLeft != null && (item.toner.daysLeft <= 21 || item.trend?.reliable) && (
           <span>
             Previsão: {item.toner.daysLeft <= 1 ? 'menos de 1 dia' : `~${Math.ceil(item.toner.daysLeft)} dias`}
@@ -522,8 +579,8 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
           : <button className="park-btn primary" disabled={!canManage} onClick={() => onDialog('os')}><ClipboardList size={14} /> Abrir O.S.</button>}
       <button className="park-btn" disabled={!hasCustomer || busy} title={hasCustomer ? (item.activeTicketId ? 'Continuar conversa ativa' : 'Abrir ficha para iniciar atendimento') : 'Cliente não vinculado ao CRM'} onClick={onConversation}><MessageCircle size={14} /> {item.activeTicketId ? 'Atendimento' : 'Abrir ficha'}</button>
       <details className="park-more-actions"><summary className="park-btn">Mais ações <ChevronRight size={14} /></summary><div>
-        <button className="park-btn" disabled={!canManage} onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar</button>
-        <button className="park-btn" disabled={!canManage} onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir</button>
+        <button className="park-btn" title="Definir responsável, prazo e condição para a ocorrência voltar à decisão" disabled={!canManage} onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar com prazo</button>
+        <button className="park-btn" title="Enviar a ocorrência para a Minha fila de um responsável e avisá-lo no chat interno" disabled={!canManage} onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir responsável</button>
         <button className="park-btn" onClick={() => onDialog('timeline')}><History size={14} /> Histórico</button>
         <button className="park-btn" disabled={!hasCustomer} onClick={() => onDialog('crm360')}><ClipboardList size={14} /> CRM 360</button>
         <button className="park-btn" disabled={busy || !canManage} onClick={onNotify}><BellRing size={14} /> Gestor</button>
@@ -580,7 +637,7 @@ function Modal({ title, eyebrow, onClose, children, footer }) {
 function MonitorDialog({ item, users, busy, onClose, onSave }) {
   const [form, setForm] = useState({ until: tomorrowAtTen(), assignedToId: item.workflow?.assignedTo?.id || '', condition: item.workflow?.monitoringCondition || 'Escalar se o nível cair novamente ou não houver nova leitura.', note: item.workflow?.nextStep || '' });
   return <Modal eyebrow="Decisão assistida" title="Monitorar com compromisso" onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !form.until || !form.condition.trim()} onClick={() => onSave(form)}>Salvar monitoramento</button></>}>
-    <p>Monitorar não é arquivar: a ocorrência volta para decisão ao vencer o prazo.</p>
+    <p>Monitorar não resolve nem arquiva. A ocorrência fica em “Em monitoramento”, o responsável definido é avisado e ela volta automaticamente para decisão ao vencer o prazo.</p>
     <label>Reavaliar em<input type="datetime-local" value={form.until} onChange={(e) => setForm({ ...form, until: e.target.value })} /></label>
     <label>Responsável<select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}><option value="">Não atribuído</option>{users.map((u) => <option value={u.id} key={u.id}>{u.name}</option>)}</select></label>
     <label>Condição de escalonamento<textarea value={form.condition} onChange={(e) => setForm({ ...form, condition: e.target.value })} /></label>
@@ -648,7 +705,7 @@ function TimelineDialog({ item, onClose }) {
   const [data, setData] = useState(null);
   useEffect(() => { if (item.equipment?.id) getParkEquipmentTimeline(item.equipment.id, { days: 90 }).then(({ data: value }) => setData(value)).catch(() => setData({ events: [] })); }, [item.equipment?.id]);
   return <Modal eyebrow="Visão consolidada" title="Histórico do equipamento" onClose={onClose} footer={<button className="park-btn" onClick={onClose}>Fechar</button>}>
-    {!data ? <div className="park-loading"><Loader2 className="spin" /> Carregando…</div> : <div className="park-timeline">{(data.events || data.timeline || []).length === 0 && <p>Sem eventos no período.</p>}{(data.events || data.timeline || []).map((e, idx) => <div key={e.id || idx}><b>{e.eventType || e.type || 'Evento'}</b><span>{fmtDate(e.occurredAt || e.createdAt)}</span><p>{e.description || e.status || e.state}</p></div>)}</div>}
+    {!data ? <div className="park-loading"><Loader2 className="spin" /> Carregando…</div> : <div className="park-timeline">{(data.events || data.timeline || []).length === 0 && <p>Sem eventos no período.</p>}{(data.events || data.timeline || []).map((e, idx) => <div key={e.id || idx}><b title={`Código PrintGuard: ${e.eventType || e.type || 'Evento'}`}>{eventLabel(e.eventType || e.type || 'Evento')}</b><span>{fmtDate(e.occurredAt || e.createdAt)}</span><p>{e.description || e.status || e.state}</p></div>)}</div>}
   </Modal>;
 }
 
@@ -665,7 +722,7 @@ function AssignDialog({ item, users, busy, onClose, onDone }) {
     } catch (e) { toast.error(e.response?.data?.error || 'Falha ao atribuir ocorrência.'); }
   }
   return <Modal eyebrow="Responsabilidade" title="Atribuir decisão" onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !form.assignedToId} onClick={save}>Salvar e avisar</button></>}>
-    <p>O responsável recebe um aviso no chat interno com o contexto e o próximo passo, e a ocorrência entra na "Minha fila" dele.</p>
+    <p>O responsável recebe um aviso no chat interno e a ocorrência entra na “Minha fila” dele. Atribuir não abre O.S., não contata o cliente e não encerra o alerta.</p>
     <label>Responsável<select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}><option value="">Selecione…</option>{users.map((u) => <option value={u.id} key={u.id}>{u.name}</option>)}</select></label>
     <label>Prazo da decisão<input type="datetime-local" value={form.decisionDueAt} onChange={(e) => setForm({ ...form, decisionDueAt: e.target.value })} /></label>
     <label>Próximo passo<textarea value={form.nextStep} onChange={(e) => setForm({ ...form, nextStep: e.target.value })} placeholder="O que essa pessoa precisa fazer?" /></label>
