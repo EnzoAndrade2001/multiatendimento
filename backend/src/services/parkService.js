@@ -788,22 +788,36 @@ async function notifyManagerIncident(tenantId, eventId, { note, context } = {}, 
 }
 
 async function parkCoverage(tenantId) {
-  const equipments = await prisma.crmEquipment.findMany({
-    where: { tenantId, isActive: true },
+  // Cobertura parte do universo realmente elegivel: equipamentos ativos com
+  // vinculo PrintGuard confirmado. Consultar todo o iLux marcava como "sem
+  // sinal" maquinas que nunca deveriam enviar telemetria e tornava a tela lenta.
+  const [bindings, pendingBindings] = await Promise.all([
+    prisma.printGuardBinding.findMany({
+      where: { tenantId, state: 'MATCHED', equipmentId: { not: null } },
+      select: { id: true, equipmentId: true, lastSeenAt: true },
+      orderBy: { lastSeenAt: 'desc' },
+    }),
+    prisma.printGuardBinding.count({
+      where: { tenantId, OR: [{ state: { not: 'MATCHED' } }, { equipmentId: null }] },
+    }),
+  ]);
+  const bindingByEquipment = new Map();
+  for (const binding of bindings) {
+    if (!binding.equipmentId) continue;
+    const current = bindingByEquipment.get(binding.equipmentId);
+    if (!current || (!current.lastSeenAt && binding.lastSeenAt)
+      || (current.lastSeenAt && binding.lastSeenAt && new Date(binding.lastSeenAt) > new Date(current.lastSeenAt))) {
+      bindingByEquipment.set(binding.equipmentId, binding);
+    }
+  }
+  const equipmentIds = [...bindingByEquipment.keys()];
+  const equipments = equipmentIds.length ? await prisma.crmEquipment.findMany({
+    where: { tenantId, id: { in: equipmentIds }, isActive: true },
     select: {
       id: true, model: true, manufacturer: true, serialNumber: true, externalId: true,
       contractExternalId: true, lastMeterReadAt: true, meterSource: true, customerId: true,
     },
-  });
-  const serials = [...new Set(equipments.map((e) => e.serialNumber).filter(Boolean))];
-  const lastSignals = serials.length
-    ? await prisma.printGuardTelemetryEvent.groupBy({
-      by: ['serialNumber'],
-      where: { tenantId, serialNumber: { in: serials } },
-      _max: { createdAt: true },
-    })
-    : [];
-  const lastSignalBySerial = new Map(lastSignals.map((r) => [r.serialNumber, r._max.createdAt]));
+  }) : [];
   const customerIds = [...new Set(equipments.map((e) => e.customerId).filter(Boolean))];
   const customers = customerIds.length
     ? await prisma.crmCustomer.findMany({ where: { tenantId, id: { in: customerIds } }, select: { id: true, name: true } })
@@ -812,7 +826,7 @@ async function parkCoverage(tenantId) {
 
   const now = Date.now();
   const rows = equipments.map((e) => {
-    const lastSignal = e.serialNumber ? lastSignalBySerial.get(e.serialNumber) : null;
+    const lastSignal = bindingByEquipment.get(e.id)?.lastSeenAt || null;
     const lastAny = [lastSignal, e.lastMeterReadAt].filter(Boolean).map((d) => new Date(d).getTime());
     const last = lastAny.length ? Math.max(...lastAny) : null;
     const ageDays = last ? Math.floor((now - last) / DAY_MS) : null;
@@ -835,6 +849,7 @@ async function parkCoverage(tenantId) {
     active: rows.filter((r) => r.status === 'ativo').length,
     offline: rows.filter((r) => r.status === 'offline').length,
     noSignal: rows.filter((r) => r.status === 'sem-sinal').length,
+    pendingBindings,
   };
   summary.coveragePct = summary.total ? Math.round((summary.active / summary.total) * 100) : 0;
   return { rows, summary };

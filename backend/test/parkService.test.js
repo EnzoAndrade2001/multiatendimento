@@ -15,6 +15,7 @@ const {
   managerMetrics,
 } = __testing;
 const prisma = require('../src/lib/prisma');
+const { parkCoverage } = require('../src/services/parkService');
 
 test('computeHealth: penaliza chamados recentes e equipamento inativo', () => {
   assert.equal(computeHealth({ callCount90d: 0, ageMinutes: 0, equipmentActive: true }), 100);
@@ -183,6 +184,51 @@ test('managerMetrics: calcula SLA, tempo medio e carga por responsavel', () => {
   assert.equal(metrics.duplicatesAvoided, 1);
   assert.equal(metrics.unassigned, 1);
   assert.equal(metrics.byAssignee[0].overdue, 1);
+});
+
+test('parkCoverage: considera somente equipamentos com vinculo PrintGuard confirmado', { concurrency: false }, async () => {
+  const originals = {
+    bindingFindMany: prisma.printGuardBinding.findMany,
+    bindingCount: prisma.printGuardBinding.count,
+    equipmentFindMany: prisma.crmEquipment.findMany,
+    customerFindMany: prisma.crmCustomer.findMany,
+  };
+  let bindingWhere;
+  let equipmentWhere;
+  prisma.printGuardBinding.findMany = async ({ where }) => {
+    bindingWhere = where;
+    return [
+      { id: 'b-new', equipmentId: 'eq-1', lastSeenAt: new Date() },
+      { id: 'b-old', equipmentId: 'eq-1', lastSeenAt: new Date(Date.now() - 10 * 86400000) },
+      { id: 'b-never', equipmentId: 'eq-2', lastSeenAt: null },
+    ];
+  };
+  prisma.printGuardBinding.count = async () => 3;
+  prisma.crmEquipment.findMany = async ({ where }) => {
+    equipmentWhere = where;
+    return [
+      { id: 'eq-1', model: 'Modelo A', serialNumber: 'A1', customerId: 'c1', lastMeterReadAt: null },
+      { id: 'eq-2', model: 'Modelo B', serialNumber: 'B1', customerId: 'c1', lastMeterReadAt: null },
+    ];
+  };
+  prisma.crmCustomer.findMany = async () => [{ id: 'c1', name: 'Cliente' }];
+  try {
+    const result = await parkCoverage('tenant-1');
+    assert.equal(bindingWhere.state, 'MATCHED');
+    assert.equal(bindingWhere.equipmentId.not, null);
+    assert.deepEqual(new Set(equipmentWhere.id.in), new Set(['eq-1', 'eq-2']));
+    assert.equal(equipmentWhere.isActive, true);
+    assert.equal(result.summary.total, 2);
+    assert.equal(result.summary.active, 1);
+    assert.equal(result.summary.noSignal, 1);
+    assert.equal(result.summary.pendingBindings, 3);
+    assert.equal(result.rows.find((row) => row.id === 'eq-1').status, 'ativo');
+  } finally {
+    prisma.printGuardBinding.findMany = originals.bindingFindMany;
+    prisma.printGuardBinding.count = originals.bindingCount;
+    prisma.crmEquipment.findMany = originals.equipmentFindMany;
+    prisma.crmCustomer.findMany = originals.customerFindMany;
+  }
 });
 
 test('monitoramento vencido reabre somente eventos encontrados e registra antes/depois', { concurrency: false }, async () => {

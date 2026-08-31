@@ -110,21 +110,23 @@ function Cobertura() {
   useEffect(() => { getParkCoverage().then(({ data }) => setData(data)).catch(() => setData({ rows: [], summary: {} })); }, []);
   if (!data) return <div style={s.loading}><RefreshCw size={16} className="spin" /> Carregando…</div>;
   const sum = data.summary || {};
+  const withoutRecentSignal = data.rows.filter((r) => r.status !== 'ativo');
   return (
     <>
       <div style={s.kpis}>
-        <div style={s.kpi}><span style={s.kpiV}>{int(sum.total)}</span><span style={s.kpiL}>Impressoras ativas</span></div>
-        <div style={s.kpi}><span style={{ ...s.kpiV, color: 'var(--accent)' }}>{sum.coveragePct ?? 0}%</span><span style={s.kpiL}>Cobertura de telemetria</span></div>
+        <div style={s.kpi} title="Equipamentos ativos do iLux com vínculo PrintGuard confirmado"><span style={s.kpiV}>{int(sum.total)}</span><span style={s.kpiL}>Vinculadas ao PrintGuard</span></div>
+        <div style={s.kpi} title="Percentual dos equipamentos vinculados que enviou sinal nas últimas 48 horas"><span style={{ ...s.kpiV, color: 'var(--accent)' }}>{sum.coveragePct ?? 0}%</span><span style={s.kpiL}>Com sinal recente</span></div>
         <div style={s.kpi}><span style={{ ...s.kpiV, color: 'var(--warning, #b3730a)' }}>{int(sum.offline)}</span><span style={s.kpiL}>Offline &gt; 48h</span></div>
         <div style={s.kpi}><span style={{ ...s.kpiV, color: 'var(--danger, #d64545)' }}>{int(sum.noSignal)}</span><span style={s.kpiL}>Sem sinal</span></div>
+        <div style={s.kpi} title="Vínculos ainda ambíguos ou não encontrados, fora do cálculo de cobertura"><span style={{ ...s.kpiV, color: 'var(--warning, #b3730a)' }}>{int(sum.pendingBindings)}</span><span style={s.kpiL}>Vínculos pendentes</span></div>
       </div>
       <div style={s.card}>
-        <div style={s.cardH}><strong>Impressoras sem sinal confiável</strong></div>
+        <div style={s.cardH}><strong>Equipamentos vinculados sem sinal recente</strong><span style={s.hint}>Somente vínculos PrintGuard confirmados entram nesta lista.</span></div>
         <div style={{ overflowX: 'auto' }}>
           <table style={s.table}>
             <thead><tr>{['Impressora', 'Cliente', 'Status', 'Último sinal'].map((h) => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
             <tbody>
-              {data.rows.filter((r) => r.status !== 'ativo').map((r) => (
+              {withoutRecentSignal.map((r) => (
                 <tr key={r.id}>
                   <td style={s.td}><b>{r.model}</b><span style={s.small}><span style={s.mono}>{r.serialNumber || '—'}</span></span></td>
                   <td style={s.td}>{r.customerName || '—'}</td>
@@ -132,11 +134,12 @@ function Cobertura() {
                   <td style={s.td}>{r.lastSignalAt ? new Date(r.lastSignalAt).toLocaleString('pt-BR') : 'nunca'}</td>
                 </tr>
               ))}
-              {data.rows.filter((r) => r.status !== 'ativo').length === 0 && <tr><td style={s.td} colSpan={4}>Todo o parque com sinal recente. 🎉</td></tr>}
+              {withoutRecentSignal.length === 0 && <tr><td style={s.td} colSpan={4}>{sum.total ? 'Todos os equipamentos vinculados estão com sinal recente. 🎉' : 'Nenhum equipamento ativo possui vínculo PrintGuard confirmado.'}</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
+      <p style={s.footNote}>Cobertura considera somente equipamentos ativos com vínculo PrintGuard confirmado. Vínculos pendentes ficam fora do percentual até serem corrigidos.</p>
     </>
   );
 }
