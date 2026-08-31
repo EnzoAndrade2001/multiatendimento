@@ -194,10 +194,11 @@ async function enrichEvents(tenantId, events) {
       orderBy: { createdAt: 'desc' },
     })
     : [];
-  const openOrderByEquipment = new Map();
+  const openOrdersByEquipment = new Map();
   for (const order of activeOrders) {
     if (CLOSED_OS_RE.test(String(order.status || ''))) continue;
-    if (!openOrderByEquipment.has(order.equipmentId)) openOrderByEquipment.set(order.equipmentId, order);
+    if (!openOrdersByEquipment.has(order.equipmentId)) openOrdersByEquipment.set(order.equipmentId, []);
+    openOrdersByEquipment.get(order.equipmentId).push(order);
   }
 
   const incidents = [];
@@ -226,7 +227,8 @@ async function enrichEvents(tenantId, events) {
       });
     }
     const suggested = pickOsType(osTypes, eventType);
-    const openOrder = localEq ? openOrderByEquipment.get(localEq.id) || null : null;
+    const equipmentOpenOrders = localEq ? (openOrdersByEquipment.get(localEq.id) || []) : [];
+    const openOrder = equipmentOpenOrders[0] || null;
 
     const incident = {
       id: event.id,
@@ -288,6 +290,15 @@ async function enrichEvents(tenantId, events) {
         createdAt: openOrder.createdAt,
         ticketId: openOrder.ticketId,
       },
+      openServiceOrders: equipmentOpenOrders.slice(0, 6).map((o) => ({
+        id: o.id,
+        number: o.externalId,
+        status: o.status,
+        typeCode: o.cdOstp,
+        defect: o.defect,
+        createdAt: o.createdAt,
+        ticketId: o.ticketId,
+      })),
     };
     const priority = priorityForIncident({
       severity: incident.severity,
@@ -302,7 +313,8 @@ async function enrichEvents(tenantId, events) {
     });
     incident.priority = priority;
     incident.recommendation = recommendationForIncident(incident);
-    incident.canOpenServiceOrder = incident.canOpenServiceOrder && !openOrder;
+    // Abrir O.S. continua permitido mesmo com O.S. em aberto — o frontend avisa
+    // e o atendente decide entre revisar as abertas ou abrir outra.
     incidents.push(incident);
   }
 

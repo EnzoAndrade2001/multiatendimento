@@ -265,6 +265,7 @@ export default function DecisionCenter({ osTypes = [] }) {
     {dialog?.type === 'monitor' && <MonitorDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onSave={saveMonitor} />}
     {dialog?.type === 'ignore' && <IgnoreDialog busy={busy} onClose={() => setDialog(null)} onSave={saveIgnore} />}
     {dialog?.type === 'os' && <OsDialog item={dialog.item} count={dialog.items?.length || 1} osTypes={osTypes} busy={busy} onClose={() => setDialog(null)} onSave={saveOs} />}
+    {dialog?.type === 'os-open' && <OpenOrdersDialog item={dialog.item} onClose={() => setDialog(null)} onProceed={() => setDialog({ type: 'os', item: dialog.item })} />}
     {dialog?.type === 'binding' && <BindingDialog item={dialog.item} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Vínculo corrigido e fila recalculada.')} />}
     {dialog?.type === 'timeline' && <TimelineDialog item={dialog.item} onClose={() => setDialog(null)} />}
     {dialog?.type === 'assign' && <AssignDialog item={dialog.item} users={users} busy={busy} onClose={() => setDialog(null)} onDone={() => refreshAfter('Responsável notificado no chat interno.')} />}
@@ -325,7 +326,7 @@ function IncidentRow({ item, checked, onToggle, onDialog, onNotify, onConversati
       {item.mappingState !== 'MATCHED'
         ? <button className="park-btn primary" onClick={() => onDialog('binding')}><Link2 size={14} /> Corrigir vínculo</button>
         : item.openServiceOrder
-          ? <button className="park-btn primary" onClick={() => window.open(`${BACKEND_URL}/api/os/${encodeURIComponent(item.openServiceOrder.number || item.openServiceOrder.id)}/pdf?token=${localStorage.getItem('token')}`, '_blank', 'noopener,noreferrer')}><ExternalLink size={14} /> O.S. {item.openServiceOrder.number || ''}</button>
+          ? <button className="park-btn primary" title="Este equipamento já tem O.S. em aberto" onClick={() => onDialog('os-open')}><ClipboardList size={14} /> Abrir O.S. · {(item.openServiceOrders?.length || 1)} aberta(s)</button>
           : <button className="park-btn primary" onClick={() => onDialog('os')}><ClipboardList size={14} /> Abrir O.S.</button>}
       <button className="park-btn" onClick={() => onDialog('monitor')}><CalendarClock size={14} /> Monitorar</button>
       <button className="park-btn" onClick={() => onDialog('assign')}><UserRound size={14} /> Atribuir</button>
@@ -386,6 +387,30 @@ function IgnoreDialog({ busy, onClose, onSave }) {
     <label>Motivo<select value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}><option value="">Selecione…</option><option value="FALSE_POSITIVE">Falso positivo</option><option value="ALREADY_SUPPLIED">Suprimento já enviado</option><option value="OPEN_ORDER">Já existe O.S.</option><option value="DUPLICATE">Evento duplicado</option><option value="EQUIPMENT_INACTIVE">Equipamento inativo</option><option value="NO_CONTRACT">Fora de contrato</option><option value="OTHER">Outro</option></select></label>
     <label>Observação<textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Contexto da decisão" /></label>
   </Modal>;
+}
+
+function OpenOrdersDialog({ item, onClose, onProceed }) {
+  const orders = item.openServiceOrders?.length ? item.openServiceOrders : (item.openServiceOrder ? [item.openServiceOrder] : []);
+  const openPdf = (o) => window.open(`${BACKEND_URL}/api/os/${encodeURIComponent(o.number || o.id)}/pdf?token=${localStorage.getItem('token')}`, '_blank', 'noopener,noreferrer');
+  return (
+    <Modal eyebrow="Atenção" title="Este equipamento já tem O.S. em aberto" onClose={onClose}
+      footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" onClick={onProceed}>Abrir outra O.S. mesmo assim</button></>}>
+      <p>{item.equipment?.model || 'Equipamento'} · {item.serialNumber || 'sem série'} — evite duplicar o atendimento. Revise as O.S. abertas antes de abrir uma nova.</p>
+      <div className="park-timeline">
+        {orders.map((o) => (
+          <div key={o.id}>
+            <b>O.S. {o.number || o.id}</b>
+            <span>{o.createdAt ? fmtDate(o.createdAt, false) : ''}</span>
+            <p>{[o.status, o.defect].filter(Boolean).join(' · ') || 'Sem descrição'}</p>
+            <button className="park-btn" style={{ marginTop: 6 }} onClick={() => openPdf(o)}>
+              <ExternalLink size={13} /> Revisar esta O.S.
+            </button>
+          </div>
+        ))}
+        {orders.length === 0 && <p>Não foi possível listar as O.S. abertas — confira no iLux.</p>}
+      </div>
+    </Modal>
+  );
 }
 
 function OsDialog({ item, count, osTypes, busy, onClose, onSave }) {
