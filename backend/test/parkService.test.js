@@ -15,7 +15,8 @@ const {
   managerMetrics,
 } = __testing;
 const prisma = require('../src/lib/prisma');
-const { parkCoverage } = require('../src/services/parkService');
+const { parkCoverage, equipmentRanking } = require('../src/services/parkService');
+const parkMetrics = require('../src/services/parkMetricsService');
 
 test('computeHealth: penaliza chamados recentes e equipamento inativo', () => {
   assert.equal(computeHealth({ callCount90d: 0, ageMinutes: 0, equipmentActive: true }), 100);
@@ -189,26 +190,27 @@ test('managerMetrics: calcula SLA, tempo medio e carga por responsavel', () => {
 test('parkCoverage: considera somente equipamentos com vinculo PrintGuard confirmado', { concurrency: false }, async () => {
   const originals = {
     bindingFindMany: prisma.printGuardBinding.findMany,
-    bindingCount: prisma.printGuardBinding.count,
     equipmentFindMany: prisma.crmEquipment.findMany,
     customerFindMany: prisma.crmCustomer.findMany,
   };
   let bindingWhere;
   let equipmentWhere;
-  prisma.printGuardBinding.findMany = async ({ where }) => {
-    bindingWhere = where;
-    return [
-      { id: 'b-new', equipmentId: 'eq-1', lastSeenAt: new Date() },
-      { id: 'b-old', equipmentId: 'eq-1', lastSeenAt: new Date(Date.now() - 10 * 86400000) },
-      { id: 'b-never', equipmentId: 'eq-2', lastSeenAt: null },
-    ];
+  prisma.printGuardBinding.findMany = async ({ where, select }) => {
+    if (where.state === 'MATCHED') {
+      bindingWhere = where;
+      return [
+        { id: 'b-new', equipmentId: 'eq-1', lastSeenAt: new Date() },
+        { id: 'b-old', equipmentId: 'eq-1', lastSeenAt: new Date(Date.now() - 10 * 86400000) },
+        { id: 'b-never', equipmentId: 'eq-2', lastSeenAt: null },
+      ];
+    }
+    return [{ customerCode: 'c1', serialNumber: 'unmatched-1' }, { customerCode: 'c1', serialNumber: 'unmatched-1' }, { customerCode: 'c2', serialNumber: null }];
   };
-  prisma.printGuardBinding.count = async () => 3;
   prisma.crmEquipment.findMany = async ({ where }) => {
     equipmentWhere = where;
     return [
-      { id: 'eq-1', model: 'Modelo A', serialNumber: 'A1', customerId: 'c1', lastMeterReadAt: null },
-      { id: 'eq-2', model: 'Modelo B', serialNumber: 'B1', customerId: 'c1', lastMeterReadAt: null },
+      { id: 'eq-1', model: 'Modelo A', serialNumber: 'A1', customerId: 'c1', lastMeterReadAt: null, isActive: true },
+      { id: 'eq-2', model: 'Modelo B', serialNumber: 'B1', customerId: 'c1', lastMeterReadAt: null, isActive: true },
     ];
   };
   prisma.crmCustomer.findMany = async () => [{ id: 'c1', name: 'Cliente' }];
@@ -216,18 +218,52 @@ test('parkCoverage: considera somente equipamentos com vinculo PrintGuard confir
     const result = await parkCoverage('tenant-1');
     assert.equal(bindingWhere.state, 'MATCHED');
     assert.equal(bindingWhere.equipmentId.not, null);
-    assert.deepEqual(new Set(equipmentWhere.id.in), new Set(['eq-1', 'eq-2']));
-    assert.equal(equipmentWhere.isActive, true);
+    assert.deepEqual(new Set(equipmentWhere.OR[0].id.in), new Set(['eq-1', 'eq-2']));
     assert.equal(result.summary.total, 2);
     assert.equal(result.summary.active, 1);
     assert.equal(result.summary.noSignal, 1);
-    assert.equal(result.summary.pendingBindings, 3);
+    assert.equal(result.summary.pendingBindings, 2);
     assert.equal(result.rows.find((row) => row.id === 'eq-1').status, 'ativo');
   } finally {
     prisma.printGuardBinding.findMany = originals.bindingFindMany;
-    prisma.printGuardBinding.count = originals.bindingCount;
     prisma.crmEquipment.findMany = originals.equipmentFindMany;
     prisma.crmCustomer.findMany = originals.customerFindMany;
+  }
+});
+
+test('equipmentRanking: combina alertas PrintGuard e O.S. mesmo sem depender de O.S. para listar', { concurrency: false }, async () => {
+  const originals = {
+    bindingFindMany: prisma.printGuardBinding.findMany,
+    orderGroupBy: prisma.serviceOrder.groupBy,
+    crmFindMany: prisma.crmEquipment.findMany,
+    eventGroupBy: prisma.printGuardTelemetryEvent.groupBy,
+    localFindMany: prisma.equipment.findMany,
+    customerFindMany: prisma.crmCustomer.findMany,
+    meterTrend: parkMetrics.meterTrend,
+  };
+  prisma.printGuardBinding.findMany = async () => [{ id: 'binding-1', equipmentId: 'crm-1' }];
+  prisma.serviceOrder.groupBy = async () => [{ equipmentId: 'local-1', _count: { _all: 2 } }];
+  prisma.crmEquipment.findMany = async () => [{ id: 'crm-1', externalId: 'ext-1', model: 'Modelo', serialNumber: 'S1', customerId: 'customer-1', pageCounter: 10000, isActive: true }];
+  prisma.printGuardTelemetryEvent.groupBy = async () => [{ bindingId: 'binding-1', severity: 'CRITICAL', _count: { _all: 2 } }];
+  prisma.equipment.findMany = async () => [{ id: 'local-1', externalId: 'ext-1', pageCount: 10000 }];
+  prisma.crmCustomer.findMany = async () => [{ id: 'customer-1', name: 'Cliente' }];
+  parkMetrics.meterTrend = async () => ({ pagesPerDay: 100 });
+  try {
+    const result = await equipmentRanking('tenant-1', { days: 90 });
+    assert.equal(result.summary.totalAlerts, 2);
+    assert.equal(result.summary.totalCalls, 2);
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].alerts, 2);
+    assert.equal(result.rows[0].calls, 2);
+    assert.equal(result.rows[0].candidate, true);
+  } finally {
+    prisma.printGuardBinding.findMany = originals.bindingFindMany;
+    prisma.serviceOrder.groupBy = originals.orderGroupBy;
+    prisma.crmEquipment.findMany = originals.crmFindMany;
+    prisma.printGuardTelemetryEvent.groupBy = originals.eventGroupBy;
+    prisma.equipment.findMany = originals.localFindMany;
+    prisma.crmCustomer.findMany = originals.customerFindMany;
+    parkMetrics.meterTrend = originals.meterTrend;
   }
 });
 

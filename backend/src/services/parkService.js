@@ -788,19 +788,27 @@ async function notifyManagerIncident(tenantId, eventId, { note, context } = {}, 
 }
 
 async function parkCoverage(tenantId) {
-  // Cobertura parte do universo realmente elegivel: equipamentos ativos com
-  // vinculo PrintGuard confirmado. Consultar todo o iLux marcava como "sem
+  // Cobertura parte do universo realmente elegivel: equipamentos com vinculo
+  // PrintGuard confirmado. Consultar todo o iLux marcava como "sem
   // sinal" maquinas que nunca deveriam enviar telemetria e tornava a tela lenta.
-  const [bindings, pendingBindings] = await Promise.all([
+  const [bindings, pendingBindingRows] = await Promise.all([
     prisma.printGuardBinding.findMany({
       where: { tenantId, state: 'MATCHED', equipmentId: { not: null } },
       select: { id: true, equipmentId: true, lastSeenAt: true },
       orderBy: { lastSeenAt: 'desc' },
     }),
-    prisma.printGuardBinding.count({
-      where: { tenantId, OR: [{ state: { not: 'MATCHED' } }, { equipmentId: null }] },
+    prisma.printGuardBinding.findMany({
+      where: { tenantId, OR: [{ state: { not: 'MATCHED' } }, { equipmentId: null }], AND: [{ OR: [{ customerCode: { not: null } }, { serialNumber: { not: null } }] }] },
+      select: { customerCode: true, serialNumber: true },
     }),
   ]);
+  // Um equipamento pode ter vários registros pendentes históricos. Para o
+  // gestor, o indicador deve representar máquinas únicas, não ocorrências.
+  const pendingKeys = new Set(pendingBindingRows.map((binding) => {
+    const serial = String(binding.serialNumber || '').trim().toLowerCase();
+    return serial ? `serial:${serial}` : `cliente:${String(binding.customerCode || '').trim().toLowerCase()}`;
+  }).filter((key) => !key.endsWith(':')));
+  const pendingBindings = pendingKeys.size;
   const bindingByEquipment = new Map();
   for (const binding of bindings) {
     if (!binding.equipmentId) continue;
@@ -812,10 +820,11 @@ async function parkCoverage(tenantId) {
   }
   const equipmentIds = [...bindingByEquipment.keys()];
   const equipments = equipmentIds.length ? await prisma.crmEquipment.findMany({
-    where: { tenantId, id: { in: equipmentIds }, isActive: true },
+    where: { tenantId, OR: [{ id: { in: equipmentIds } }, { externalId: { in: equipmentIds } }] },
     select: {
       id: true, model: true, manufacturer: true, serialNumber: true, externalId: true,
       contractExternalId: true, lastMeterReadAt: true, meterSource: true, customerId: true,
+      isActive: true,
     },
   }) : [];
   const customerIds = [...new Set(equipments.map((e) => e.customerId).filter(Boolean))];
@@ -826,7 +835,8 @@ async function parkCoverage(tenantId) {
 
   const now = Date.now();
   const rows = equipments.map((e) => {
-    const lastSignal = bindingByEquipment.get(e.id)?.lastSeenAt || null;
+    const linkedBinding = bindingByEquipment.get(e.id) || bindingByEquipment.get(e.externalId);
+    const lastSignal = linkedBinding?.lastSeenAt || null;
     const lastAny = [lastSignal, e.lastMeterReadAt].filter(Boolean).map((d) => new Date(d).getTime());
     const last = lastAny.length ? Math.max(...lastAny) : null;
     const ageDays = last ? Math.floor((now - last) / DAY_MS) : null;
@@ -840,7 +850,8 @@ async function parkCoverage(tenantId) {
       contractExternalId: e.contractExternalId,
       lastSignalAt: last ? new Date(last).toISOString() : null,
       ageDays,
-      status,
+      status: e.isActive === false ? 'inativo' : status,
+      isActive: e.isActive !== false,
     };
   });
   rows.sort((a, b) => (a.ageDays == null ? -1 : b.ageDays == null ? 1 : b.ageDays - a.ageDays));
@@ -849,6 +860,7 @@ async function parkCoverage(tenantId) {
     active: rows.filter((r) => r.status === 'ativo').length,
     offline: rows.filter((r) => r.status === 'offline').length,
     noSignal: rows.filter((r) => r.status === 'sem-sinal').length,
+    inactive: rows.filter((r) => r.status === 'inativo').length,
     pendingBindings,
   };
   summary.coveragePct = summary.total ? Math.round((summary.active / summary.total) * 100) : 0;
@@ -857,60 +869,106 @@ async function parkCoverage(tenantId) {
 
 async function equipmentRanking(tenantId, { days = 90, limit = 20 } = {}) {
   const since = new Date(Date.now() - days * DAY_MS);
-  const grouped = await prisma.serviceOrder.groupBy({
-    by: ['equipmentId'],
-    where: { tenantId, createdAt: { gte: since } },
-    _count: { _all: true },
-  });
-  if (!grouped.length) return { rows: [], summary: { avgCallsPer1k: 0, candidates: 0 } };
+  // O ranking precisa enxergar o equipamento mesmo antes da primeira O.S.:
+  // alertas recorrentes do PrintGuard também são evidência de problema.
+  const [bindings, groupedOrders] = await Promise.all([
+    prisma.printGuardBinding.findMany({
+      where: { tenantId, state: 'MATCHED', equipmentId: { not: null } },
+      select: { id: true, equipmentId: true },
+    }),
+    prisma.serviceOrder.groupBy({
+      by: ['equipmentId'],
+      where: { tenantId, createdAt: { gte: since } },
+      _count: { _all: true },
+    }),
+  ]);
+  const equipmentIds = [...new Set(bindings.map((binding) => binding.equipmentId).filter(Boolean))];
+  if (!equipmentIds.length) return { rows: [], summary: { avgCallsPer1k: 0, avgProblemsPer1k: 0, candidates: 0, totalAlerts: 0, totalCalls: 0 } };
 
-  const localIds = grouped.map((g) => g.equipmentId);
+  const bindingIds = bindings.map((binding) => binding.id);
+  const [crmEquipments, eventGroups] = await Promise.all([
+    prisma.crmEquipment.findMany({
+      where: { tenantId, OR: [{ id: { in: equipmentIds } }, { externalId: { in: equipmentIds } }] },
+      select: { id: true, externalId: true, model: true, serialNumber: true, customerId: true, pageCounter: true, isActive: true },
+    }),
+    prisma.printGuardTelemetryEvent.groupBy({
+      by: ['bindingId', 'severity'],
+      where: {
+        tenantId,
+        bindingId: { in: bindingIds },
+        OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
+      },
+      _count: { _all: true },
+    }),
+  ]);
+  const crmByRef = new Map();
+  for (const equipment of crmEquipments) {
+    crmByRef.set(equipment.id, equipment.id);
+    if (equipment.externalId) crmByRef.set(equipment.externalId, equipment.id);
+  }
+  const bindingToEquipment = new Map(bindings.map((binding) => [binding.id, crmByRef.get(binding.equipmentId) || binding.equipmentId]));
+  const alertsByEquipment = new Map();
+  for (const group of eventGroups) {
+    const equipmentId = bindingToEquipment.get(group.bindingId);
+    if (!equipmentId) continue;
+    const current = alertsByEquipment.get(equipmentId) || { total: 0, critical: 0 };
+    const count = group._count._all;
+    current.total += count;
+    if (severityRank(group.severity) >= 3) current.critical += count;
+    alertsByEquipment.set(equipmentId, current);
+  }
+  const ordersByEquipment = new Map(groupedOrders.map((group) => [group.equipmentId, group._count._all]));
   const localEquipments = await prisma.equipment.findMany({
-    where: { tenantId, id: { in: localIds } },
-    select: { id: true, externalId: true, serialNumber: true, model: true, contactId: true, pageCount: true },
+    where: { tenantId, externalSource: 'firebird', externalId: { in: crmEquipments.map((equipment) => equipment.externalId).filter(Boolean) } },
+    select: { id: true, externalId: true, pageCount: true },
   });
-  const localById = new Map(localEquipments.map((e) => [e.id, e]));
-  const externalIds = [...new Set(localEquipments.map((e) => e.externalId).filter(Boolean))];
-  const crmEquipments = externalIds.length
-    ? await prisma.crmEquipment.findMany({
-      where: { tenantId, externalSource: 'firebird', externalId: { in: externalIds } },
-      select: { externalId: true, model: true, serialNumber: true, customerId: true, pageCounter: true },
-    })
-    : [];
-  const crmByExternal = new Map(crmEquipments.map((e) => [e.externalId, e]));
-  const customerIds = [...new Set(crmEquipments.map((e) => e.customerId).filter(Boolean))];
+  const localByExternal = new Map(localEquipments.map((equipment) => [equipment.externalId, equipment]));
+  const customerIds = [...new Set(crmEquipments.map((equipment) => equipment.customerId).filter(Boolean))];
   const customers = customerIds.length
     ? await prisma.crmCustomer.findMany({ where: { tenantId, id: { in: customerIds } }, select: { id: true, name: true } })
     : [];
-  const customerById = new Map(customers.map((c) => [c.id, c]));
-
-  const rows = [];
-  for (const g of grouped) {
-    const local = localById.get(g.equipmentId);
-    if (!local) continue;
-    const crmEq = local.externalId ? crmByExternal.get(local.externalId) : null;
-    const trend = crmEq?.externalId ? await parkMetrics.meterTrend(tenantId, crmEq.externalId, { days }) : null;
-    const volume = (trend?.pagesPerDay || 0) * days || crmEq?.pageCounter || local.pageCount || 0;
-    const callsPer1k = volume > 0 ? Math.round((g._count._all / volume) * 1000 * 10) / 10 : null;
-    rows.push({
-      equipmentId: local.id,
-      model: crmEq?.model || local.model,
-      serialNumber: crmEq?.serialNumber || local.serialNumber,
-      customerName: crmEq ? (customerById.get(crmEq.customerId)?.name || null) : null,
-      calls: g._count._all,
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const enriched = await Promise.all(crmEquipments.map(async (crmEq) => {
+    const alerts = alertsByEquipment.get(crmEq.id) || { total: 0, critical: 0 };
+    const calls = ordersByEquipment.get(localByExternal.get(crmEq.externalId)?.id) || 0;
+    if (!alerts.total && !calls) return null;
+    const local = localByExternal.get(crmEq.externalId);
+    const trend = crmEq.externalId ? await parkMetrics.meterTrend(tenantId, crmEq.externalId, { days }) : null;
+    const volume = (trend?.pagesPerDay || 0) * days || crmEq.pageCounter || local?.pageCount || 0;
+    const callsPer1k = volume > 0 ? Math.round((calls / volume) * 1000 * 10) / 10 : null;
+    const problemsPer1k = volume > 0 ? Math.round(((calls + alerts.total) / volume) * 1000 * 10) / 10 : null;
+    return {
+      equipmentId: crmEq.id,
+      model: crmEq.model,
+      serialNumber: crmEq.serialNumber,
+      customerName: customerById.get(crmEq.customerId)?.name || null,
+      alerts: alerts.total,
+      criticalAlerts: alerts.critical,
+      calls,
+      issues: alerts.total + calls,
       volume: Math.round(volume),
       pagesPerDay: trend?.pagesPerDay ?? null,
       callsPer1k,
-    });
-  }
-  rows.sort((a, b) => (b.callsPer1k ?? -1) - (a.callsPer1k ?? -1) || b.calls - a.calls);
-  const withRate = rows.filter((r) => r.callsPer1k != null);
-  const avg = withRate.length ? withRate.reduce((s, r) => s + r.callsPer1k, 0) / withRate.length : 0;
+      problemsPer1k,
+      isActive: crmEq.isActive !== false,
+    };
+  }));
+  const rows = enriched.filter(Boolean);
+  const withCallRate = rows.filter((row) => row.callsPer1k != null);
+  const withProblemRate = rows.filter((row) => row.problemsPer1k != null);
+  const avgCalls = withCallRate.length ? withCallRate.reduce((sum, row) => sum + row.callsPer1k, 0) / withCallRate.length : 0;
+  const avgProblems = withProblemRate.length ? withProblemRate.reduce((sum, row) => sum + row.problemsPer1k, 0) / withProblemRate.length : 0;
+  const candidate = (row) => row.alerts >= 3 || row.criticalAlerts >= 2 || row.calls >= 2 || (avgProblems > 0 && row.problemsPer1k != null && row.problemsPer1k >= avgProblems * 3);
+  const rankedRows = rows.map((row) => ({ ...row, candidate: candidate(row) }));
+  rankedRows.sort((a, b) => (b.problemsPer1k ?? -1) - (a.problemsPer1k ?? -1) || b.issues - a.issues);
   const summary = {
-    avgCallsPer1k: Math.round(avg * 10) / 10,
-    candidates: rows.filter((r) => r.callsPer1k != null && r.callsPer1k >= avg * 3 && avg > 0).length,
+    avgCallsPer1k: Math.round(avgCalls * 10) / 10,
+    avgProblemsPer1k: Math.round(avgProblems * 10) / 10,
+    candidates: rankedRows.filter((row) => row.candidate).length,
+    totalAlerts: rankedRows.reduce((sum, row) => sum + row.alerts, 0),
+    totalCalls: rankedRows.reduce((sum, row) => sum + row.calls, 0),
   };
-  return { rows: rows.slice(0, limit), summary };
+  return { rows: rankedRows.slice(0, Math.max(1, Number(limit) || 20)), summary };
 }
 
 async function equipmentTimeline(tenantId, equipmentId, { limit = 40 } = {}) {

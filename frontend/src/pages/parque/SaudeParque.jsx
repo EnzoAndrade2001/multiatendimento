@@ -130,7 +130,7 @@ function Cobertura() {
                 <tr key={r.id}>
                   <td style={s.td}><b>{r.model}</b><span style={s.small}><span style={s.mono}>{r.serialNumber || '—'}</span></span></td>
                   <td style={s.td}>{r.customerName || '—'}</td>
-                  <td style={s.td}><span style={{ ...s.pill, ...(r.status === 'offline' ? s.pillWarn : s.pillCrit) }}>{r.status === 'offline' ? `offline ${r.ageDays}d` : 'sem sinal'}</span></td>
+                  <td style={s.td}><span style={{ ...s.pill, ...(r.status === 'offline' ? s.pillWarn : s.pillCrit) }}>{r.status === 'offline' ? `offline ${r.ageDays}d` : r.status === 'inativo' ? 'inativo no iLux' : 'sem sinal'}</span></td>
                   <td style={s.td}>{r.lastSignalAt ? new Date(r.lastSignalAt).toLocaleString('pt-BR') : 'nunca'}</td>
                 </tr>
               ))}
@@ -161,27 +161,31 @@ function EquipamentosProblema() {
   return (
     <>
       <div style={s.kpis}>
-        <div style={s.kpi}><span style={{ ...s.kpiV, color: 'var(--danger, #d64545)' }}>{int(data.summary.candidates)}</span><span style={s.kpiL}>Candidatas a troca</span></div>
-        <div style={s.kpi}><span style={s.kpiV}>{data.summary.avgCallsPer1k ?? 0}</span><span style={s.kpiL}>Chamados / 1k pág — média</span></div>
+        <div style={s.kpi} title="Equipamentos com pelo menos três alertas, dois alertas críticos, duas O.S. ou recorrência muito acima da média"><span style={{ ...s.kpiV, color: 'var(--danger, #d64545)' }}>{int(data.summary.candidates)}</span><span style={s.kpiL}>Candidatas a troca</span></div>
+        <div style={s.kpi} title="Alertas do PrintGuard recebidos nos equipamentos vinculados nos últimos 90 dias"><span style={s.kpiV}>{int(data.summary.totalAlerts)}</span><span style={s.kpiL}>Alertas PrintGuard / 90d</span></div>
+        <div style={s.kpi} title="Ordens de serviço abertas ou encerradas nos últimos 90 dias"><span style={s.kpiV}>{int(data.summary.totalCalls)}</span><span style={s.kpiL}>O.S. / 90d</span></div>
+        <div style={s.kpi} title="Índice médio combinando alertas PrintGuard e O.S. por 1.000 páginas"><span style={s.kpiV}>{data.summary.avgProblemsPer1k ?? 0}</span><span style={s.kpiL}>Problemas / 1k pág — média</span></div>
       </div>
       <div style={s.card}>
-        <div style={s.cardH}><strong>Ranking — 90 dias · chamados por 1.000 páginas</strong></div>
+        <div style={s.cardH}><strong>Equipamentos com recorrência — últimos 90 dias</strong><span style={s.hint}>Combina alertas PrintGuard e O.S. para indicar risco de troca.</span></div>
         <div style={{ overflowX: 'auto' }}>
           <table style={s.table}>
-            <thead><tr>{['#', 'Equipamento', 'Cliente', 'Chamados/1k', 'Chamados', 'Pág/dia', ''].map((h) => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+            <thead><tr>{['#', 'Equipamento', 'Cliente', 'Alertas PG', 'O.S.', 'Problemas/1k', 'Pág/dia', 'Situação', ''].map((h) => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
             <tbody>
               {data.rows.map((r, i) => (
                 <tr key={r.equipmentId}>
                   <td style={{ ...s.td, color: 'var(--text-muted)', fontWeight: 700 }}>{i + 1}</td>
                   <td style={s.td}><b>{r.model}</b><span style={s.small}><span style={s.mono}>{r.serialNumber || '—'}</span></span></td>
                   <td style={s.td}>{r.customerName || '—'}</td>
-                  <td style={s.tdNum}>{r.callsPer1k ?? '—'}</td>
+                  <td style={s.tdNum}>{r.alerts}</td>
                   <td style={s.tdNum}>{r.calls}</td>
+                  <td style={s.tdNum} title={r.problemsPer1k == null ? 'Sem histórico de contador suficiente para normalizar por volume.' : 'Alertas + O.S. por 1.000 páginas'}>{r.problemsPer1k ?? '—'}</td>
                   <td style={s.tdNum}>{r.pagesPerDay != null ? int(r.pagesPerDay) : '—'}</td>
+                  <td style={s.td}><span style={{ ...s.pill, ...(r.candidate ? s.pillCrit : s.pillWarn) }}>{r.candidate ? 'candidata a troca' : 'acompanhar'}</span></td>
                   <td style={s.td}><button style={s.linkBtn} onClick={() => openTimeline(r.equipmentId)}>Timeline</button></td>
                 </tr>
               ))}
-              {data.rows.length === 0 && <tr><td style={s.td} colSpan={7}>Sem O.S. suficientes no período.</td></tr>}
+              {data.rows.length === 0 && <tr><td style={s.td} colSpan={9}>Nenhum alerta ou O.S. recorrente encontrado nos equipamentos vinculados no período.</td></tr>}
             </tbody>
           </table>
         </div>
