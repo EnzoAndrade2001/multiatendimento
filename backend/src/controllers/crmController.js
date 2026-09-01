@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { hasPermission } = require('../auth/permissions');
 const billingDocuments = require('../services/billingDocumentService');
 
@@ -277,17 +278,7 @@ function normalizeEquipmentMeter(record) {
 }
 
 function normalizeOrderStatus(status, closedAt, closing) {
-  const value = String(status || '').trim().toUpperCase();
-  if (closedAt || ['O', 'F', 'C', 'FINALIZADA', 'FINALIZADO', 'CONCLUIDA', 'CONCLUÍDA', 'FECHADA'].includes(value)) {
-    return 'FINALIZADA';
-  }
-  // Alguns snapshots antigos nao trazem STATUS; nesse caso, uma descricao de
-  // fechamento ainda e o melhor indicio disponivel. Com STATUS presente, ele
-  // prevalece para nao confundir anotacao tecnica com encerramento.
-  if (!value && closing) return 'FINALIZADA';
-  if (value.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
-  if (value.includes('ATEND')) return 'EM_ATENDIMENTO';
-  return 'PENDENTE';
+  return normalizeServiceOrderStatus(status, { closedAt, closing });
 }
 
 function normalizeExternalOrder(payload, fallback = {}) {
@@ -864,7 +855,7 @@ async function loadCustomerOperationalMetrics(tenantId, customers) {
     const key = `${customer.id}:${normalized.externalId || record.id}`;
     if (orderKeys.has(key)) continue;
     orderKeys.add(key);
-    if (normalized.status !== 'FINALIZADA') metric.openServiceOrdersCount += 1;
+    if (!isServiceOrderClosed(normalized)) metric.openServiceOrdersCount += 1;
     const timestamp = orderTimestamp(normalized);
     if (timestamp && (!metric.lastServiceOrderAt || timestamp > new Date(metric.lastServiceOrderAt).getTime())) {
       metric.lastServiceOrderAt = normalized.openedAt || normalized.updatedAt || null;
@@ -877,7 +868,7 @@ async function loadCustomerOperationalMetrics(tenantId, customers) {
     const key = `${customerId}:local:${order.id}`;
     if (orderKeys.has(key)) continue;
     orderKeys.add(key);
-    if (String(order.status || '').toUpperCase() !== 'FINALIZADA' && !order.closedAt) metric.openServiceOrdersCount += 1;
+    if (!isServiceOrderClosed(order)) metric.openServiceOrdersCount += 1;
     const timestamp = order.createdAt || order.updatedAt;
     if (timestamp && (!metric.lastServiceOrderAt || new Date(timestamp).getTime() > new Date(metric.lastServiceOrderAt).getTime())) {
       metric.lastServiceOrderAt = timestamp;
@@ -1732,7 +1723,7 @@ async function listFlaggedBillingDocuments(req, res) {
 }
 
 function isOrderClosedForAnalytics(order) {
-  return order.status === 'FINALIZADA' || Boolean(order.closedAt);
+  return isServiceOrderClosed(order);
 }
 
 async function listEquipments(req, res) {

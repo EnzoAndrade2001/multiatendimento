@@ -8,6 +8,7 @@ const { mapEquipmentType } = require('../utils/equipmentMapper');
 const { mediaPath } = require('../utils/uploads');
 const billingDocumentService = require('../services/billingDocumentService');
 const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
+const { normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
 
 const RECEIVABLE_SNAPSHOT_ENTITY = 'receivablesSnapshot';
 const EQUIPMENT_SNAPSHOT_ENTITY = 'equipmentsSnapshot';
@@ -46,12 +47,7 @@ function normalizePhone(value, fallback) {
 }
 
 function normalizeStatus(value) {
-  const text = pick(value)?.toUpperCase() || '';
-
-  if (text.includes('CONCLU') || text.includes('FINALIZ')) return 'FINALIZADA';
-  if (text.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
-  if (text.includes('ATEND')) return 'EM_ATENDIMENTO';
-  return 'PENDENTE';
+  return normalizeServiceOrderStatus(value);
 }
 
 function comparableText(value) {
@@ -500,7 +496,7 @@ async function upsertServiceOrder(tenant, instance, data) {
     externalSource: 'firebird',
     externalId,
     externalUpdatedAt: normalizeDate(pick(data.updatedAt, data.atualizado, data.dtAtendimento, data.dtatendimento)),
-    status: normalizeStatus(pick(data.status, data.nmStatus, data.tffaturar)),
+    status: normalizeStatus(pick(data.status, data.nmStatus, data.nmstatus, data.raw?.status, data.raw?.nmstatus, data.tffaturar, data.raw?.tffaturar)),
     defect: pick(data.defect, data.nmDefeito, data.causa, data.sintoma),
     technicalNotes: [pick(data.action, data.acao), pick(data.observacao), pick(data.nmSuporteT)].filter(Boolean).join(' | ') || null,
     resolvedAt: normalizeDate(pick(data.resolvedAt, data.dtAtendimento, data.dtatendimento)),

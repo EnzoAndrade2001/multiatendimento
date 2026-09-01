@@ -199,6 +199,7 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
       EM_ATENDIMENTO: '#faad14',
       AGUARDANDO_RETORNO: '#ff9c6e',
       FINALIZADA: '#52c41a',
+      CANCELADA: '#8c8c8c',
     };
 
     return {

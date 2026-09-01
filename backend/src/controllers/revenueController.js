@@ -2,6 +2,7 @@ const prisma = require('../lib/prisma');
 const crmController = require('./crmController');
 const aiService = require('../services/aiService');
 const printGuardService = require('../services/printGuardService');
+const { normalizeServiceOrderStatus, rawServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { generateText } = aiService;
 
 const SENTINELA_SYNC_STALE_AFTER_MINUTES = 15;
@@ -95,12 +96,8 @@ async function getRevenueDashboard(req, res) {
 
     function fbStatus(payload) {
       const raw = payload?.raw || payload || {};
-      const status = String(raw.status || raw.nmstatus || payload?.status || '').trim().toUpperCase();
       const closedAt = raw.dtfechamento || payload?.closedAt;
-      if (closedAt || ['O', 'F', 'C', 'FINALIZADA', 'CONCLUIDA'].includes(status)) return 'FINALIZADA';
-      if (status.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
-      if (status.includes('ATEND') || ['E', 'M', 'T'].includes(status)) return 'EM_ATENDIMENTO';
-      return 'PENDENTE';
+      return normalizeServiceOrderStatus(rawServiceOrderStatus(payload), { closedAt });
     }
 
     function fbDate(payload, ...keys) {
@@ -420,12 +417,8 @@ async function getBenchmark(req, res) {
 
     function fbStatus(payload) {
       const raw = payload?.raw || payload || {};
-      const status = String(raw.status || raw.nmstatus || payload?.status || '').trim().toUpperCase();
       const closedAt = raw.dtfechamento || payload?.closedAt;
-      if (closedAt || ['O', 'F', 'C', 'FINALIZADA', 'CONCLUIDA'].includes(status)) return 'FINALIZADA';
-      if (status.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
-      if (status.includes('ATEND') || ['E', 'M', 'T'].includes(status)) return 'EM_ATENDIMENTO';
-      return 'PENDENTE';
+      return normalizeServiceOrderStatus(rawServiceOrderStatus(payload), { closedAt });
     }
 
     function fbDate(payload, ...keys) {
@@ -874,12 +867,8 @@ async function getDrilldown(req, res) {
 
     function fbStatus(payload) {
       const raw = payload?.raw || payload || {};
-      const status = String(raw.status || raw.nmstatus || payload?.status || '').trim().toUpperCase();
       const closedAt = raw.dtfechamento || payload?.closedAt;
-      if (closedAt || ['O', 'F', 'C', 'FINALIZADA', 'CONCLUIDA'].includes(status)) return 'FINALIZADA';
-      if (status.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
-      if (status.includes('ATEND') || ['E', 'M', 'T'].includes(status)) return 'EM_ATENDIMENTO';
-      return 'PENDENTE';
+      return normalizeServiceOrderStatus(rawServiceOrderStatus(payload), { closedAt });
     }
 
     function fbDate(payload, ...keys) {

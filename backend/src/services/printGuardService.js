@@ -2,12 +2,13 @@ const axios = require('axios');
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { encryptSecret, decryptSecret } = require('./printGuardCrypto');
+const { isServiceOrderClosed } = require('../utils/serviceOrderStatus');
+const { reconcileServiceOrderStatuses } = require('./serviceOrderStatusReconciliationService');
 
 const SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
 const METER_HISTORY_PAGE_SIZE = 100;
 const METER_HISTORY_MAX_PAGES = 50;
-const CLOSED_OS_RE = /^(FINALIZADA|FECHADA|CONCLUIDA|CANCELADA|C|F)$/i;
 // Versioned API prefix shared by pairing and all authenticated resources.
 const PRINTGUARD_API_PREFIX = '/integrations/v1/multiatendimento';
 let io = null;
@@ -789,6 +790,7 @@ async function approveEvent(tenantId, event, body = {}) {
   const crmEquipment = await prisma.crmEquipment.findFirst({ where: { id: binding.equipmentId, tenantId } });
   const localEquipment = crmEquipment?.externalId ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: 'firebird', externalId: crmEquipment.externalId } }) : null;
   if (!localEquipment) { const error = new Error('Equipamento ainda nao sincronizado para abertura de O.S.'); error.statusCode = 409; throw error; }
+  await reconcileServiceOrderStatuses(tenantId, { equipmentId: localEquipment.id });
   const contact = await prisma.contact.findFirst({ where: { tenantId, id: localEquipment.contactId } });
   if (!contact) { const error = new Error('Contato do equipamento nao encontrado.'); error.statusCode = 409; throw error; }
   const requestKey = `printguard:${event.id}`;
@@ -811,10 +813,10 @@ async function approveEvent(tenantId, event, body = {}) {
     const existingRequest = await tx.serviceOrder.findFirst({ where: { tenantId, requestKey } });
     if (existingRequest) return { serviceOrder: existingRequest, reused: true };
     const openOrder = await tx.serviceOrder.findFirst({
-      where: { tenantId, equipmentId: localEquipment.id, closedAt: null, resolvedAt: null },
+      where: { tenantId, equipmentId: localEquipment.id, closedAt: null, resolvedAt: null, status: { notIn: ['FINALIZADA', 'CANCELADA'] } },
       orderBy: { createdAt: 'desc' },
     });
-    if (openOrder && !CLOSED_OS_RE.test(String(openOrder.status || ''))) {
+    if (openOrder && !isServiceOrderClosed(openOrder)) {
       await tx.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', serviceOrderId: openOrder.id, ticketId: openOrder.ticketId, errorCode: null, errorMessage: null } });
       return { serviceOrder: openOrder, reused: true };
     }

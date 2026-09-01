@@ -1,4 +1,6 @@
 const prisma = require('../lib/prisma');
+const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
+const { reconcileServiceOrderStatuses } = require('../services/serviceOrderStatusReconciliationService');
 const pdfmake = require('pdfmake');
 const path = require('path');
 const fs = require('fs');
@@ -56,11 +58,7 @@ function pdfDate(value, fallback = new Date()) {
 }
 
 function pdfOrderStatus(value) {
-  const normalized = String(value || '').toUpperCase();
-  if (normalized.includes('CONCLU') || normalized.includes('FINALIZ')) return 'FINALIZADA';
-  if (normalized.includes('AGUARD')) return 'AGUARDANDO_RETORNO';
-  if (normalized.includes('ATEND')) return 'EM_ATENDIMENTO';
-  return 'PENDENTE';
+  return normalizeServiceOrderStatus(value);
 }
 
 async function resolveServiceOrderForPdf(tenantId, id) {
@@ -287,21 +285,19 @@ async function deleteEquipment(req, res) {
   }
 }
 
-// Mesmo critério de "em aberto" usado no cockpit Saúde do Parque.
-const CLOSED_OS_STATUS_RE = /^(FINALIZADA|FECHADA|CONCLUIDA|CONCLUÍDA|CANCELADA|C|F)$/i;
-
 async function getOpenOrdersForEquipment(req, res) {
   const { tenantId } = req.user;
   const { equipmentId } = req.params;
   const equipment = await prisma.equipment.findFirst({ where: { id: equipmentId, tenantId }, select: { id: true } });
   if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
+  await reconcileServiceOrderStatuses(tenantId, { equipmentId });
   const orders = await prisma.serviceOrder.findMany({
     where: { tenantId, equipmentId, closedAt: null, resolvedAt: null },
     select: { id: true, externalId: true, status: true, cdOstp: true, defect: true, createdAt: true, ticketId: true },
     orderBy: { createdAt: 'desc' },
     take: 12,
   });
-  res.json(orders.filter((o) => !CLOSED_OS_STATUS_RE.test(String(o.status || ''))).slice(0, 6));
+  res.json(orders.filter((order) => !isServiceOrderClosed(order)).slice(0, 6));
 }
 
 async function getOSList(req, res) {

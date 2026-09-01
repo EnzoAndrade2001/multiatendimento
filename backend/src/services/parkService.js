@@ -2,11 +2,12 @@ const prisma = require('../lib/prisma');
 const parkMetrics = require('./parkMetricsService');
 const printGuard = require('./printGuardService');
 const { recordAuditEvent } = require('./auditEventService');
+const { isServiceOrderClosed } = require('../utils/serviceOrderStatus');
+const { reconcileServiceOrderStatuses } = require('./serviceOrderStatusReconciliationService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LOW_TONER_RE = /toner|supply|cartucho|insumo|cilindro|drum|maintenance/i;
 const HARDWARE_RE = /error|erro|jam|atol|hardware|fusor|falha|offline|stopped|parou/i;
-const CLOSED_OS_RE = /^(FINALIZADA|FECHADA|CONCLUIDA|CANCELADA|C|F)$/i;
 
 function obj(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -310,7 +311,7 @@ async function enrichEvents(tenantId, events) {
     : [];
   const openOrdersByEquipment = new Map();
   for (const order of activeOrders) {
-    if (CLOSED_OS_RE.test(String(order.status || ''))) continue;
+    if (isServiceOrderClosed(order)) continue;
     if (!openOrdersByEquipment.has(order.equipmentId)) openOrdersByEquipment.set(order.equipmentId, []);
     openOrdersByEquipment.get(order.equipmentId).push(order);
   }
@@ -479,6 +480,7 @@ async function enrichEvents(tenantId, events) {
 }
 
 async function parkQueue(tenantId, query = {}) {
+  await reconcileServiceOrderStatuses(tenantId);
   const reopenedMonitoring = await reopenExpiredMonitoring(tenantId);
   const events = await loadDecisionEvents(tenantId, { windowHours: Number(query.windowHours) || 72 });
   let incidents = await enrichEvents(tenantId, events);
@@ -1041,6 +1043,7 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
     ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: 'firebird', externalId: crmEquipment.externalId } })
     : null;
   if (!localEquipment) { const e = new Error('Equipamento ainda nao sincronizado para abertura de O.S.'); e.statusCode = 409; throw e; }
+  await reconcileServiceOrderStatuses(tenantId, { equipmentId: localEquipment.id });
   const contact = await prisma.contact.findFirst({ where: { tenantId, id: localEquipment.contactId } });
   if (!contact) { const e = new Error('Contato do equipamento nao encontrado.'); e.statusCode = 409; throw e; }
 
@@ -1063,10 +1066,10 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
       `printguard-os:${tenantId}:${localEquipment.id}`,
     );
     const openOrder = await tx.serviceOrder.findFirst({
-      where: { tenantId, equipmentId: localEquipment.id, closedAt: null, resolvedAt: null },
+      where: { tenantId, equipmentId: localEquipment.id, closedAt: null, resolvedAt: null, status: { notIn: ['FINALIZADA', 'CANCELADA'] } },
       orderBy: { createdAt: 'desc' },
     });
-    if (openOrder && !CLOSED_OS_RE.test(String(openOrder.status || ''))) {
+    if (openOrder && !isServiceOrderClosed(openOrder)) {
       await tx.printGuardTelemetryEvent.updateMany({ where: { tenantId, id: { in: ids } }, data: { state: 'APPROVED', serviceOrderId: openOrder.id, ticketId: openOrder.ticketId } });
       return Object.assign(openOrder, { reused: true });
     }

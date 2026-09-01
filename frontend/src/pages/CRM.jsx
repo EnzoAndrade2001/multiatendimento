@@ -1637,7 +1637,7 @@ function isOrderClosed(order) {
   if (typeof order.isClosed === 'boolean') return order.isClosed;
   if (pick(order, 'closedAt', 'finishedAt')) return true;
   const status = String(pick(order, 'status', 'situation', 'statusCode') || '').trim().toLowerCase();
-  return ['o', 'f', 'fechada', 'fechado', 'finalizada', 'finalizado', 'closed', 'concluida', 'concluído'].includes(status);
+  return ['o', 'f', 'c', 'fechada', 'fechado', 'finalizada', 'finalizado', 'closed', 'concluida', 'concluído', 'cancelada', 'cancelado', 'cancelled', 'canceled'].includes(status);
 }
 
 function sumMonthlyValue(contracts) { return contracts.filter(isContractActive).reduce((sum, contract) => sum + Number(pick(contract, 'monthlyValue', 'value', 'amount') || 0), 0); }

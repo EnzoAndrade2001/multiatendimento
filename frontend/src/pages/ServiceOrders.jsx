@@ -52,7 +52,8 @@ export default function ServiceOrders() {
     { id: 'PENDENTE', title: 'Pendentes', color: 'var(--danger)' },
     { id: 'EM_ATENDIMENTO', title: 'Em Atendimento', color: 'var(--warning)' },
     { id: 'AGUARDANDO_RETORNO', title: 'Aguardando Peça/Retorno', color: 'var(--info)' },
-    { id: 'FINALIZADA', title: 'Finalizadas', color: 'var(--success)' }
+    { id: 'FINALIZADA', title: 'Finalizadas', color: 'var(--success)' },
+    { id: 'CANCELADA', title: 'Canceladas', color: 'var(--text-muted)' }
   ];
 
   const [dragOverCol, setDragOverCol] = useState(null);
