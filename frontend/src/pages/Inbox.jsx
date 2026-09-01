@@ -125,7 +125,10 @@ export default function Inbox() {
   const [reopening, setReopening] = useState(false);
   const [crmProfile, setCrmProfile] = useState(null);
   const [crmProfileTab, setCrmProfileTab] = useState('overview');
-  const [isCompactDesktop, setIsCompactDesktop] = useState(() => window.innerWidth > 768 && window.innerWidth <= 1440);
+  const [isCompactDesktop, setIsCompactDesktop] = useState(() => window.innerWidth > 768 && window.innerWidth <= 1599);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [density, setDensity] = useState(() => localStorage.getItem('inbox-density') || 'auto');
+  const [notebookListHidden, setNotebookListHidden] = useState(false);
   const openOsHandledRef = useRef(false);
   const isMobile = useIsMobile();
   const { instances: contextInstances } = useOutletContext() || { instances: [] };
@@ -148,10 +151,25 @@ export default function Inbox() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const updateViewportMode = () => setIsCompactDesktop(window.innerWidth > 768 && window.innerWidth <= 1440);
+    const updateViewportMode = () => {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+      setIsCompactDesktop(window.innerWidth > 768 && window.innerWidth <= 1599);
+    };
     window.addEventListener('resize', updateViewportMode);
     return () => window.removeEventListener('resize', updateViewportMode);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('inbox-density', density);
+  }, [density]);
+
+  useEffect(() => {
+    if (viewport.width > 1199 || viewport.width <= 768) setNotebookListHidden(false);
+  }, [viewport.width]);
+
+  const effectiveDensity = density === 'auto'
+    ? (viewport.width < 1600 || viewport.height < 900 ? 'compact' : 'comfortable')
+    : density;
 
   // Volta para a lista quando a janela retorna ao desktop
   useEffect(() => {
@@ -735,6 +753,7 @@ export default function Inbox() {
     }
     setSelectedId(id);
     if (isMobile) setView('chat');
+    if (!isMobile && viewport.width <= 1199) setNotebookListHidden(true);
     
     // Zera o contador localmente para feedback imediato
     const ticket = tickets.find((item) => item.id === id);
@@ -742,7 +761,7 @@ export default function Inbox() {
     if (ticket?.isUnread) updateTicketPreferences(id, { isUnread: false }).catch(() => {});
     
     // O backend ja zera ao chamar getMessages pelo useEffect do selectedId
-  }, [selectedId, historySearch, isMobile, tickets, setTickets]);
+  }, [selectedId, historySearch, isMobile, tickets, setTickets, viewport.width]);
 
   const handleTicketPreference = useCallback(async (ticketId, preference) => {
     const previous = tickets.find((ticket) => ticket.id === ticketId);
@@ -791,7 +810,7 @@ export default function Inbox() {
   }
 
   return (
-    <div style={s.layout}>
+    <div className="inbox-workspace" data-density={effectiveDensity} style={s.layout}>
       <style>{`
         @keyframes pulse {
           0% { opacity: 1; transform: scale(1); }
@@ -802,8 +821,41 @@ export default function Inbox() {
         .inbox-control:hover:not(:disabled) { border-color: var(--accent-border) !important; color: var(--text-main) !important; }
         .inbox-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .inbox-control:active:not(:disabled) { transform: translateY(1px); }
+        .inbox-sidebar { width: clamp(282px, 19vw, 348px) !important; min-width: clamp(282px, 19vw, 348px) !important; }
+        .inbox-message-lane { width: min(100%, 1240px); margin-inline: auto; }
+        .inbox-contact-panel { width: clamp(330px, 22vw, 400px) !important; }
+        .inbox-workspace[data-density="compact"] .inbox-sidebar-header { padding: .72rem .8rem .58rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-sidebar-subtitle { display: none; }
+        .inbox-workspace[data-density="compact"] .inbox-tabs-wrap { padding: .55rem .7rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-search-wrap { padding: .65rem .7rem !important; gap: .55rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-ticket-row { padding: .55rem .6rem !important; gap: .55rem !important; margin-bottom: .15rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-ticket-operations { margin-top: .2rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-ticket-meta { margin-top: .25rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-ticket-tags { display: none !important; }
+        .inbox-workspace[data-density="compact"] .inbox-chat-header { min-height: 64px !important; padding: .65rem 1rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-messages { padding: .8rem 1rem 1rem !important; gap: .65rem !important; }
+        .inbox-workspace[data-density="compact"] .inbox-bubble { padding: .65rem .78rem !important; line-height: 1.42 !important; }
+        .inbox-workspace[data-density="compact"] .inbox-composer { padding: .55rem .8rem !important; gap: .5rem !important; }
+        @media (max-width: 1199px) {
+          .inbox-sidebar { width: 292px !important; min-width: 292px !important; }
+          .inbox-contact-panel { position: absolute !important; inset: 0 0 0 auto !important; width: min(390px, calc(100% - 20px)) !important; z-index: 200 !important; box-shadow: -18px 0 42px rgba(0,0,0,.3) !important; }
+          .inbox-message-lane { width: min(100%, 980px); }
+        }
+        @media (max-width: 768px) {
+          .inbox-sidebar { width: 100% !important; min-width: 100% !important; }
+          .inbox-contact-panel { position: fixed !important; inset: 0 !important; width: 100% !important; }
+          .inbox-message-lane { width: 100%; }
+        }
+        @media (min-width: 1200px) and (max-width: 1599px) {
+          .inbox-sidebar { width: 310px !important; min-width: 310px !important; }
+          .inbox-contact-panel { position: absolute !important; inset: 0 0 0 auto !important; width: min(410px, calc(100% - 24px)) !important; z-index: 200 !important; box-shadow: -18px 0 42px rgba(0,0,0,.3) !important; }
+        }
+        @media (max-height: 760px) and (min-width: 769px) {
+          .inbox-sidebar-eyebrow, .inbox-updated-at { display: none !important; }
+          .inbox-chat-header { min-height: 58px !important; }
+        }
       `}</style>
-      <TicketSidebar
+      {!notebookListHidden ? <TicketSidebar
         counts={counts}
         error={ticketsError}
         filters={filters}
@@ -822,12 +874,15 @@ export default function Inbox() {
         teams={teams}
         tickets={tickets}
         users={users}
+        density={density}
+        setDensity={setDensity}
         view={view}
         lastUpdatedAt={ticketsLastUpdatedAt}
-      />
+      /> : null}
 
       {/* Main Chat */}
-      <main 
+      <main
+        className="inbox-main"
         style={{ 
           ...s.main,
           display: (isMobile && view === 'list') ? 'none' : 'flex'
@@ -851,6 +906,11 @@ export default function Inbox() {
           }
         }}
       >
+        {notebookListHidden ? (
+          <button type="button" className="inbox-control" style={s.notebookListToggle} onClick={() => setNotebookListHidden(false)}>
+            Conversas
+          </button>
+        ) : null}
         {selectedTicket ? (
           <>
             {messagesError ? (
@@ -961,7 +1021,13 @@ export default function Inbox() {
             <div style={s.emptyChat}>
             <div style={s.emptyIcon}>Chat</div>
             <h2>Central de Atendimento</h2>
-            <p>Selecione uma conversa na lista ao lado para começar a atender</p>
+            <p>Selecione uma conversa para começar ou use um dos atalhos abaixo.</p>
+            <div style={s.emptyQuickGrid}>
+              <button type="button" style={s.emptyQuickCard} onClick={() => setTab('mine')}><strong>{counts.mine || 0}</strong><span>Minhas conversas</span></button>
+              <button type="button" style={s.emptyQuickCard} onClick={() => setTab('pending')}><strong>{counts.pending || 0}</strong><span>Aguardando equipe</span></button>
+              <button type="button" style={s.emptyQuickCard} onClick={() => setTab('all')}><strong>{counts.all || 0}</strong><span>Todos os contatos</span></button>
+            </div>
+            <small style={s.emptyShortcut}>Dica: use Ctrl K para buscar ações sem sair do atendimento.</small>
           </div>
         )}
       </main>
@@ -1270,6 +1336,7 @@ export const inboxStyles = {
   miniBadge: { fontSize: '0.72rem', padding: '3px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' },
 
   main: { flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-base)', position: 'relative', minWidth: 0, overflow: 'hidden' },
+  notebookListToggle: { position: 'absolute', left: '0.75rem', top: '72px', zIndex: 30, minHeight: '34px', padding: '0 0.8rem', borderRadius: 'var(--radius-lg)', border: '1px solid var(--accent-border)', background: 'var(--bg-surface)', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' },
   chatHeader: { display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem 1.5rem', background: 'var(--chat-header-bg)', backdropFilter: 'blur(20px)', borderBottom: '1px solid var(--border-color)', zIndex: 10, width: '100%', boxSizing: 'border-box', minHeight: '76px' },
   backBtn: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--text-main)', width: '38px', height: '38px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   chatIdentity: { minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '0.35rem' },
@@ -1383,8 +1450,11 @@ export const inboxStyles = {
   recordingTime: { color: 'var(--text-main)', fontWeight: 900, fontSize: '1.1rem', fontFamily: 'monospace' },
   stopBtn: { marginLeft: 'auto', background: 'var(--danger)', color: '#fff', border: 'none', padding: '0.6rem 1rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer' },
   
-  emptyChat: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%)' },
-  emptyIcon: { fontSize: '4rem', marginBottom: '1.5rem', opacity: 0.15, background: 'rgba(255,255,255,0.05)', padding: '2rem', borderRadius: '50%' },
+  emptyChat: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.7rem', padding: '2rem', textAlign: 'center', color: 'var(--text-dim)', background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%)' },
+  emptyIcon: { fontSize: '2.2rem', marginBottom: '0.25rem', opacity: 0.22, background: 'rgba(255,255,255,0.05)', padding: '1.25rem', borderRadius: '50%' },
+  emptyQuickGrid: { width: 'min(100%, 620px)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.7rem', marginTop: '1rem' },
+  emptyQuickCard: { minWidth: 0, padding: '0.9rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-start', textAlign: 'left' },
+  emptyShortcut: { marginTop: '0.5rem', color: 'var(--text-dim)', fontSize: '0.75rem' },
 
   overlay: { position: 'fixed', inset: 0, background: 'var(--overlay-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(8px)' },
   modal: { background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: '440px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-lg)' },

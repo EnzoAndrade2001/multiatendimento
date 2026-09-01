@@ -861,7 +861,7 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
 
   return (
     <div
-      className="animate-slide-in-right"
+      className="animate-slide-in-right inbox-contact-panel"
       style={{
         ...styles.infoPanel,
         position: isMobile ? 'fixed' : isCompactDesktop ? 'absolute' : 'relative',
@@ -1228,6 +1228,7 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
           onSelect(ticket.id);
         }
       }}
+      className="inbox-ticket-row"
       style={{ ...styles.row, ...(isSelected ? styles.rowActive : {}) }}
     >
       <Avatar name={contactName} src={ticket.contact?.avatarUrl} size={36} />
@@ -1270,7 +1271,7 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
           {(ticket.isUnread || ticket.unreadCount > 0) ? <div style={styles.unreadBadge} role="status" aria-label={`${ticket.unreadCount > 0 ? ticket.unreadCount : 1} mensagem(ns) não lida(s)`}>{ticket.unreadCount > 0 ? ticket.unreadCount : '•'}</div> : null}
         </div>
 
-        <div style={styles.rowOperationalLine}>
+        <div className="inbox-ticket-operations" style={styles.rowOperationalLine}>
           {awaitingCustomer ? <span style={styles.awaitingCustomerPill}>Aguardando cliente</span> : null}
           {slaMeta ? (
             <span style={{ ...styles.slaPill, ...(slaMeta.tone === 'danger' ? styles.slaDanger : slaMeta.tone === 'warning' ? styles.slaWarning : styles.slaOk) }}>
@@ -1279,10 +1280,10 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
           ) : null}
         </div>
 
-        <div style={styles.rowMetaLine}>
+        <div className="inbox-ticket-meta" style={styles.rowMetaLine}>
           <span style={styles.rowOwner}>{ownerLabel}</span>
           {tags.length > 0 ? (
-            <div style={styles.rowTags}>
+            <div className="inbox-ticket-tags" style={styles.rowTags}>
               {tags.map((tag, tagIndex) => {
                 const safeTag = getSafeText(tag, 'Tag');
                 return (
@@ -1330,6 +1331,8 @@ export const TicketSidebar = React.memo(function TicketSidebar({
   teams,
   view,
   lastUpdatedAt,
+  density,
+  setDensity,
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('inbox:sort') || 'recent');
@@ -1414,6 +1417,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
 
   return (
     <aside
+      className="inbox-sidebar"
       style={{
         ...styles.sidebar,
         display: (isMobile && view === 'chat') ? 'none' : 'flex',
@@ -1422,15 +1426,20 @@ export const TicketSidebar = React.memo(function TicketSidebar({
         borderRight: isMobile ? 'none' : styles.sidebar.borderRight,
       }}
     >
-      <div style={styles.sidebarHeader}>
+      <div className="inbox-sidebar-header" style={styles.sidebarHeader}>
         <div style={{ minWidth: 0 }}>
-          <div style={styles.sidebarEyebrow}>Operacao</div>
+          <div className="inbox-sidebar-eyebrow" style={styles.sidebarEyebrow}>Operacao</div>
           <div style={styles.sidebarTitle}>Inbox</div>
-          <div style={styles.sidebarSubtitle}>{activeTabLabel}</div>
+          <div className="inbox-sidebar-subtitle" style={styles.sidebarSubtitle}>{activeTabLabel}</div>
         </div>
+        <select style={{ ...styles.sortSelect, flex: '0 0 auto', width: 92 }} value={density} onChange={(event) => setDensity(event.target.value)} aria-label="Densidade da lista" title="Densidade visual">
+          <option value="auto">Auto</option>
+          <option value="compact">Compacta</option>
+          <option value="comfortable">Confortável</option>
+        </select>
       </div>
 
-      <div style={styles.tabsWrap}>
+      <div className="inbox-tabs-wrap" style={styles.tabsWrap}>
         <div style={styles.tabs}>
           {['mine', 'pending', 'all'].map((tabId) => (
             <button
@@ -1449,7 +1458,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
         </div>
       </div>
 
-      <div style={styles.searchWrap}>
+      <div className="inbox-search-wrap" style={styles.searchWrap}>
         <div style={styles.searchRow}>
           <div style={styles.searchShell}>
             <Search size={15} strokeWidth={2.2} style={styles.searchIcon} />
@@ -1564,7 +1573,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
         <div style={styles.sidebarLoading} role="status" aria-live="polite">Carregando conversas...</div>
       ) : null}
       {!loading && lastUpdatedAt && !error ? (
-        <div style={styles.sidebarUpdated} aria-live="polite">
+        <div className="inbox-updated-at" style={styles.sidebarUpdated} aria-live="polite">
           Atualizado às {new Date(lastUpdatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
         </div>
       ) : null}
@@ -1670,7 +1679,7 @@ export const ChatHeader = React.memo(function ChatHeader({
   }, []);
 
   return (
-    <header style={{ ...styles.chatHeader, padding: isMobile ? '0.85rem 1rem' : '1rem 1.5rem' }}>
+    <header className="inbox-chat-header" style={{ ...styles.chatHeader, padding: isMobile ? '0.85rem 1rem' : '1rem 1.5rem' }}>
       {isMobile ? (
         <button style={styles.backBtn} onClick={() => setView('list')} aria-label="Voltar para lista">
           <ArrowLeft size={18} strokeWidth={2.4} />
@@ -1900,7 +1909,7 @@ export const MessageList = React.memo(function MessageList({
     : null;
 
   return (
-    <div style={{ ...styles.messages, padding: isMobile ? '0.85rem 0.85rem 1rem' : styles.messages.padding }} ref={scrollRef}>
+    <div className="inbox-messages inbox-message-lane" style={{ ...styles.messages, padding: isMobile ? '0.85rem 0.85rem 1rem' : styles.messages.padding }} ref={scrollRef}>
       <div style={{ ...styles.historySearchSticky, top: isMobile ? '-0.85rem' : styles.historySearchSticky.top, paddingTop: isMobile ? '0.85rem' : styles.historySearchSticky.paddingTop }}>
         {historySearchOpen ? (
           <form
@@ -2088,6 +2097,7 @@ export const MessageList = React.memo(function MessageList({
                 <MessageRenderErrorBoundary key={messageKey} messageId={message.id}>
                   <div className="animate-fade-in-up" style={{ ...styles.bubbleWrap, justifyContent: message.fromMe ? 'flex-end' : 'flex-start' }}>
                     <div
+                      className="inbox-bubble"
                       style={{
                         ...styles.bubble,
                         maxWidth: isMobile ? '88%' : styles.bubble.maxWidth,
@@ -2412,7 +2422,7 @@ export const MessageComposer = React.memo(function MessageComposer({
         </div>
       )}
 
-      <div style={{ ...styles.inputArea, padding: isMobile ? '0.75rem' : '1rem 1.5rem' }}>
+      <div className="inbox-composer" style={{ ...styles.inputArea, padding: isMobile ? '0.75rem' : '1rem 1.5rem' }}>
         {/* Canal e tipo de envio compartilham a mesma barra para poupar altura. */}
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
           {!isNote && showInstancePicker ? (
