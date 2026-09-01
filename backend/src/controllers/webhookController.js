@@ -29,7 +29,36 @@ const TECHNICIAN_MODE_MENU_TEXT = [
 ].join('\n');
 
 const pendingConnectionChecks = new Map();
+const recentWebhookMessages = new Map();
 const DISCONNECT_CONFIRMATION_MS = Number(process.env.EVOLUTION_DISCONNECT_CONFIRMATION_MS || 45000);
+const WEBHOOK_DEDUP_TTL_MS = 5 * 60 * 1000;
+
+function getWebhookMessageIdentity(msg) {
+  const key = msg?.key;
+  const externalId = typeof key?.id === 'string' ? key.id.trim() : '';
+  const remoteJid = typeof key?.remoteJid === 'string' ? key.remoteJid.trim() : '';
+  const hasExplicitDirection = typeof key?.fromMe === 'boolean';
+  return {
+    externalId,
+    remoteJid,
+    hasExplicitDirection,
+    fromMe: key?.fromMe === true,
+    valid: Boolean(externalId && remoteJid && hasExplicitDirection),
+  };
+}
+
+function claimWebhookMessage(tenantId, externalId, nowMs = Date.now()) {
+  const dedupKey = `${tenantId}:${externalId}`;
+  const previous = recentWebhookMessages.get(dedupKey);
+  if (previous && nowMs - previous < WEBHOOK_DEDUP_TTL_MS) return false;
+  recentWebhookMessages.set(dedupKey, nowMs);
+  if (recentWebhookMessages.size > 5000) {
+    for (const [key, timestamp] of recentWebhookMessages) {
+      if (nowMs - timestamp >= WEBHOOK_DEDUP_TTL_MS) recentWebhookMessages.delete(key);
+    }
+  }
+  return true;
+}
 
 function messageOccurredAt(msg, fallback = new Date()) {
   const raw = msg?.messageTimestamp ?? msg?.timestamp ?? msg?.key?.messageTimestamp;
@@ -340,8 +369,12 @@ async function downloadMedia(settings, instanceName, msg, messageId) {
 }
 
 async function processSingleMessage(msg, instance, waInstance, tenant, isHistorical) {
-  const externalId = msg.key?.id;
-  const fromMe = msg.key?.fromMe === true;
+  const identity = getWebhookMessageIdentity(msg);
+  if (!identity.valid) {
+    console.warn(`[webhook] Ignorando messages.upsert sem identidade/direcao confiavel. instance=${instance || 'desconhecida'}`);
+    return;
+  }
+  const { externalId, fromMe, remoteJid } = identity;
   const occurredAt = messageOccurredAt(msg);
 
   // Se já existe no banco, ignora (evita duplicar o que o sistema enviou)
@@ -350,7 +383,6 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
   }) : null;
   if (existing) return;
 
-  const remoteJid = msg.key?.remoteJid || '';
   if (remoteJid === 'status@broadcast') return;
 
   const isGroup = evolutionService.isGroupJid(remoteJid);
@@ -428,6 +460,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
     }
     return;
   }
+  if (!claimWebhookMessage(tenant.id, externalId)) return;
   console.log(`[webhook] mensagem ${fromMe ? 'ENVIADA para' : 'RECEBIDA de'} ${require('../utils/privacy').maskPhone(phone)} ${media ? `[${media.type}]` : ''} | isHistorical: ${isHistorical}`);
 
   const phoneCandidates = evolutionService.buildPhoneLookupCandidates(phone);
@@ -882,7 +915,13 @@ async function handleWebhook(req, res) {
 
     if (ev !== 'messages.upsert' && ev !== 'messages.set') return;
 
-    const messages = Array.isArray(data?.messages) ? data.messages : (data ? [data] : []);
+    const messages = Array.isArray(data?.messages)
+      ? data.messages
+      : data?.key
+        ? [data]
+        : data?.message?.key
+          ? [data.message]
+          : [];
     if (messages.length === 0) return;
 
     const waInstance = await prisma.waInstance.findFirst({ where: { instanceName: instance } });
@@ -1343,5 +1382,11 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
 
 module.exports = {
   handleWebhook, setIo, processSingleMessage,
-  __testing: { isHistoricalMessage, messageOccurredAt, shouldReopenResolvedTicket },
+  __testing: {
+    claimWebhookMessage,
+    getWebhookMessageIdentity,
+    isHistoricalMessage,
+    messageOccurredAt,
+    shouldReopenResolvedTicket,
+  },
 };

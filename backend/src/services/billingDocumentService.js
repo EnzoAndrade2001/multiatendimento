@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../lib/prisma');
+const whatsappComplianceService = require('./whatsappComplianceService');
 const evolutionService = require('./evolutionService');
 const { mediaPath } = require('../utils/uploads');
 
@@ -330,6 +331,7 @@ async function resolveDelivery({ tenantId, customerId, ticketId }) {
     instanceId: ticket.instanceId,
     instanceName: ticket.instance?.instanceName || null,
     instanceStatus: ticket.instance?.status || null,
+    instanceProvider: ticket.instance?.provider || null,
     unavailableReason: !phone
       ? 'Telefone WhatsApp invalido.'
       : !ticket.instance?.instanceName
@@ -359,6 +361,16 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
     error.statusCode = 409;
     throw error;
   }
+  await whatsappComplianceService.assertAutomatedSendAllowed({
+    tenantId,
+    contactId: delivery.contactId,
+    instance: {
+      id: delivery.instanceId,
+      instanceName: delivery.instanceName,
+      status: delivery.instanceStatus,
+      provider: delivery.instanceProvider,
+    },
+  });
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
   const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;

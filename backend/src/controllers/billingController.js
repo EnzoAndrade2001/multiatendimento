@@ -3,6 +3,7 @@ const path = require('path');
 const prisma = require('../lib/prisma');
 const evolutionService = require('../services/evolutionService');
 const billingDocuments = require('../services/billingDocumentService');
+const whatsappComplianceService = require('../services/whatsappComplianceService');
 const { mediaPath } = require('../utils/uploads');
 
 let io = null;
@@ -57,19 +58,69 @@ function normalizeBillingPhone(value) {
 }
 
 // Instancia de saida das cobrancas. Prioriza a configurada em
-// TenantSettings.billingInstanceId; senao, a primeira conectada; senao, a
-// primeira da lista (comportamento antigo).
+// TenantSettings.billingInstanceId e obrigatoria. Nenhuma conexao deve assumir
+// cobrancas silenciosamente, especialmente a API oficial, cujas mensagens
+// proativas exigem janela ou template Meta.
 function resolveBillingInstance(tenant) {
   const instances = (tenant?.instances || []).filter((i) => !String(i.instanceName || '').startsWith('DELETED_'));
   const configuredId = tenant?.settings?.billingInstanceId;
   if (configuredId) {
     const configured = instances.find((i) => i.id === configuredId);
     if (configured) return configured;
-    console.warn(`[billing] billingInstanceId ${configuredId} nao encontrado no tenant; usando fallback.`);
+    console.warn(`[billing] billingInstanceId ${configuredId} nao encontrado no tenant.`);
   }
-  return instances.find((i) => ['connected', 'open', 'online'].includes(String(i.status || '').toLowerCase()))
-    || instances[0]
-    || null;
+  return null;
+}
+
+function isConnectedInstance(instance) {
+  return ['connected', 'open', 'online'].includes(String(instance?.status || '').toLowerCase());
+}
+
+async function assertBillingDeliveryAllowed({ tenant, contact, instance }) {
+  if (!instance) {
+    throw Object.assign(new Error('Selecione explicitamente uma instancia para cobrancas.'), {
+      statusCode: 409,
+      code: 'BILLING_INSTANCE_REQUIRED',
+    });
+  }
+  if (!isConnectedInstance(instance)) {
+    throw Object.assign(new Error('A instancia configurada para cobrancas esta desconectada.'), {
+      statusCode: 409,
+      code: 'BILLING_INSTANCE_DISCONNECTED',
+    });
+  }
+  return whatsappComplianceService.assertAutomatedSendAllowed({
+    tenantId: tenant.id,
+    contactId: contact.id,
+    instance,
+  });
+}
+
+// Registra uma saida financeira sem transformar uma notificacao proativa em
+// demanda humana. Ticket resolvido continua resolvido; ticket ativo continua
+// ativo. Se ainda nao existe conversa, nasce encerrada e so sera reaberta por
+// uma mensagem real do cliente.
+async function getOutboundBillingTicket({ tenantId, contactId, instanceId, at = new Date() }) {
+  const current = await prisma.ticket.findFirst({
+    where: { tenantId, contactId },
+    orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
+  });
+  if (current) {
+    return prisma.ticket.update({
+      where: { id: current.id },
+      data: { instanceId, lastMessageAt: at },
+    });
+  }
+  return prisma.ticket.create({
+    data: {
+      tenantId,
+      instanceId,
+      contactId,
+      status: 'resolved',
+      resolvedAt: at,
+      lastMessageAt: at,
+    },
+  });
 }
 
 function getBillingContactPhone(contact) {
@@ -243,7 +294,7 @@ async function sendBilling(req, res) {
     const billingInstance = resolveBillingInstance(tenant);
     const instanceName = billingInstance?.instanceName;
 
-    if (!evolutionUrl || !evolutionKey || !instanceName) {
+    if (!evolutionUrl || !evolutionKey) {
       throw new Error('Integração com WhatsApp não configurada ou sem instâncias conectadas.');
     }
 
@@ -267,25 +318,7 @@ async function sendBilling(req, res) {
       return res.json({ success: true, skipped: true, message: 'Contato optou por não receber mensagens no WhatsApp.' });
     }
 
-    // Busca ou abre um ticket para o cliente
-    let ticket = await prisma.ticket.findFirst({
-      where: {
-        contactId: contact.id,
-        status: { in: ['pending', 'open', 'bot'] }
-      }
-    });
-
-    if (!ticket) {
-      ticket = await prisma.ticket.create({
-        data: {
-          tenantId: tenant.id,
-          instanceId: billingInstance?.id || tenant.instances[0]?.id,
-          contactId: contact.id,
-          status: 'open'
-        }
-      });
-      if (io) io.to(tenant.id).emit('ticket_updated', { ticketId: ticket.id, ticket });
-    }
+    await assertBillingDeliveryAllowed({ tenant, contact, instance: billingInstance });
 
     // 1. Envia a mensagem de texto com o template primeiro - o cliente le a
     // explicacao ("Segue anexo...") antes de receber os PDFs, nao depois.
@@ -294,6 +327,11 @@ async function sendBilling(req, res) {
     console.log(`[billing] Enviando texto de cobrança para ${require('../utils/privacy').maskPhone(phone)}...`);
     const textResult = await evolutionService.sendText(evolutionUrl, evolutionKey, instanceName, phone, template);
     const textExternalId = textResult?.key?.id || textResult?.message?.key?.id;
+    const ticket = await getOutboundBillingTicket({
+      tenantId: tenant.id,
+      contactId: contact.id,
+      instanceId: billingInstance.id,
+    });
 
     // Salva a mensagem de texto no histórico
     await prisma.message.create({
@@ -301,6 +339,7 @@ async function sendBilling(req, res) {
         ticketId: ticket.id,
         body: template,
         fromMe: true,
+        automationType: 'BILLING',
         externalId: textExternalId
       }
     });
@@ -328,6 +367,7 @@ async function sendBilling(req, res) {
           ticketId: ticket.id,
           body: '',
           fromMe: true,
+          automationType: 'BILLING',
           mediaUrl,
           mediaType: 'document',
           fileName: file.originalname,
@@ -352,6 +392,21 @@ async function sendBilling(req, res) {
         fileName: files.map(f => f.originalname).join(', '),
         status: 'SUCCESS'
       }
+    });
+    await prisma.ticketEvent.create({
+      data: {
+        ticketId: ticket.id,
+        tenantId: tenant.id,
+        type: 'billing_documents_resent',
+        payload: JSON.stringify({
+          automatic: false,
+          result: 'SUCCESS',
+          instanceId: billingInstance.id,
+          instanceProvider: billingInstance.provider || null,
+          documentCount: files.length,
+          ticketStatus: ticket.status,
+        }),
+      },
     });
 
     if (io) {
@@ -500,6 +555,32 @@ async function autoSendBilling(req, res) {
       return res.json({ success: true, skipped: true, message: 'Envio automatico nao habilitado para este contato.' });
     }
 
+    const evolutionUrl = tenant.settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
+    const evolutionKey = tenant.settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+    const billingInstance = resolveBillingInstance(tenant);
+    const instanceName = billingInstance?.instanceName;
+    const phone = getBillingContactPhone(precheckContact);
+    let deliveryBlock = null;
+    if (!evolutionUrl || !evolutionKey) {
+      deliveryBlock = 'Integracao com WhatsApp nao configurada.';
+    } else if (!phone) {
+      deliveryBlock = 'Telefone do contato invalido ou nao cadastrado para WhatsApp.';
+    } else {
+      try {
+        await assertBillingDeliveryAllowed({ tenant, contact: precheckContact, instance: billingInstance });
+      } catch (error) {
+        deliveryBlock = error.message;
+      }
+    }
+    if (deliveryBlock) {
+      if (!recentSkip) {
+        await prisma.billingLog.create({
+          data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: requestedFileNames, status: 'SKIPPED', errorMessage: deliveryBlock },
+        });
+      }
+      return res.json({ success: true, skipped: true, message: deliveryBlock });
+    }
+
     // Guarda cada documento do mesmo jeito que um clique manual no CRM guardaria
     // -- assim, se alguem abrir esse titulo no CRM depois, ja aparece pronto em
     // vez de pedir pro agente de novo. Os campos do "receivable" abaixo sao um
@@ -541,7 +622,7 @@ async function autoSendBilling(req, res) {
     }
 
     const fileNames = cachedDocuments.map((document) => document.fileName).join(', ');
-    const contact = await findContactForBilling(tenant.id, crmCustomer, crmCustomer.cpfCnpj);
+    const contact = precheckContact;
     const isSendToAll = String(sendPolicy).toLowerCase() === 'todos';
 
     if (!contact) {
@@ -557,14 +638,9 @@ async function autoSendBilling(req, res) {
       return res.json({ success: true, skipped: true, message: 'Envio automático não habilitado para este contato.' });
     }
 
-    const evolutionUrl = tenant.settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = tenant.settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
-    const billingInstance = resolveBillingInstance(tenant);
-    const instanceName = billingInstance?.instanceName;
     if (!evolutionUrl || !evolutionKey || !instanceName) {
       throw new Error('Integração com WhatsApp não configurada ou sem instâncias conectadas.');
     }
-    const phone = getBillingContactPhone(contact);
     if (!phone) {
       await prisma.billingLog.create({
         data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SKIPPED', errorMessage: 'Telefone do contato inválido ou não cadastrado para WhatsApp.' },
@@ -578,30 +654,14 @@ async function autoSendBilling(req, res) {
       return res.json({ success: true, skipped: true, message: 'Contato optou por não receber mensagens no WhatsApp.' });
     }
 
-    // Busca ou abre uma conversa para o cliente -- precisa funcionar mesmo com
-    // quem nunca trocou mensagem no WhatsApp antes, como o fluxo antigo fazia.
-    let ticket = await prisma.ticket.findFirst({
-      where: { contactId: contact.id, status: { in: ['pending', 'open', 'bot'] } },
-    });
-    if (!ticket) {
-      ticket = await prisma.ticket.create({
-        data: {
-          tenantId: tenant.id,
-          instanceId: billingInstance?.id || tenant.instances[0]?.id,
-          contactId: contact.id,
-          status: 'open',
-        },
-      });
-      if (io) io.to(tenant.id).emit('ticket_updated', { ticketId: ticket.id, ticket });
-    }
-
     // A mensagem de apresentação ("Segue anexo...") precisa chegar ANTES dos
     // documentos, nao depois - e assim que o cliente le a explicacao antes
     // de ver os PDFs, nao o contrario.
     const template = tenant.settings?.billingMessageTemplate || 'Olá! Seguem em anexo sua fatura, boleto e demonstrativo deste mês. Se tiver qualquer dúvida, estamos à disposição.';
     const textResult = await evolutionService.sendText(evolutionUrl, evolutionKey, instanceName, phone, template);
     const textExternalId = textResult?.key?.id || textResult?.message?.key?.id;
-    await prisma.message.create({ data: { ticketId: ticket.id, body: template, fromMe: true, externalId: textExternalId } });
+    const ticket = await getOutboundBillingTicket({ tenantId: tenant.id, contactId: contact.id, instanceId: billingInstance.id });
+    await prisma.message.create({ data: { ticketId: ticket.id, body: template, fromMe: true, automationType: 'BILLING', externalId: textExternalId } });
 
     for (const document of cachedDocuments) {
       const filePath = path.join(mediaPath, path.basename(document.mediaUrl));
@@ -615,7 +675,7 @@ async function autoSendBilling(req, res) {
       });
       const externalId = result?.key?.id || result?.message?.key?.id;
       const message = await prisma.message.create({
-        data: { ticketId: ticket.id, body: '', fromMe: true, mediaUrl: document.mediaUrl, mediaType: 'document', fileName: document.fileName, externalId, mediaStatus: 'ok' },
+        data: { ticketId: ticket.id, body: '', fromMe: true, automationType: 'BILLING', mediaUrl: document.mediaUrl, mediaType: 'document', fileName: document.fileName, externalId, mediaStatus: 'ok' },
       });
       if (io) io.to(tenant.id).emit('new_message', { ticketId: ticket.id, message, fromMe: true });
     }
@@ -636,6 +696,10 @@ async function autoSendBilling(req, res) {
           documentTypes: cachedDocuments.map((document) => document.documentType),
           phone,
           automatic: true,
+          result: 'SUCCESS',
+          instanceId: billingInstance.id,
+          instanceProvider: billingInstance.provider || null,
+          ticketStatus: ticket.status,
         }),
       },
     });
@@ -977,5 +1041,7 @@ module.exports = {
     resolveBillingDateRange,
     describeAutoSendFailure,
     resolveBillingInstance,
+    assertBillingDeliveryAllowed,
+    getOutboundBillingTicket,
   }
 };

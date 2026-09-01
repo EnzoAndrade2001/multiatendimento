@@ -1802,7 +1802,7 @@ export default function Settings() {
                       value={form.billingInstanceId || ''}
                       onChange={(e) => setForm({ ...form, billingInstanceId: e.target.value })}
                     >
-                      <option value="">Automática (primeira conectada)</option>
+                      <option value="">Selecione uma instância...</option>
                       {instances.map((instance) => {
                         const connected = instance.status === 'connected' || instance.state === 'open';
                         const official = instance.provider === 'evolution_official';
@@ -1814,8 +1814,8 @@ export default function Settings() {
                       })}
                     </select>
                     <p style={s.hint}>
-                      Fixe uma instância para as cobranças não saírem por um número errado. Deixe em "Automática" para o comportamento atual.
-                      Cobrança por instância <strong>oficial</strong> exige o cliente ter enviado mensagem nas últimas 24h ou um template de utilidade aprovado pela Meta.
+                      Selecione obrigatoriamente a instância para as cobranças não saírem por um número errado.
+                      Na instância <strong>oficial</strong>, o envio financeiro fica bloqueado fora da janela de 24 horas enquanto não houver um template de utilidade aprovado configurado para essa automação.
                     </p>
                   </div>
 

@@ -18,19 +18,24 @@ test('configurada tem prioridade mesmo sobre a primeira conectada', () => {
   assert.equal(resolveBillingInstance(tenant)?.id, 'qr1');
 });
 
-test('sem configuracao: primeira conectada (comportamento antigo)', () => {
+test('sem configuracao nunca escolhe a API oficial silenciosamente', () => {
   const tenant = { instances: [disconnectedQr, official], settings: {} };
-  assert.equal(resolveBillingInstance(tenant)?.id, 'of1');
+  assert.equal(resolveBillingInstance(tenant), null);
 });
 
-test('configurada inexistente cai no fallback', () => {
+test('configurada inexistente nao usa outra conexao como fallback', () => {
   const tenant = { instances: [qr], settings: { billingInstanceId: 'sumiu' } };
-  assert.equal(resolveBillingInstance(tenant)?.id, 'qr1');
+  assert.equal(resolveBillingInstance(tenant), null);
+});
+
+test('sem configuracao nao escolhe nem QR conectado', () => {
+  const tenant = { instances: [official, qr], settings: {} };
+  assert.equal(resolveBillingInstance(tenant), null);
 });
 
 test('ignora instancias DELETED_', () => {
-  const tenant = { instances: [deleted, qr], settings: {} };
-  assert.equal(resolveBillingInstance(tenant)?.id, 'qr1');
+  const tenant = { instances: [deleted, qr], settings: { billingInstanceId: 'del' } };
+  assert.equal(resolveBillingInstance(tenant), null);
 });
 
 test('sem instancias retorna null', () => {
