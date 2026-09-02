@@ -3,6 +3,8 @@
   "short_name": "MultiPRO",
   "description": "Sistema de Atendimento Omnichannel com IA",
   "start_url": "/lcddigital/login",
+  "scope": "/",
+  "id": "/",
   "display": "standalone",
   "background_color": "#050505",
   "theme_color": "#D4AF37",
