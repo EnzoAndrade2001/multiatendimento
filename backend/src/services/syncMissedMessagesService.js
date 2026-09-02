@@ -75,11 +75,14 @@ async function syncMissedMessages(instanceName) {
         if (!exists) {
           console.log(`[syncMissedMessages] Mensagem recuperada via sync automático: ${externalId} (${require('../utils/privacy').maskPhone(contact.phone)})`);
           try {
+            const webhookHeaders = process.env.WEBHOOK_SECRET
+              ? { 'x-webhook-secret': process.env.WEBHOOK_SECRET }
+              : undefined;
             await axios.post(`${backendUrl}/api/webhook`, {
               event: 'messages.upsert',
               instance: instanceName,
               data: { messages: [msg] }
-            });
+            }, webhookHeaders ? { headers: webhookHeaders } : undefined);
             totalSynced++;
             // Pequeno delay para evitar gargalos na API
             await new Promise(resolve => setTimeout(resolve, 500));

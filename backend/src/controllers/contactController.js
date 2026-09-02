@@ -1,6 +1,7 @@
+const fs = require('fs');
 const prisma = require('../lib/prisma');
 const { normalizeTagList } = require('../utils/tagUtils');
-const xlsx = require('xlsx');
+const readXlsxFile = require('read-excel-file/node');
 const evolutionService = require('../services/evolutionService');
 
 async function list(req, res) {
@@ -270,6 +271,9 @@ async function importExcel(req, res) {
   console.log('[importExcel] Request received', { file: req.file?.originalname, size: req.file?.size });
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+    if (!/\.xlsx$/i.test(String(req.file.originalname || ''))) {
+      return res.status(400).json({ error: 'Envie uma planilha no formato .xlsx.' });
+    }
     const { tenantId } = req.user;
 
     // Busca uma instância para vincular os contatos (prioriza conectada, mas aceita qualquer uma para testes)
@@ -286,9 +290,22 @@ async function importExcel(req, res) {
     
     if (!inst) return res.status(400).json({ error: 'Nenhuma instância de WhatsApp encontrada para este tenant. Crie uma conexão primeiro (mesmo que não conectada) para permitir a importação.' });
 
-    const workbook = xlsx.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    // Use a parser without SheetJS's prototype-pollution/ReDoS advisories and
+    // cap the number of records accepted from a valid workbook.
+    const rawRows = await readXlsxFile(req.file.path);
+    if (rawRows.length > 10001) {
+      return res.status(413).json({ error: 'A planilha excede o limite de 10.000 linhas.' });
+    }
+    const headerRow = Array.isArray(rawRows[0]) ? rawRows[0] : [];
+    const headers = headerRow.map((value) => String(value ?? '').trim());
+    const rows = rawRows.slice(1, 10001).map((values) => {
+      const row = {};
+      values.forEach((value, index) => {
+        const header = headers[index];
+        if (header) row[header] = value;
+      });
+      return row;
+    });
 
     let importedContacts = 0;
     let importedEquipments = 0;
@@ -407,6 +424,10 @@ async function importExcel(req, res) {
   } catch (err) {
     console.error('[importExcel] erro:', err.message);
     res.status(500).json({ error: 'Erro ao importar planilha' });
+  } finally {
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch { /* arquivo temporario ja removido */ }
+    }
   }
 }
 

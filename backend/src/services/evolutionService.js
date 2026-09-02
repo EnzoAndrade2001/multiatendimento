@@ -316,9 +316,16 @@ async function getConnectionState(url, key, instanceName) {
 
 async function setWebhook(url, key, instanceName, webhookUrl) {
   const client = getClient(url, key);
+  const secret = String(process.env.WEBHOOK_SECRET || '').trim();
+  // Evolution versions differ in support for custom webhook headers. The
+  // signed query fallback keeps the callback authenticated even on versions
+  // that only accept a URL; the middleware still prefers the header/bearer.
+  const securedWebhookUrl = secret && !webhookUrl.includes('token=')
+    ? `${webhookUrl}${webhookUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(secret)}`
+    : webhookUrl;
   const { data } = await client.post(`/webhook/set/${instanceName}`, {
     webhook: {
-      url: webhookUrl,
+      url: securedWebhookUrl,
       enabled: true,
       webhook_by_events: false,
       webhook_base64: false,

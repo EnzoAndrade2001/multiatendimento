@@ -31,6 +31,11 @@ export const getMediaUrl = (url) => {
     const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
     return `${BACKEND_URL}/api/user-avatars/${encodeURIComponent(filename)}${suffix}`;
   }
+  if (cleanUrl.startsWith('/uploads/')) {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : '';
+    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+    return `${BACKEND_URL}${cleanUrl}${suffix}`;
+  }
   return `${BACKEND_URL}${cleanUrl}`;
 };
 

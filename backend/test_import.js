@@ -1,5 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
-const xlsx = require('xlsx');
+const readXlsxFile = require('read-excel-file/node');
 const path = require('path');
 const fs = require('fs');
 
@@ -38,9 +38,12 @@ async function testImport() {
 
     // 2. Ler Arquivo
     try {
-        const workbook = xlsx.readFile(filePath);
-        const sheetName = workbook.SheetNames[0];
-        const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+        if (!/\.xlsx$/i.test(filePath)) throw new Error('Este script de teste aceita somente .xlsx.');
+        const rawRows = await readXlsxFile(filePath);
+        const headers = (rawRows[0] || []).map((value) => String(value ?? '').trim());
+        const rows = rawRows.slice(1).map((values) => Object.fromEntries(
+            values.map((value, index) => [headers[index], value]).filter(([header]) => header)
+        ));
         console.log('Total de linhas na planilha:', rows.length);
 
         let importedContacts = 0;

@@ -38,15 +38,18 @@ test('settings ignora secrets vazios ou mascarados para preservar valores atuais
   }), { evolutionUrl: 'https://evolution.example', firebirdClientToken: 'novo-token' });
 });
 
-test('webhook permanece compativel quando WEBHOOK_SECRET nao esta configurado', () => {
+test('webhook falha fechado quando WEBHOOK_SECRET nao esta configurado', () => {
   const previous = process.env.WEBHOOK_SECRET;
+  const previousAllowUnsigned = process.env.ALLOW_UNSIGNED_WEBHOOKS;
   delete process.env.WEBHOOK_SECRET;
+  delete process.env.ALLOW_UNSIGNED_WEBHOOKS;
   try {
-    let called = false;
-    verifyWebhookSecret(requestWithHeaders(), responseRecorder(), () => { called = true; });
-    assert.equal(called, true);
+    const response = responseRecorder();
+    verifyWebhookSecret(requestWithHeaders(), response, () => assert.fail('nao deveria autorizar'));
+    assert.equal(response.statusCode, 503);
   } finally {
     if (previous !== undefined) process.env.WEBHOOK_SECRET = previous;
+    if (previousAllowUnsigned !== undefined) process.env.ALLOW_UNSIGNED_WEBHOOKS = previousAllowUnsigned;
   }
 });
 

@@ -256,7 +256,7 @@ export default function Contacts() {
             <ActionButton variant="secondary" style={s.importBtn} disabled={loading} onClick={() => document.getElementById('importExcel').click()}>
               <Upload size={18} /> Importar
             </ActionButton>
-            <input type="file" id="importExcel" hidden accept=".xlsx, .xls" onChange={handleImportExcel} />
+            <input type="file" id="importExcel" hidden accept=".xlsx" onChange={handleImportExcel} />
 
             <ActionButton onClick={() => setShowAddModal(true)}>
               <Plus size={20} /> Novo contato

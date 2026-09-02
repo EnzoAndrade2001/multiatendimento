@@ -4,6 +4,8 @@ const fs = require('fs');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const prisma = require('./lib/prisma');
+const authenticate = require('./middlewares/authenticate');
 
 const authRoutes = require('./routes/auth');
 const ticketRoutes = require('./routes/tickets');
@@ -44,6 +46,27 @@ const telemetryRoutes = require('./routes/telemetry');
 const { setIo: setIoPrintGuard } = require('./services/printGuardService');
 
 const app = express();
+app.disable('x-powered-by');
+
+const allowedOrigins = String(process.env.FRONTEND_URL || 'http://localhost:5174')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOrigin = (origin, callback) => {
+  // Non-browser requests have no Origin and must remain usable (agents/webhooks).
+  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+  return callback(new Error('Origem nao autorizada pelo CORS'));
+};
+
+// Baseline headers for API and file responses. The frontend should also set a
+// CSP at its own web server, but these headers protect this Express surface.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 app.use('/api/report', require('./routes/report'));
 
 const server = http.createServer(app);
@@ -51,7 +74,7 @@ const bootAt = Date.now();
 
 const io = new Server(server, {
   cors: { 
-    origin: process.env.FRONTEND_URL || '*', 
+    origin: corsOrigin,
     credentials: true,
     methods: ["GET", "POST"]
   },
@@ -71,7 +94,7 @@ setIoManagerCopy(io);
 setIoBillingDocuments(io);
 setIoPrintGuard(io);
 
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5174', credentials: true }));
+app.use(cors({ origin: corsOrigin, credentials: true }));
 // Preserva os bytes exatos apenas para webhooks PrintGuard assinados. A
 // assinatura é calculada sobre `${timestamp}.${rawBody}` e não sobre um JSON
 // reserializado; as demais rotas continuam usando o parser normalmente.
@@ -108,12 +131,58 @@ const { uploadsPath } = require('./utils/uploads');
 app.use('/uploads/media', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
 app.use('/uploads/knowledge', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
 app.use('/uploads/user-avatars', (_req, res) => res.status(404).json({ error: 'Arquivo não encontrado.' }));
-app.use('/uploads', express.static(uploadsPath, {
-  setHeaders(res) {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cache-Control', 'private, no-store');
-  },
-}));
+// Only tenant logos are public. Inbox, lead and document attachments remain
+// behind their tenant-aware authenticated routes.
+app.get('/uploads/:filename', async (req, res) => {
+  const filename = path.basename(String(req.params.filename || ''));
+  if (!filename || filename !== req.params.filename || filename.startsWith('.')) {
+    return res.status(404).json({ error: 'Arquivo não encontrado.' });
+  }
+  const isSafeImage = /\.(?:png|jpe?g|gif|webp)$/i.test(filename);
+  try {
+    const logoUrl = `/uploads/${filename}`;
+    const tenant = isSafeImage
+      ? await prisma.tenant.findFirst({ where: { logoUrl }, select: { id: true } })
+      : null;
+    if (!tenant) {
+      // Legacy campaign/lead uploads use the flat /uploads path. They are
+      // served only after a valid JWT and a tenant-scoped campaign reference.
+      return authenticate(req, res, async () => {
+        try {
+          const campaign = await prisma.campaign.findFirst({
+            where: { tenantId: req.user.tenantId, mediaUrl: logoUrl },
+            select: { id: true },
+          });
+          if (!campaign) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+          const filePath = path.resolve(uploadsPath, filename);
+          const basePath = path.resolve(uploadsPath);
+          if (!filePath.startsWith(`${basePath}${path.sep}`) || !fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Arquivo não encontrado.' });
+          }
+          res.setHeader('Cache-Control', 'private, no-store');
+          if (!isSafeImage) {
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.type('application/octet-stream');
+          }
+          return res.sendFile(filePath);
+        } catch (error) {
+          console.warn(`[uploads] falha ao servir anexo: ${error.message}`);
+          return res.status(404).json({ error: 'Arquivo não encontrado.' });
+        }
+      });
+    }
+    const filePath = path.resolve(uploadsPath, filename);
+    const basePath = path.resolve(uploadsPath);
+    if (!filePath.startsWith(`${basePath}${path.sep}`) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.sendFile(filePath);
+  } catch (error) {
+    console.warn(`[uploads] falha ao servir logo: ${error.message}`);
+    return res.status(404).json({ error: 'Arquivo não encontrado.' });
+  }
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
@@ -147,7 +216,6 @@ app.use('/api/integrations/printguard', printGuardRoutes);
 app.use('/api/telemetry', telemetryRoutes);
 
 const jwt = require('jsonwebtoken');
-const prisma = require('./lib/prisma');
 const { resolveUserAccess, hasPermission } = require('./auth/permissions');
 const onlineUsersByTenant = new Map();
 const internalViewersByTenant = new Map();
