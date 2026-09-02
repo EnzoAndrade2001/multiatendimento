@@ -3,6 +3,7 @@ const crmController = require('./crmController');
 const aiService = require('../services/aiService');
 const printGuardService = require('../services/printGuardService');
 const { normalizeServiceOrderStatus, rawServiceOrderStatus } = require('../utils/serviceOrderStatus');
+const { parseFirebirdDate } = require('../utils/firebirdDate');
 const { generateText } = aiService;
 
 const SENTINELA_SYNC_STALE_AFTER_MINUTES = 15;
@@ -104,7 +105,7 @@ async function getRevenueDashboard(req, res) {
       const raw = payload?.raw || payload || {};
       for (const key of keys) {
         const val = raw[key] || raw[key.toLowerCase()] || raw[key.toUpperCase()] || payload?.[key];
-        if (val) { const d = new Date(val); if (!Number.isNaN(d.getTime())) return d; }
+        if (val) { const d = parseFirebirdDate(val); if (d) return d; }
       }
       return null;
     }
@@ -425,7 +426,7 @@ async function getBenchmark(req, res) {
       const raw = payload?.raw || payload || {};
       for (const key of keys) {
         const val = raw[key] || raw[key.toLowerCase()] || raw[key.toUpperCase()] || payload?.[key];
-        if (val) { const d = new Date(val); if (!Number.isNaN(d.getTime())) return d; }
+        if (val) { const d = parseFirebirdDate(val); if (d) return d; }
       }
       return null;
     }
@@ -875,7 +876,7 @@ async function getDrilldown(req, res) {
       const raw = payload?.raw || payload || {};
       for (const key of keys) {
         const val = raw[key] || raw[key.toLowerCase()] || raw[key.toUpperCase()] || payload?.[key];
-        if (val) { const d = new Date(val); if (!Number.isNaN(d.getTime())) return d; }
+        if (val) { const d = parseFirebirdDate(val); if (d) return d; }
       }
       return null;
     }

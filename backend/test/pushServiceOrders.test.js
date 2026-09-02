@@ -76,6 +76,10 @@ test('push de serviceOrders grava em ServiceOrder, nao so no log bruto (regressa
       nmCliente: 'GRAFICA SANTOS',
       cdequipamento: '314',
       status: 'FINALIZADA',
+      dtinclusao: '2026-08-24T00:00:00',
+      dtatendimento: '2026-08-26T00:00:00',
+      hratendimento: '09:45:06',
+      dtfechamento: '2026-08-26T09:45:06',
     }],
   });
   const res = fakeRes();
@@ -87,4 +91,6 @@ test('push de serviceOrders grava em ServiceOrder, nao so no log bruto (regressa
   assert.ok(createdServiceOrder, 'prisma.serviceOrder.create deveria ter sido chamado');
   assert.equal(createdServiceOrder.externalId, '78844');
   assert.equal(createdServiceOrder.externalSource, 'firebird');
+  assert.equal(createdServiceOrder.createdAt.toISOString(), '2026-08-24T03:00:00.000Z');
+  assert.equal(createdServiceOrder.closedAt.toISOString(), '2026-08-26T12:45:06.000Z');
 });

@@ -2,6 +2,7 @@ const prisma = require('../lib/prisma');
 const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { hasPermission } = require('../auth/permissions');
 const billingDocuments = require('../services/billingDocumentService');
+const { parseFirebirdDate } = require('../utils/firebirdDate');
 
 const HISTORY_DEFAULT_LIMIT = 25;
 const HISTORY_MAX_LIMIT = 100;
@@ -105,25 +106,8 @@ function asNumber(value) {
 }
 
 function asDate(value, timeValue) {
-  if (!value) return null;
-  const input = String(value).trim();
-  const timeMatch = timeValue && String(timeValue).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  const time = timeMatch
-    ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}:${timeMatch[3] || '00'}`
-    : null;
-  const brazilian = input.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (brazilian) {
-    const [, dd, mm, yyyy, matchedHour, matchedMinute, matchedSecond] = brazilian;
-    const [hh, mi, ss] = time
-      ? time.split(':')
-      : [matchedHour || '00', matchedMinute || '00', matchedSecond || '00'];
-    const parsed = new Date(`${yyyy}-${mm}-${dd}T${hh.padStart(2, '0')}:${mi}:${ss}`);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-  }
-  const isoDay = input.match(/^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.\d+)?(?:Z)?)?$/);
-  const isoDate = isoDay && time ? `${isoDay[1]}T${time}` : input;
-  const parsed = new Date(isoDate);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  const parsed = parseFirebirdDate(value, timeValue);
+  return parsed ? parsed.toISOString() : null;
 }
 
 function asCalendarDate(value) {

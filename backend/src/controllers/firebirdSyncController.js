@@ -9,9 +9,15 @@ const { mediaPath } = require('../utils/uploads');
 const billingDocumentService = require('../services/billingDocumentService');
 const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
 const { normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
+const { parseFirebirdDate } = require('../utils/firebirdDate');
+
+// Mantem o nome usado pelos normalizadores legados, mas com a semantica
+// correta para datas Firebird sem fuso (horario local de Sao Paulo).
+const normalizeDate = parseFirebirdDate;
 
 const RECEIVABLE_SNAPSHOT_ENTITY = 'receivablesSnapshot';
 const EQUIPMENT_SNAPSHOT_ENTITY = 'equipmentsSnapshot';
+const SERVICE_ORDER_OPEN_SNAPSHOT_ENTITY = 'serviceOrdersOpenSnapshot';
 
 function pick(...values) {
   for (const value of values) {
@@ -26,18 +32,6 @@ function pick(...values) {
 // 'true'/'false'; `tfinativo` legado chega como 'S'/'N'.
 function isInactiveFlag(value) {
   return ['1', 'S', 'SIM', 'TRUE', 'Y', 'YES'].includes(String(value ?? '').trim().toUpperCase());
-}
-
-function normalizeDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-
-  const text = String(value).trim();
-  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/);
-  if (!match) return null;
-
-  const [, dd, mm, yyyy, hh, mi, ss] = match;
-  return new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi), Number(ss));
 }
 
 function normalizePhone(value, fallback) {
@@ -232,6 +226,57 @@ async function reconcileEquipmentsSnapshot(tenantId, snapshot) {
     });
   }
   return missingIds.length;
+}
+
+// O iLux altera STATUS/DTATENDIMENTO diretamente na IXLOS e, em varios
+// registros, preserva ATUALIZADO com a data de inclusao. Nesse caso nenhum
+// cursor incremental consegue descobrir que uma O.S. deixou de estar aberta.
+// O agente envia uma janela autoritativa das O.S. ainda abertas; as que
+// desapareceram dessa janela sao marcadas como concluidas no espelho local.
+async function reconcileServiceOrdersOpenSnapshot(tenantId, snapshot) {
+  const externalIds = [...new Set((snapshot?.externalIds || []).map(String).filter((value) => /^\d+$/.test(value)))];
+  const declaredCount = Number(snapshot?.count);
+  if (!snapshot?.completeWindow || !Array.isArray(snapshot?.externalIds) || declaredCount !== externalIds.length) {
+    throw new Error('Snapshot de O.S. abertas invalido ou incompleto; reconciliacao ignorada por seguranca.');
+  }
+
+  const present = new Set(externalIds);
+  const cached = await prisma.externalSyncRecord.findMany({
+    where: { tenantId, source: 'firebird', entity: 'serviceOrders' },
+    select: { id: true, externalId: true, payload: true },
+  });
+  let reconciled = 0;
+  for (const record of cached) {
+    if (present.has(String(record.externalId))) continue;
+    const payload = record.payload && typeof record.payload === 'object' ? record.payload : {};
+    const raw = payload.raw && typeof payload.raw === 'object' ? payload.raw : payload;
+    const status = String(raw.status ?? payload.status ?? '').trim().toUpperCase();
+    if (!['A', 'E', 'M', 'T', 'P'].includes(status)) continue;
+
+    const reconciledAt = snapshot.capturedAt || new Date().toISOString();
+    const nextRaw = {
+      ...raw,
+      status: 'O',
+      nmstatus: raw.dtfechamento ? raw.nmstatus : 'CONCLUIDO POR SINCRONIZACAO',
+      sourceReconciledClosed: true,
+      sourceReconciledAt: reconciledAt,
+    };
+    await prisma.externalSyncRecord.update({
+      where: { id: record.id },
+      data: {
+        payload: {
+          ...payload,
+          status: 'O',
+          raw: nextRaw,
+          sourceReconciledClosed: true,
+          sourceReconciledAt: reconciledAt,
+        },
+        syncedAt: new Date(),
+      },
+    });
+    reconciled += 1;
+  }
+  return reconciled;
 }
 
 async function findOrCreateContact(tenant, instance, data) {
@@ -489,17 +534,37 @@ async function upsertServiceOrder(tenant, instance, data) {
     state: pick(data.state, data.uf),
   });
 
+  const openedAt = parseFirebirdDate(
+    pick(data.createdAt, data.dtInclusao, data.dtinclusao, data.raw?.dtinclusao),
+    pick(data.time, data.hrInclusao, data.hrinclusao, data.raw?.hrinclusao),
+  );
+  const attendedAt = parseFirebirdDate(
+    pick(data.resolvedAt, data.dtAtendimento, data.dtatendimento, data.raw?.dtatendimento),
+    pick(data.attendedTime, data.hrAtendimento, data.hratendimento, data.raw?.hratendimento),
+  );
+  const closedAt = parseFirebirdDate(
+    pick(data.closedAt, data.dtFechamento, data.dtfechamento, data.raw?.dtfechamento),
+  );
+  const hasClosedAt = ['closedAt', 'dtFechamento', 'dtfechamento'].some((key) => (
+    Object.prototype.hasOwnProperty.call(data, key) || Object.prototype.hasOwnProperty.call(data.raw || {}, key)
+  ));
+  const hasAttendedAt = ['resolvedAt', 'dtAtendimento', 'dtatendimento'].some((key) => (
+    Object.prototype.hasOwnProperty.call(data, key) || Object.prototype.hasOwnProperty.call(data.raw || {}, key)
+  ));
+
   const defaults = {
     tenantId: tenant.id,
     contactId: contact.id,
     equipmentId: equipment.id,
     externalSource: 'firebird',
     externalId,
-    externalUpdatedAt: normalizeDate(pick(data.updatedAt, data.atualizado, data.dtAtendimento, data.dtatendimento)),
+    externalUpdatedAt: parseFirebirdDate(pick(data.updatedAt, data.atualizado, data.raw?.atualizado)) || openedAt || attendedAt || closedAt,
     status: normalizeStatus(pick(data.status, data.nmStatus, data.nmstatus, data.raw?.status, data.raw?.nmstatus, data.tffaturar, data.raw?.tffaturar)),
     defect: pick(data.defect, data.nmDefeito, data.causa, data.sintoma),
     technicalNotes: [pick(data.action, data.acao), pick(data.observacao), pick(data.nmSuporteT)].filter(Boolean).join(' | ') || null,
-    resolvedAt: normalizeDate(pick(data.resolvedAt, data.dtAtendimento, data.dtatendimento)),
+    resolvedAt: attendedAt || closedAt || null,
+    ...(openedAt ? { createdAt: openedAt } : {}),
+    ...(closedAt ? { closedAt } : {}),
   };
 
   const existing = await prisma.serviceOrder.findFirst({
@@ -520,7 +585,9 @@ async function upsertServiceOrder(tenant, instance, data) {
         status: defaults.status || existing.status,
         defect: defaults.defect || existing.defect,
         technicalNotes: defaults.technicalNotes || existing.technicalNotes,
-        resolvedAt: defaults.resolvedAt || existing.resolvedAt,
+        ...(openedAt ? { createdAt: openedAt } : {}),
+        ...(hasClosedAt ? { closedAt: closedAt || null } : {}),
+        ...(hasAttendedAt ? { resolvedAt: attendedAt || closedAt || null } : {}),
       },
     });
   }
@@ -673,6 +740,11 @@ async function pushBatch(req, res) {
         }
         if (entity === EQUIPMENT_SNAPSHOT_ENTITY) {
           stats.reconciled += await reconcileEquipmentsSnapshot(tenant.id, record);
+          stats.stored += 1;
+          continue;
+        }
+        if (entity === SERVICE_ORDER_OPEN_SNAPSHOT_ENTITY) {
+          stats.reconciled += await reconcileServiceOrdersOpenSnapshot(tenant.id, record);
           stats.stored += 1;
           continue;
         }

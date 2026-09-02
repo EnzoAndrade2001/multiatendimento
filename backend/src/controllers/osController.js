@@ -8,6 +8,7 @@ const aiService = require('../services/aiService');
 const { draftServiceOrder } = aiService;
 const { renderOfficialOsTemplate } = require('../templates/officialOsTemplate');
 const { getLatestCompanyProfile } = require('../services/companyProfileService');
+const { parseFirebirdDate } = require('../utils/firebirdDate');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -53,8 +54,7 @@ function firstPdfValue(...values) {
 
 function pdfDate(value, fallback = new Date()) {
   if (!value) return fallback;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+  return parseFirebirdDate(value) || fallback;
 }
 
 function pdfOrderStatus(value) {

@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.9"
+DEFAULT_AGENT_VERSION = "1.1.0"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -1844,6 +1844,19 @@ class FirebirdRepository:
         sql = self._service_orders_select("os.SEQOS > ?", limit)
         yield from self._rows(sql, (cursor,))
 
+    def fetch_service_orders_open(self) -> list[dict[str, Any]]:
+        """Return the complete authoritative window of open O.S.
+
+        Some iLux installations do not advance IXLOS.ATUALIZADO when a
+        technician closes an order. A bounded cursor can therefore retain an
+        order as open forever. The open-status query is small in practice and
+        lets the CRM reconcile records that disappeared from this window.
+        """
+        sql = self._service_orders_select(
+            "trim(coalesce(os.STATUS, '')) in ('A', 'E', 'M', 'T', 'P')",
+        )
+        return list(self._rows(sql, ()))
+
     def get_service_order_watermarks(self) -> tuple[int, int]:
         """Return current high-water marks without reading O.S. rows."""
         con = self.connect()
@@ -2797,8 +2810,17 @@ def _sync_service_orders_incremental_unlocked(
             # attendance-based path alive and retry this cursor next cycle.
             logging.warning("Nao foi possivel ler O.S. alteradas por ATUALIZADO: %s", exc)
 
+    # Rele o conjunto atual de O.S. abertas para corrigir o caso em que o
+    # fechamento altera apenas STATUS/DTFECHAMENTO, sem criar atendimento e
+    # sem atualizar IXLOS.ATUALIZADO. Repositórios/testes antigos podem ainda
+    # não implementar esse método.
+    open_rows = []
+    fetch_open = getattr(repo, "fetch_service_orders_open", None)
+    if callable(fetch_open):
+        open_rows = list(fetch_open())
+
     rows_by_seq: dict[int, dict[str, Any]] = {}
-    for raw in new_rows + changed_rows + changed_by_update_rows:
+    for raw in new_rows + changed_rows + changed_by_update_rows + open_rows:
         raw_seq = raw.get("seqos")
         if raw_seq is not None:
             rows_by_seq[int(raw_seq)] = raw
@@ -2812,6 +2834,14 @@ def _sync_service_orders_incremental_unlocked(
     ]
     if normalized:
         crm.push("serviceOrders", normalized)
+
+    if open_rows:
+        crm.push("serviceOrdersOpenSnapshot", [{
+            "completeWindow": True,
+            "count": len(open_rows),
+            "externalIds": [str(row["seqos"]) for row in open_rows if row.get("seqos") is not None],
+            "capturedAt": datetime.now().isoformat(timespec="seconds"),
+        }])
 
     if new_rows:
         seq_cursor = max(
