@@ -364,12 +364,18 @@ server.listen(PORT, () => {
         const webhookUrl = `${backendUrl}/api/webhook`;
         
         for (const inst of instances) {
+          // Ignore deleted Evolution records and isolate failures per instance.
+          if (String(inst.instanceName || '').startsWith('DELETED_')) continue;
+          try {
           const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: inst.tenantId } });
           const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
           const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
           if (evolutionUrl && evolutionKey) {
             console.log(`[startup-webhook-fix] Atualizando webhook da instância ${inst.instanceName} com URL ${webhookUrl}...`);
-            await evolution.setWebhook(evolutionUrl, evolutionKey, inst.instanceName, webhookUrl);
+           await evolution.setWebhook(evolutionUrl, evolutionKey, inst.instanceName, webhookUrl);
+          }
+          } catch (err) {
+            console.error(`[startup-webhook-fix] Falha na instÃ¢ncia ${inst.instanceName}:`, err.message);
           }
         }
         console.log(`[startup-webhook-fix] Concluído.`);
