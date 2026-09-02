@@ -45,6 +45,9 @@ async function main() {
       if (createdAt) data.createdAt = createdAt;
       if (hasClosedAt) data.closedAt = closedAt;
       if (hasAttendedAt) data.resolvedAt = attendedAt || closedAt || null;
+      const sourceStatus = String(raw.status || payload.status || '').trim().toUpperCase();
+      if (sourceStatus === 'O') data.status = 'FINALIZADA';
+      if (sourceStatus === 'C') data.status = 'CANCELADA';
       if (!Object.keys(data).length) continue;
       const result = await prisma.serviceOrder.updateMany({
         where: { tenantId: record.tenantId, externalSource: 'firebird', externalId: String(record.externalId) },
