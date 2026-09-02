@@ -274,6 +274,19 @@ async function reconcileServiceOrdersOpenSnapshot(tenantId, snapshot) {
         syncedAt: new Date(),
       },
     });
+    const sourceClosedAt = parseFirebirdDate(raw.dtfechamento || payload.closedAt);
+    const sourceAttendedAt = parseFirebirdDate(
+      raw.dtatendimento || payload.resolvedAt,
+      raw.hratendimento || payload.hratendimento,
+    );
+    await prisma.serviceOrder.updateMany({
+      where: { tenantId, externalSource: 'firebird', externalId: String(record.externalId) },
+      data: {
+        status: 'FINALIZADA',
+        ...(sourceClosedAt ? { closedAt: sourceClosedAt } : {}),
+        ...((sourceAttendedAt || sourceClosedAt) ? { resolvedAt: sourceAttendedAt || sourceClosedAt } : {}),
+      },
+    });
     reconciled += 1;
   }
   return reconciled;
