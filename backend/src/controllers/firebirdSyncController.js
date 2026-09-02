@@ -274,7 +274,10 @@ async function reconcileServiceOrdersOpenSnapshot(tenantId, snapshot) {
         syncedAt: new Date(),
       },
     });
-    const sourceClosedAt = parseFirebirdDate(raw.dtfechamento || payload.closedAt);
+    const sourceClosedAt = parseFirebirdDate(
+      raw.dtfechamento || payload.closedAt,
+      raw.hratendimento || payload.hratendimento,
+    );
     const sourceAttendedAt = parseFirebirdDate(
       raw.dtatendimento || payload.resolvedAt,
       raw.hratendimento || payload.hratendimento,
@@ -557,6 +560,7 @@ async function upsertServiceOrder(tenant, instance, data) {
   );
   const closedAt = parseFirebirdDate(
     pick(data.closedAt, data.dtFechamento, data.dtfechamento, data.raw?.dtfechamento),
+    pick(data.closedTime, data.hrFechamento, data.hratendimento, data.raw?.hratendimento),
   );
   const hasClosedAt = ['closedAt', 'dtFechamento', 'dtfechamento'].some((key) => (
     Object.prototype.hasOwnProperty.call(data, key) || Object.prototype.hasOwnProperty.call(data.raw || {}, key)

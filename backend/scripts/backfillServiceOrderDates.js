@@ -34,7 +34,10 @@ async function main() {
       );
       const hasClosedAt = Object.prototype.hasOwnProperty.call(raw, 'dtfechamento')
         || Object.prototype.hasOwnProperty.call(payload, 'closedAt');
-      const closedAt = parseFirebirdDate(first(raw.dtfechamento, payload.closedAt));
+      const closedAt = parseFirebirdDate(
+        first(raw.dtfechamento, payload.closedAt),
+        first(raw.hratendimento, payload.hratendimento),
+      );
       const hasAttendedAt = Object.prototype.hasOwnProperty.call(raw, 'dtatendimento')
         || Object.prototype.hasOwnProperty.call(payload, 'resolvedAt');
       const attendedAt = parseFirebirdDate(

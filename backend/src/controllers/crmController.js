@@ -276,7 +276,10 @@ function normalizeExternalOrder(payload, fallback = {}) {
     rawValue(source, 'time', 'hrinclusao')
   ) || asDate(rawValue(source, 'updatedAt'));
   const attendedAt = asDate(rawValue(source, 'resolvedAt', 'dtatendimento'), rawValue(source, 'hratendimento'));
-  const closedAt = asDate(rawValue(source, 'closedAt', 'dtfechamento'));
+  const closedAt = asDate(
+    rawValue(source, 'closedAt', 'dtfechamento'),
+    rawValue(source, 'closedTime', 'hrfechamento', 'hratendimento'),
+  );
   // `observacao` dos lotes antigos tambem recebeu o nome do tipo da O.S.; nao
   // deve ser tratado como fechamento. O fechamento real vem de OBSDEFEITOATS.
   const closing = first(

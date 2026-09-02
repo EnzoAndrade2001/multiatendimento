@@ -103,9 +103,12 @@ async function getRevenueDashboard(req, res) {
 
     function fbDate(payload, ...keys) {
       const raw = payload?.raw || payload || {};
+      const timeKey = keys.some((key) => String(key).toLowerCase().includes('fechamento'))
+        ? 'hratendimento'
+        : keys.some((key) => String(key).toLowerCase().includes('inclusao')) ? 'hrinclusao' : null;
       for (const key of keys) {
         const val = raw[key] || raw[key.toLowerCase()] || raw[key.toUpperCase()] || payload?.[key];
-        if (val) { const d = parseFirebirdDate(val); if (d) return d; }
+        if (val) { const d = parseFirebirdDate(val, timeKey ? raw[timeKey] : null); if (d) return d; }
       }
       return null;
     }
@@ -424,9 +427,12 @@ async function getBenchmark(req, res) {
 
     function fbDate(payload, ...keys) {
       const raw = payload?.raw || payload || {};
+      const timeKey = keys.some((key) => String(key).toLowerCase().includes('fechamento'))
+        ? 'hratendimento'
+        : keys.some((key) => String(key).toLowerCase().includes('inclusao')) ? 'hrinclusao' : null;
       for (const key of keys) {
         const val = raw[key] || raw[key.toLowerCase()] || raw[key.toUpperCase()] || payload?.[key];
-        if (val) { const d = parseFirebirdDate(val); if (d) return d; }
+        if (val) { const d = parseFirebirdDate(val, timeKey ? raw[timeKey] : null); if (d) return d; }
       }
       return null;
     }
@@ -874,9 +880,12 @@ async function getDrilldown(req, res) {
 
     function fbDate(payload, ...keys) {
       const raw = payload?.raw || payload || {};
+      const timeKey = keys.some((key) => String(key).toLowerCase().includes('fechamento'))
+        ? 'hratendimento'
+        : keys.some((key) => String(key).toLowerCase().includes('inclusao')) ? 'hrinclusao' : null;
       for (const key of keys) {
         const val = raw[key] || raw[key.toLowerCase()] || raw[key.toUpperCase()] || payload?.[key];
-        if (val) { const d = parseFirebirdDate(val); if (d) return d; }
+        if (val) { const d = parseFirebirdDate(val, timeKey ? raw[timeKey] : null); if (d) return d; }
       }
       return null;
     }

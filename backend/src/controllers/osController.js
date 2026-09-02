@@ -121,6 +121,9 @@ async function resolveServiceOrderForPdf(tenantId, id) {
     firstPdfValue(raw.dtinclusao, payload.createdAt, historicalRecord.receivedAt),
     historicalRecord.receivedAt,
   );
+  const createdAtWithTime = raw.dtinclusao
+    ? (parseFirebirdDate(raw.dtinclusao, raw.hrinclusao) || createdAt)
+    : createdAt;
   const contact = {
     id: customer?.id || `firebird-client-${clientExternalId || id}`,
     tenantId,
@@ -172,9 +175,11 @@ async function resolveServiceOrderForPdf(tenantId, id) {
       technicalNotes: firstPdfValue(payload.action, payload.observacao, raw.obsdefeitoats, null),
       meters: null,
       userId: null,
-      createdAt,
-      updatedAt: pdfDate(historicalRecord.syncedAt, createdAt),
-      resolvedAt: payload.resolvedAt ? pdfDate(payload.resolvedAt, null) : null,
+      createdAt: createdAtWithTime,
+      updatedAt: pdfDate(historicalRecord.syncedAt, createdAtWithTime),
+      resolvedAt: payload.resolvedAt
+        ? (parseFirebirdDate(payload.resolvedAt, raw.hratendimento) || pdfDate(payload.resolvedAt, null))
+        : null,
       contact,
       equipment,
       tenant,
