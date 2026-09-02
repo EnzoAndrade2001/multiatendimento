@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 import firebirdsql
 import requests
@@ -44,8 +45,12 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.0"
+DEFAULT_AGENT_VERSION = "1.1.1"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
+# O pacote oficial e o painel de configurações usam este endpoint. Manter um
+# valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
+# tente chamar requests com uma URL relativa ("/api/...").
+DEFAULT_CRM_BASE_URL = "https://api-crm.lcddigital.com.br"
 AGENT_CAPABILITIES = (
     "sync.contacts",
     "sync.equipments",
@@ -79,6 +84,23 @@ def first_non_empty(*values: Any) -> str | None:
         if text:
             return text
     return None
+
+
+def normalize_crm_base_url(value: Any) -> str:
+    """Normaliza a URL do CRM antes de montar os endpoints do agente.
+
+    Instalações antigas às vezes guardam somente o domínio, sem esquema. O
+    requests não aceita esse formato; como o agente oficial fala com o CRM por
+    HTTPS, completamos o esquema automaticamente. URL vazia usa o endpoint
+    oficial, enquanto formatos inválidos continuam sendo rejeitados por
+    ``validate_config`` com uma mensagem clara.
+    """
+    text = str(value or "").strip().strip('"').strip("'")
+    if not text:
+        return DEFAULT_CRM_BASE_URL
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text):
+        text = f"https://{text}"
+    return text.rstrip("/")
 
 
 def fit_text(value: Any, max_length: int) -> str:
@@ -216,7 +238,6 @@ def safe_pdf_filename_part(value: Any, fallback: str = "CLIENTE") -> str:
     cleaned = re.sub(r"[^A-Za-z0-9 ._-]+", " ", str(value or "")).strip()
     return (cleaned or fallback)[:70]
 
-
 @dataclass
 class AppConfig:
     agent_version: str = DEFAULT_AGENT_VERSION
@@ -328,7 +349,7 @@ class AppConfig:
             firebird_password=os.getenv("FIREBIRD_PASSWORD", ""),
             firebird_charset=os.getenv("FIREBIRD_CHARSET", "WIN1252"),
             firebird_company_id=env_int("FIREBIRD_COMPANY_ID", 1),
-            crm_base_url=os.getenv("CRM_BASE_URL", "").rstrip("/"),
+            crm_base_url=normalize_crm_base_url(os.getenv("CRM_BASE_URL", "")),
             crm_tenant_slug=os.getenv("CRM_TENANT_SLUG", ""),
             crm_sync_token=os.getenv("CRM_SYNC_TOKEN", ""),
             sync_interval_seconds=env_int("SYNC_INTERVAL_SECONDS", 300),
@@ -3318,6 +3339,13 @@ def validate_config(config: AppConfig) -> None:
     missing = [name for name, value in required.items() if not value]
     if missing:
         raise RuntimeError(f"Configuração ausente: {', '.join(missing)}")
+
+    parsed_crm_url = urlsplit(config.crm_base_url)
+    if parsed_crm_url.scheme not in {"http", "https"} or not parsed_crm_url.netloc:
+        raise RuntimeError(
+            "CRM_BASE_URL inválida. Informe o endereço completo, por exemplo: "
+            "https://api-crm.lcddigital.com.br"
+        )
 
 
 def validate_firebird_config(config: AppConfig) -> None:

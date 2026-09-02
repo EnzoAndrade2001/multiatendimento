@@ -160,6 +160,24 @@ class AgentGUI(ctk.CTk):
         self.login_entry = self._input(frame, "Usuário Firebird", 6)
         self.password_entry = self._input(frame, "Senha Firebird", 8, show="•")
 
+        connection_actions = ctk.CTkFrame(frame, fg_color="transparent")
+        connection_actions.grid(row=10, column=0, padx=10, pady=(4, 2), sticky="ew")
+        connection_actions.grid_columnconfigure(0, weight=0)
+        connection_actions.grid_columnconfigure(1, weight=1)
+        self.test_connection_btn = ctk.CTkButton(
+            connection_actions,
+            text="Testar conexão com o banco",
+            command=self.test_firebird_connection,
+        )
+        self.test_connection_btn.grid(row=0, column=0, sticky="w")
+        self.connection_status_label = ctk.CTkLabel(
+            connection_actions,
+            text="",
+            text_color="#94a3b8",
+            anchor="w",
+        )
+        self.connection_status_label.grid(row=0, column=1, padx=(12, 0), sticky="ew")
+
     def _create_sync_tab(self):
         frame = self._scrollable_tab("Sincronização")
         self._section_title(
@@ -431,6 +449,40 @@ class AgentGUI(ctk.CTk):
         self.set_startup(self.autostart_var.get())
         if log:
             self.log_message("Configurações salvas com sucesso.")
+
+    def test_firebird_connection(self):
+        """Testa o acesso ao Firebird sem bloquear a interface do agente."""
+        self.save_settings(log=False)
+        self.test_connection_btn.configure(state="disabled", text="Testando...")
+        self.connection_status_label.configure(text="Abrindo conexão com o banco...", text_color="#eabf32")
+        threading.Thread(target=self._test_firebird_connection_worker, daemon=True).start()
+
+    def _test_firebird_connection_worker(self):
+        try:
+            import main as agent_main
+
+            config = agent_main.AppConfig.from_env()
+            agent_main.validate_firebird_config(config)
+            connection = agent_main.FirebirdRepository(config).connect()
+            try:
+                cursor = connection.cursor()
+                cursor.execute("select 1 from RDB$DATABASE")
+                cursor.fetchone()
+            finally:
+                connection.close()
+            message = "Conexão com o Firebird realizada com sucesso."
+            color = "#4ade80"
+            logging.info(message)
+        except Exception as exc:
+            message = f"Falha na conexão com o Firebird: {exc}"
+            color = "#f87171"
+            logging.error(message)
+        self.after(0, self._finish_firebird_connection_test, message, color)
+
+    def _finish_firebird_connection_test(self, message, color):
+        self.test_connection_btn.configure(state="normal", text="Testar conexão com o banco")
+        self.connection_status_label.configure(text=message, text_color=color)
+        self.log_message(message)
 
     def _financial_scan_interval(self):
         try:

@@ -10,7 +10,15 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 import main as agent_main
-from main import AGENT_CAPABILITIES, DEFAULT_AGENT_VERSION, AppConfig, CRMClient, StateStore
+from main import (
+    AGENT_CAPABILITIES,
+    DEFAULT_AGENT_VERSION,
+    DEFAULT_CRM_BASE_URL,
+    AppConfig,
+    CRMClient,
+    StateStore,
+    normalize_crm_base_url,
+)
 
 
 class RecordingSession:
@@ -23,7 +31,17 @@ class RecordingSession:
 
 class AgentHeartbeatTest(unittest.TestCase):
     def test_default_version_matches_current_release(self):
-        self.assertEqual(DEFAULT_AGENT_VERSION, "1.0.9")
+        self.assertEqual(DEFAULT_AGENT_VERSION, "1.1.1")
+
+    def test_crm_base_url_is_normalized_for_old_env_files(self):
+        with patch.dict(
+            os.environ,
+            {"CRM_BASE_URL": "api-crm.lcddigital.com.br/"},
+            clear=False,
+        ):
+            config = AppConfig.from_env()
+
+        self.assertEqual(config.crm_base_url, "https://api-crm.lcddigital.com.br")
 
     def test_version_and_protocol_are_configurable_from_environment(self):
         with patch.dict(
@@ -35,6 +53,13 @@ class AgentHeartbeatTest(unittest.TestCase):
 
         self.assertEqual(config.agent_version, "2.3.4")
         self.assertEqual(config.agent_protocol_version, "7")
+
+    def test_crm_url_gets_https_scheme_when_domain_only(self):
+        self.assertEqual(
+            normalize_crm_base_url("api-crm.lcddigital.com.br/"),
+            "https://api-crm.lcddigital.com.br",
+        )
+        self.assertEqual(normalize_crm_base_url(""), DEFAULT_CRM_BASE_URL)
 
     def test_ping_keeps_tenant_slug_and_adds_agent_metadata(self):
         config = AppConfig(
