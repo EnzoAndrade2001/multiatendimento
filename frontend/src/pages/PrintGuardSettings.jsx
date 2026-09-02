@@ -108,6 +108,11 @@ export default function PrintGuardSettings() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => { load(); }, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
   async function handlePairing() {
     const code = pairingCode.trim();
     if (!code) {
@@ -242,7 +247,7 @@ export default function PrintGuardSettings() {
   );
 }
 
-function Detail({ label, value }) { return <div style={styles.detail}><span>{label}</span><strong title={value}>{value}</strong></div>; }
+function Detail({ label, value }) { return <div style={styles.detail}><span>{label}</span><strong style={styles.detailValue} title={value}>{value}</strong></div>; }
 function Metric({ icon, label, value, tone = 'default' }) { return <div style={styles.metric}><span style={{ ...styles.metricIcon, ...(styles[`${tone}Metric`] || {}) }}>{icon}</span><span style={styles.metricBody}><small>{label}</small><strong>{numberLabel(value)}</strong></span></div>; }
 
 const responsiveCss = `
@@ -250,7 +255,8 @@ const responsiveCss = `
   .printguard-page input:focus-visible, .printguard-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .printguard-page .spin { animation: printguard-spin .8s linear infinite; }
   @keyframes printguard-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-  @media (max-width: 900px) { .printguard-connection-grid { grid-template-columns: 1fr !important; } .printguard-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+  @media (max-width: 1050px) { .printguard-connection-grid { grid-template-columns: 1fr !important; } .printguard-pairing-row { grid-template-columns: 1fr !important; } .printguard-action-stack { flex-direction: row !important; flex-wrap: wrap; } }
+  @media (max-width: 900px) { .printguard-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
   @media (max-width: 620px) { .printguard-page { padding: 1rem !important; } .printguard-metric-grid { grid-template-columns: 1fr !important; } .printguard-pairing-row { grid-template-columns: 1fr !important; } .printguard-action-stack { flex-direction: row !important; } .printguard-page .printguard-table-wrap { overflow-x: auto; } .printguard-page table { min-width: 560px; } }
 `;
 
@@ -266,7 +272,7 @@ const styles = {
   alertClose: { marginLeft: 'auto', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', display: 'grid', placeItems: 'center' },
   connectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--space-5)', marginBottom: 'var(--space-5)' },
   card: { minWidth: 0, padding: 'var(--space-5)', marginBottom: 'var(--space-5)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-panel)', boxShadow: 'var(--shadow-xs)' },
-  cardHeading: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', marginBottom: 'var(--space-5)', flexWrap: 'wrap' },
+  cardHeading: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', marginBottom: 'var(--space-5)', flexWrap: 'wrap', minWidth: 0 },
   cardTitle: { display: 'flex', alignItems: 'center', gap: '.5rem', margin: 0, color: 'var(--text-main)', fontSize: 'var(--text-lg)', fontWeight: 800 },
   cardSubtitle: { margin: '.4rem 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.45 },
   statusPill: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', borderRadius: 999, padding: '.38rem .6rem', fontSize: 'var(--text-xs)', fontWeight: 800, whiteSpace: 'nowrap' },
@@ -285,6 +291,7 @@ const styles = {
   statusDotOn: { background: 'var(--success)', boxShadow: '0 0 0 4px var(--success-light)' },
   connectionDetails: { display: 'grid', gap: '.55rem', marginBottom: 'var(--space-5)' },
   detail: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1rem', paddingBottom: '.55rem', borderBottom: '1px solid var(--border-color)', minWidth: 0 },
+  detailValue: { minWidth: 0, overflowWrap: 'anywhere', wordBreak: 'break-word', textAlign: 'right' },
   detailSpan: {},
   detailStrong: {},
   connectionActions: { display: 'flex', alignItems: 'center', gap: '.6rem', flexWrap: 'wrap' },
@@ -303,5 +310,5 @@ const styles = {
   th: { padding: '.7rem .8rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-muted)', textAlign: 'left', fontSize: 'var(--text-xs)', fontWeight: 800 },
   td: { padding: '.75rem .8rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
   mappingStatus: { display: 'inline-flex', alignItems: 'center', gap: '.3rem', color: 'var(--success-text, var(--success))', fontSize: 'var(--text-xs)', fontWeight: 800 },
-  footerNote: { display: 'flex', alignItems: 'center', gap: '.4rem', color: 'var(--text-dim)', fontSize: 'var(--text-xs)' },
+  footerNote: { display: 'flex', alignItems: 'center', gap: '.4rem', color: 'var(--text-dim)', fontSize: 'var(--text-xs)', flexWrap: 'wrap' },
 };

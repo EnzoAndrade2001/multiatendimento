@@ -571,7 +571,7 @@ async function getSummary(req, res) {
     activeEquipmentContractLinks,
     contractRecords,
     syncedServiceOrders,
-    syncedOpenServiceOrders,
+    syncedOpenServiceOrderRecords,
     localServiceOrders,
     localOpenServiceOrders,
     customerRevenue,
@@ -590,7 +590,7 @@ async function getSummary(req, res) {
       select: { externalId: true, payload: true, syncedAt: true, receivedAt: true },
     }),
     prisma.externalSyncRecord.count({ where: { tenantId, source: 'firebird', entity: 'serviceOrders' } }),
-    prisma.externalSyncRecord.count({
+    prisma.externalSyncRecord.findMany({
       where: {
         tenantId,
         source: 'firebird',
@@ -599,6 +599,7 @@ async function getSummary(req, res) {
           payload: { path: ['raw', 'status'], equals: status },
         })),
       },
+      select: { externalId: true, payload: true },
     }),
     prisma.serviceOrder.count({ where: { tenantId } }),
     prisma.serviceOrder.count({ where: { tenantId, status: { not: 'FINALIZADA' } } }),
@@ -608,6 +609,10 @@ async function getSummary(req, res) {
       select: { firebirdLastSyncAt: true, firebirdLastSyncStatus: true, firebirdLastSyncError: true },
     }),
   ]);
+
+  const syncedOpenServiceOrders = syncedOpenServiceOrderRecords.filter((record) => (
+    !isServiceOrderClosed(normalizeExternalOrder(record.payload, { externalId: record.externalId }))
+  )).length;
 
   const contracts = contractRecords.map(normalizeContract);
   const activeContractIds = new Set(

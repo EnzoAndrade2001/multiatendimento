@@ -23,7 +23,7 @@ class RecordingSession:
 
 class AgentHeartbeatTest(unittest.TestCase):
     def test_default_version_matches_current_release(self):
-        self.assertEqual(DEFAULT_AGENT_VERSION, "1.0.8")
+        self.assertEqual(DEFAULT_AGENT_VERSION, "1.0.9")
 
     def test_version_and_protocol_are_configurable_from_environment(self):
         with patch.dict(

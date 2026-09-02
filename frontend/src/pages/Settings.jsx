@@ -1720,7 +1720,7 @@ export default function Settings() {
           {tab === 9 && (
             <div style={s.sections}>
               <div style={s.card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
                   <h2 style={s.cardTitle}>Agente Local (Integração Firebird & Boletos)</h2>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} title={form.firebirdLastSyncAt ? `Último sinal do agente: ${new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR')}` : 'O agente nunca se conectou'}>
                     <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: agentIsOnline ? 'var(--success)' : 'var(--danger)' }} />
@@ -1740,9 +1740,9 @@ export default function Settings() {
 
                   <div style={s.field}>
                     <label style={s.label}>Token de Autenticação (CRM_SYNC_TOKEN)</label>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexDirection: isMobile ? 'column' : 'row' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexDirection: isMobile ? 'column' : 'row', flexWrap: isMobile ? 'nowrap' : 'wrap', minWidth: 0 }}>
                       <input
-                        style={{ ...s.input, flex: 1 }}
+                        style={{ ...s.input, flex: '1 1 240px', minWidth: 0 }}
                         type={showToken ? "text" : "password"}
                         value={form.firebirdClientToken}
                         onChange={(e) => setForm({ ...form, firebirdClientToken: e.target.value })}
@@ -1837,14 +1837,14 @@ export default function Settings() {
             </div>
 
             <div style={s.agentReleaseCard}>
-              <div>
+              <div style={{ minWidth: 0, flex: '1 1 240px' }}>
                 <span style={s.integrationMetaLabel}>Pacote oficial</span>
                 <strong style={s.integrationMetaValue}>{agentInfo?.fileName || 'FirebirdCRMClient.exe'}</strong>
                 <p style={{ ...s.hint, margin: '0.35rem 0 0' }}>
                   Versão {agentInfo?.version || 'não informada'}{agentInfo?.releasedAt ? ` · publicado em ${new Date(agentInfo.releasedAt).toLocaleDateString('pt-BR')}` : ''}
                 </p>
               </div>
-              <button type="button" style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap' }} onClick={handleDownloadAgent}>
+              <button type="button" style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'normal', flex: '0 1 auto' }} onClick={handleDownloadAgent}>
                 {agentInfo?.downloadAvailable ? 'Baixar agente' : 'Abrir download externo'}
               </button>
             </div>
@@ -2122,8 +2122,8 @@ const s = {
   mobileSelectWrap: { gap: '0.35rem' },
   mobileSelectLabel: { color: 'var(--text-dim)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' },
   mobileSelect: { width: '100%', padding: '0.72rem', border: '1px solid var(--border-color)', borderRadius: '10px', color: 'var(--text-main)', background: 'var(--bg-surface)', fontWeight: 600 },
-  sections: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', gap: '1rem', alignItems: 'start' },
-  card: { background: 'var(--bg-surface)', padding: '1.35rem', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 10px 28px rgba(0,0,0,.08)' },
+  sections: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', gap: '1rem', alignItems: 'start', minWidth: 0 },
+  card: { background: 'var(--bg-surface)', padding: '1.35rem', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 10px 28px rgba(0,0,0,.08)', minWidth: 0, overflow: 'hidden' },
   cardTitle: {
     fontSize: 'var(--text-lg)',
     fontWeight: 800,
@@ -2131,6 +2131,8 @@ const s = {
     color: 'var(--text-main)',
     borderBottom: '1px solid var(--border-color)',
     paddingBottom: '1rem',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
   },
   sectionHeading: {
     margin: 0,
@@ -2164,7 +2166,7 @@ const s = {
     outline: 'none',
     fontSize: 'var(--text-sm)',
   },
-  hint: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginTop: '2px', lineHeight: 'var(--leading-normal)' },
+  hint: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginTop: '2px', lineHeight: 'var(--leading-normal)', overflowWrap: 'anywhere', wordBreak: 'break-word' },
   integrationMeta: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -2175,6 +2177,7 @@ const s = {
     border: '1px solid var(--border-color)',
   },
   integrationMetaLabel: {
+    display: 'block',
     fontSize: '0.7rem',
     fontWeight: 800,
     color: 'var(--text-dim)',
@@ -2300,6 +2303,8 @@ const s = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '1rem',
+    flexWrap: 'wrap',
+    minWidth: 0,
     padding: '1rem 1.1rem',
     borderRadius: '14px',
     background: 'var(--accent-light)',

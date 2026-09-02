@@ -22,6 +22,7 @@ const internalMessageRoutes = require('./routes/internalMessages');
 const scheduledMessageRoutes = require('./routes/scheduledMessages');
 const scheduleProcessor = require('./services/scheduleProcessor');
 const campaignProcessor = require('./services/campaignProcessor');
+const printGuardScheduler = require('./services/printGuardScheduler');
 const { setIo: setIoWebhook } = require('./controllers/webhookController');
 const { setIo: setIoTicket } = require('./controllers/ticketController');
 const { setIo: setIoInternal } = require('./controllers/internalMessageController');
@@ -335,6 +336,7 @@ server.listen(PORT, () => {
   console.log(`[server] boot=${new Date(bootAt).toISOString()} pid=${process.pid}`);
   scheduleProcessor.start();
   campaignProcessor.start();
+  printGuardScheduler.start();
 
   // Auto-correção de URLs da Evolution inválidas (ex: contendo '@' ou emails)
   (async () => {

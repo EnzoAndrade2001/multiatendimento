@@ -1,9 +1,17 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from main import AppConfig, CRMClient, FirebirdRepository, StateStore, run_service_order_history_backfill
+from main import (
+    AppConfig,
+    CRMClient,
+    FirebirdRepository,
+    StateStore,
+    parse_firebird_timestamp_to_datetime,
+    run_service_order_history_backfill,
+)
 
 
 def fake_service_order_row(seqos: int) -> dict:
@@ -152,6 +160,20 @@ class RunServiceOrderHistoryBackfillTest(unittest.TestCase):
         # (simulating a healthy prior install) must be restored, not left at 0.
         reloaded = StateStore(self.config.state_file)
         self.assertEqual(reloaded.get_cursor("serviceOrders"), 91_293)
+
+
+class FirebirdTimestampCursorTest(unittest.TestCase):
+    def test_accepts_persisted_iso_cursor(self):
+        self.assertEqual(
+            parse_firebird_timestamp_to_datetime("2026-09-02T15:45:12"),
+            datetime(2026, 9, 2, 15, 45, 12),
+        )
+
+    def test_accepts_firebird_timestamp(self):
+        self.assertEqual(
+            parse_firebird_timestamp_to_datetime("02/09/2026 15:45:12"),
+            datetime(2026, 9, 2, 15, 45, 12),
+        )
 
 
 if __name__ == "__main__":

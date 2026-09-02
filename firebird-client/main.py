@@ -44,7 +44,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.0.8"
+DEFAULT_AGENT_VERSION = "1.0.9"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 AGENT_CAPABILITIES = (
     "sync.contacts",
@@ -121,11 +121,19 @@ def parse_firebird_timestamp_to_datetime(value: Any) -> datetime | None:
 
     text = str(value).strip()
     match = re.match(r"(\d{2})/(\d{2})/(\d{4}) (\d{2}):(\d{2}):(\d{2})", text)
-    if not match:
-        return None
+    if match:
+        dd, mm, yyyy, hh, mi, ss = match.groups()
+        return datetime(int(yyyy), int(mm), int(dd), int(hh), int(mi), int(ss))
 
-    dd, mm, yyyy, hh, mi, ss = match.groups()
-    return datetime(int(yyyy), int(mm), int(dd), int(hh), int(mi), int(ss))
+    # The incremental cursor is persisted as ISO-8601, while Firebird
+    # drivers may return the native ``dd/mm/yyyy HH:MM:SS`` representation.
+    # Accept both forms so a restart continues from the saved cursor instead
+    # of falling back to the recovery window on every cycle.
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
 
 
 def normalize_phone(*values: Any) -> str | None:
@@ -1802,12 +1810,19 @@ class FirebirdRepository:
         """
         yield from self._rows(sql, ())
 
-    def _service_orders_select(self, where_clause: str, limit: int | None = None) -> str:
+    def _service_orders_select(
+        self,
+        where_clause: str,
+        limit: int | None = None,
+        include_updated_at: bool = False,
+    ) -> str:
         first = f"first {max(1, int(limit))}" if limit is not None else ""
+        updated_column = "os.ATUALIZADO," if include_updated_at else ""
         return f"""
             select {first}
                 os.CDCLIENTE, os.NMCLIENTE, os.CDEQUIPAMENTO, os.SEQOS,
                 os.DTINCLUSAO, os.HRINCLUSAO, os.DTATENDIMENTO, os.HRATENDIMENTO, os.DTFECHAMENTO,
+                {updated_column}
                 tp.NMOSTP, st.NMSTATUS, os.STATUS, os.NMSUPORTEA, os.NMSUPORTET, os.NMSUPORTEL,
                 os.USUARIO_FECHAMENTO, os.OBSDEFEITOCLI, os.OBSDEFEITOATS,
                 os.DEPARTAMENTO, os.LOCALINSTAL, os.CIDADE, os.UF, os.ENDERECO, os.CEP,
@@ -1885,6 +1900,52 @@ class FirebirdRepository:
             f"os.SEQOS in ({placeholders})",
         )
         return list(self._rows(sql, tuple(seq_os_values))), max_attendance
+
+    def fetch_service_orders_changed_by_updated_at(
+        self,
+        updated_cursor: dict[str, Any] | None,
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Read O.S. whose IXLOS row changed after the durable cursor.
+
+        Closing an O.S. in the iLux updates IXLOS directly and does not always
+        create a row in IXLOSATENDIMENTO. The attendance cursor alone therefore
+        misses status/closing-date changes. ATUALIZADO is consumed with a
+        timestamp+SEQOS tie-breaker so rows changed in the same second are not
+        lost between cycles.
+        """
+        raw_at = updated_cursor.get("at") if isinstance(updated_cursor, dict) else None
+        cursor_at = parse_firebird_timestamp_to_datetime(raw_at)
+        if cursor_at is None:
+            cursor_at = datetime.now() - timedelta(days=3)
+        try:
+            cursor_seq = max(0, int(updated_cursor.get("seq", 0))) if isinstance(updated_cursor, dict) else 0
+        except (TypeError, ValueError):
+            cursor_seq = 0
+
+        sql = self._service_orders_select(
+            "os.ATUALIZADO is not null "
+            "and (os.ATUALIZADO > ? or (os.ATUALIZADO = ? and os.SEQOS > ?))",
+            limit,
+            include_updated_at=True,
+        ).replace("order by os.SEQOS", "order by os.ATUALIZADO, os.SEQOS")
+        rows = list(self._rows(sql, (cursor_at, cursor_at, cursor_seq)))
+
+        next_at = cursor_at
+        next_seq = cursor_seq
+        for row in rows:
+            row_at = parse_firebird_timestamp_to_datetime(row.get("atualizado"))
+            if row_at is None:
+                continue
+            try:
+                row_seq = int(row.get("seqos") or 0)
+            except (TypeError, ValueError):
+                row_seq = 0
+            if row_at > next_at or (row_at == next_at and row_seq > next_seq):
+                next_at = row_at
+                next_seq = row_seq
+
+        return rows, {"at": next_at.isoformat(timespec="seconds"), "seq": next_seq}
 
     def fetch_os_types(self) -> Iterator[dict[str, Any]]:
         # O iLux associa cada tipo de O.S. a um formulario/modelo de
@@ -2379,7 +2440,7 @@ def normalize_service_order(record: dict[str, Any]) -> dict[str, Any]:
         "action": first_non_empty(record.get("acao")),
         "observacao": first_non_empty(record.get("observacao"), record.get("obsdefeitoats"), record.get("nmostp")),
         "resolvedAt": parse_firebird_timestamp(record.get("dtfechamento")) or parse_firebird_timestamp(record.get("dtatendimento")),
-        "updatedAt": parse_firebird_timestamp(record.get("dtfechamento")) or parse_firebird_timestamp(record.get("dtatendimento")) or parse_firebird_timestamp(record.get("dtinclusao")),
+        "updatedAt": parse_firebird_timestamp(record.get("atualizado")) or parse_firebird_timestamp(record.get("dtfechamento")) or parse_firebird_timestamp(record.get("dtatendimento")) or parse_firebird_timestamp(record.get("dtinclusao")),
         "address": first_non_empty(record.get("endereco")),
         "city": first_non_empty(record.get("cidade")),
         "state": first_non_empty(record.get("uf")),
@@ -2687,10 +2748,18 @@ def _sync_service_orders_incremental_unlocked(
         return False
 
     recent_bootstrap_size = 250
-    cycle_limit = max(25, min(int(batch_size), 100))
+    cycle_limit = max(25, min(int(batch_size), 250))
     seq_cursor = state.get_cursor("serviceOrders")
     attendance_cursor_exists = "serviceOrderAttendances" in state.data.get("cursors", {})
     attendance_cursor = state.get_cursor("serviceOrderAttendances")
+    updated_cursor = state.data.get("serviceOrderUpdatedAt")
+    if not isinstance(updated_cursor, dict) or not parse_firebird_timestamp_to_datetime(updated_cursor.get("at")):
+        # A new cursor must recover recent direct edits (especially O.S.
+        # encerradas hoje) without replaying the complete historical table.
+        updated_cursor = {
+            "at": (datetime.now() - timedelta(days=3)).isoformat(timespec="seconds"),
+            "seq": 0,
+        }
 
     if seq_cursor <= 0 or not attendance_cursor_exists:
         max_seq_os, max_attendance = repo.get_service_order_watermarks()
@@ -2714,9 +2783,22 @@ def _sync_service_orders_incremental_unlocked(
         attendance_cursor,
         cycle_limit,
     )
+    changed_by_update_rows = []
+    next_updated_cursor = updated_cursor
+    fetch_changed_by_update = getattr(repo, "fetch_service_orders_changed_by_updated_at", None)
+    if callable(fetch_changed_by_update):
+        try:
+            changed_by_update_rows, next_updated_cursor = fetch_changed_by_update(
+                updated_cursor,
+                cycle_limit,
+            )
+        except Exception as exc:
+            # Older Firebird schemas may not have IXLOS.ATUALIZADO. Keep the
+            # attendance-based path alive and retry this cursor next cycle.
+            logging.warning("Nao foi possivel ler O.S. alteradas por ATUALIZADO: %s", exc)
 
     rows_by_seq: dict[int, dict[str, Any]] = {}
-    for raw in new_rows + changed_rows:
+    for raw in new_rows + changed_rows + changed_by_update_rows:
         raw_seq = raw.get("seqos")
         if raw_seq is not None:
             rows_by_seq[int(raw_seq)] = raw
@@ -2738,6 +2820,7 @@ def _sync_service_orders_incremental_unlocked(
         )
     state.set_cursor("serviceOrders", seq_cursor)
     state.set_cursor("serviceOrderAttendances", max_attendance)
+    state.data["serviceOrderUpdatedAt"] = next_updated_cursor
     state.set_last_sync_at(datetime.now().isoformat(timespec="seconds"))
     state.save()
 
