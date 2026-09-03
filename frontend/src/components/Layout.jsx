@@ -374,6 +374,8 @@ export default function Layout() {
   const commandResults = visibleDesktopLinks.filter((link) => (
     !commandQuery.trim() || link.label.toLowerCase().includes(commandQuery.trim().toLowerCase())
   ));
+  const isInboxRoute = location.pathname === '/inbox' || location.pathname.startsWith('/inbox/');
+  const inboxShell = isInboxRoute && !isMobile;
 
   function activateNavigationItem(link) {
     setCommandOpen(false);
@@ -384,7 +386,7 @@ export default function Layout() {
   }
 
   return (
-    <div style={{ ...styles.root, paddingRight: !isMobile && isChatOpen ? `${internalChatWidth}px` : 0 }} className="app-layout-root">
+    <div style={{ ...styles.root, paddingRight: !isMobile && isChatOpen ? `${internalChatWidth}px` : 0 }} className={`app-layout-root${inboxShell ? ' inbox-app-shell' : ''}`}>
       <style>{`
         .desktop-nav-scroll::-webkit-scrollbar {
           display: none;
@@ -392,11 +394,105 @@ export default function Layout() {
         .primary-nav-link, .header-action-button, .user-menu-item { transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s ease; }
         .primary-nav-link:hover, .header-action-button:hover, .user-menu-item:hover { background: var(--bg-hover, var(--accent-light)) !important; color: var(--text-main) !important; }
         .primary-nav-link:focus-visible, .header-action-button:focus-visible, .user-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .app-layout-root.inbox-app-shell {
+          display: grid !important;
+          grid-template-columns: 132px minmax(0, 1fr) !important;
+          grid-template-rows: minmax(0, 1fr) !important;
+          height: 100vh !important;
+          padding-right: 0 !important;
+          background: #080c13 !important;
+        }
+        .app-layout-root.inbox-app-shell > .inbox-global-nav,
+        .app-layout-root.inbox-app-shell > .layout-health-banner,
+        .app-layout-root.inbox-app-shell > .layout-connection-banner { display: none !important; }
+        .app-layout-root.inbox-app-shell > .app-layout-content {
+          grid-column: 2;
+          grid-row: 1;
+          min-width: 0;
+          min-height: 0;
+        }
+        .inbox-app-rail {
+          grid-column: 1;
+          grid-row: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: .55rem;
+          min-width: 0;
+          padding: 1.1rem .65rem .85rem;
+          color: var(--text-muted);
+          background: linear-gradient(180deg, #0c1725 0%, #0a111d 55%, #080c13 100%);
+          border-right: 1px solid rgba(148, 163, 184, .12);
+          z-index: 250;
+        }
+        .inbox-rail-brand { width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; border-radius: 16px; background: var(--accent); color: #17130a; font-weight: 950; letter-spacing: .02em; box-shadow: 0 12px 24px rgba(232, 201, 106, .16); margin-bottom: .7rem; }
+        .inbox-rail-link { width: 100%; min-height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .32rem; border: 1px solid transparent; border-radius: 14px; background: transparent; color: var(--text-muted); text-decoration: none; cursor: pointer; font-family: inherit; font-size: .68rem; font-weight: 750; text-align: center; transition: background .16s ease, color .16s ease, border-color .16s ease, transform .16s ease; }
+        .inbox-rail-link:hover { color: var(--text-main); background: rgba(255,255,255,.05); }
+        .inbox-rail-link.active { color: var(--accent); background: rgba(232,201,106,.09); border-color: rgba(232,201,106,.36); box-shadow: inset 3px 0 0 var(--accent); }
+        .inbox-rail-divider { width: 58%; height: 1px; background: rgba(148,163,184,.16); margin: .2rem 0 .15rem; }
+        .inbox-rail-spacer { flex: 1; min-height: 1rem; }
+        .inbox-rail-icon-button { width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; border-radius: 13px; border: 1px solid rgba(148,163,184,.16); background: rgba(255,255,255,.025); color: var(--text-muted); cursor: pointer; }
+        .inbox-rail-icon-button:hover { color: var(--text-main); border-color: rgba(232,201,106,.36); background: rgba(232,201,106,.08); }
+        .inbox-rail-profile { position: relative; margin-top: .15rem; }
+        .inbox-rail-user { width: 46px; height: 46px; padding: 0; border-radius: 50%; border: 2px solid rgba(232,201,106,.4); background: rgba(255,255,255,.04); cursor: pointer; }
+        .inbox-rail-user-menu { position: absolute; left: calc(100% + .7rem); bottom: 0; width: 250px; padding: .55rem; border: 1px solid var(--border-color); border-radius: 16px; background: var(--bg-surface); box-shadow: 0 18px 44px rgba(0,0,0,.4); z-index: 1000; }
+        .inbox-rail-profile-header { display: flex; align-items: center; gap: .65rem; padding: .6rem .55rem .75rem; border-bottom: 1px solid var(--border-color); margin-bottom: .35rem; }
+        .inbox-rail-profile-header span { min-width: 0; display: flex; flex-direction: column; gap: .18rem; }
+        .inbox-rail-profile-header strong { color: var(--text-main); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .inbox-rail-profile-header small { color: var(--text-dim); font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         @media (max-width: 1180px) {
           .header-chat-label { display: none; }
         }
       `}</style>
-      <nav style={{ ...styles.nav, padding: isMobile ? '0 var(--space-4)' : '0 var(--space-6)' }}>
+      {inboxShell ? (
+        <aside className="inbox-app-rail" aria-label="Navegação do atendimento">
+          <div className="inbox-rail-brand" aria-label="Multiatendimento PRO">MA</div>
+          {primaryDesktopLinks.map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              end={link.to === '/dashboard'}
+              className={({ isActive }) => `inbox-rail-link${isActive ? ' active' : ''}`}
+              title={link.label}
+            >
+              {link.icon}
+              <span>{link.label === 'Chat' ? 'Atendimento' : link.label}</span>
+            </NavLink>
+          ))}
+          <div className="inbox-rail-divider" aria-hidden="true" />
+          {secondaryDesktopLinks.filter((link) => ['/contacts', '/campaigns', '/knowledge', '/connections', '/settings'].includes(link.to)).map((link) => (
+            link.to ? (
+              <NavLink key={link.to} to={link.to} className={({ isActive }) => `inbox-rail-link${isActive ? ' active' : ''}`} title={link.label}>
+                {link.icon}
+                <span>{link.label === 'Clientes WhatsApp' ? 'Clientes' : link.label === 'Treinamento IA' ? 'IA' : link.label === 'Conexões' ? 'Conexões' : link.label === 'Ajustes' ? 'Ajustes' : 'Campanhas'}</span>
+              </NavLink>
+            ) : null
+          ))}
+          <div className="inbox-rail-spacer" />
+          <button type="button" className="inbox-rail-icon-button" onClick={() => setCommandOpen(true)} aria-label="Abrir busca de ações" title="Buscar (Ctrl K)"><Search size={18} /></button>
+          {canUseInternalChat ? <button type="button" className="inbox-rail-icon-button" onClick={() => { setInitialInternalConversationKey(null); setIsChatOpen(true); }} aria-label="Abrir chat interno" title="Chat interno"><MessageCircle size={18} /></button> : null}
+          {currentUser?.name ? (
+            <div className="inbox-rail-profile" ref={userMenuRef}>
+              <button type="button" className="inbox-rail-user" onClick={() => setUserMenuOpen((open) => !open)} aria-label={`Abrir menu de ${currentUser.name}`} aria-expanded={userMenuOpen} aria-haspopup="menu">
+                <UserAvatar user={currentUser} size={42} />
+              </button>
+              {userMenuOpen ? (
+                <div className="inbox-rail-user-menu" role="menu">
+                  <div className="inbox-rail-profile-header">
+                    <UserAvatar user={currentUser} size={34} />
+                    <span><strong>{currentUser.name}</strong><small>{currentUser.email || 'Usuário do sistema'}</small></span>
+                  </div>
+                  <button type="button" className="user-menu-item" role="menuitem" style={styles.userMenuItem} onClick={() => { setUserMenuOpen(false); navigate('/settings?tab=account'); }}><Settings size={17} /><span>Minha conta</span></button>
+                  <button type="button" className="user-menu-item" role="menuitem" style={styles.userMenuItem} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}</span></button>
+                  <button type="button" className="user-menu-item" role="menuitem" style={{ ...styles.userMenuItem, color: 'var(--danger)' }} onClick={logout}><LogOut size={17} /><span>Sair do sistema</span></button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </aside>
+      ) : null}
+
+      <nav className={inboxShell ? 'inbox-global-nav' : undefined} style={{ ...styles.nav, padding: isMobile ? '0 var(--space-4)' : '0 var(--space-6)' }}>
         <div style={styles.brandGroup}>
           {tenant?.logoUrl ? (
             <div style={{ ...styles.logoFrame, width: isMobile ? '76px' : '98px', height: isMobile ? '42px' : '52px' }}>
@@ -526,7 +622,7 @@ export default function Layout() {
       </nav>
 
       {(unstableInstances.length > 0 || degradedInstances.length > 0) && (
-        <div style={{
+        <div className="layout-health-banner" style={{
           backgroundColor: 'var(--warning, #F59E0B)',
           color: '#17130A',
           padding: '0.65rem 1rem',
@@ -547,7 +643,7 @@ export default function Layout() {
       )}
 
       {(!realtimeConnected || disconnectedInstances.length > 0) && (
-        <div style={{
+        <div className="layout-connection-banner" style={{
           backgroundColor: !realtimeConnected ? 'var(--warning, #F59E0B)' : 'var(--danger, #EF4444)',
           color: !realtimeConnected ? '#17130A' : '#fff',
           padding: '0.65rem 1rem',
