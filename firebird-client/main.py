@@ -45,7 +45,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.1"
+DEFAULT_AGENT_VERSION = "1.1.2"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -3333,7 +3333,6 @@ def validate_config(config: AppConfig) -> None:
     required = {
         "FIREBIRD_DATABASE": config.firebird_database,
         "CRM_BASE_URL": config.crm_base_url,
-        "CRM_TENANT_SLUG": config.crm_tenant_slug,
         "CRM_SYNC_TOKEN": config.crm_sync_token,
     }
     missing = [name for name, value in required.items() if not value]

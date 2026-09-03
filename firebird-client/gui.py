@@ -156,12 +156,13 @@ class AgentGUI(ctk.CTk):
             0,
         )
         self.token_entry = self._input(frame, "Token do CRM", 2, show="•")
-        self.db_path_entry = self._input(frame, "Caminho do banco Firebird", 4)
-        self.login_entry = self._input(frame, "Usuário Firebird", 6)
-        self.password_entry = self._input(frame, "Senha Firebird", 8, show="•")
+        self.tenant_slug_entry = self._input(frame, "Slug da empresa (opcional)", 4, placeholder="Identificado automaticamente pelo token")
+        self.db_path_entry = self._input(frame, "Caminho do banco Firebird", 6)
+        self.login_entry = self._input(frame, "Usuário Firebird", 8)
+        self.password_entry = self._input(frame, "Senha Firebird", 10, show="•")
 
         connection_actions = ctk.CTkFrame(frame, fg_color="transparent")
-        connection_actions.grid(row=10, column=0, padx=10, pady=(4, 2), sticky="ew")
+        connection_actions.grid(row=12, column=0, padx=10, pady=(4, 2), sticky="ew")
         connection_actions.grid_columnconfigure(0, weight=0)
         connection_actions.grid_columnconfigure(1, weight=1)
         self.test_connection_btn = ctk.CTkButton(
@@ -347,6 +348,7 @@ class AgentGUI(ctk.CTk):
 
     def load_settings(self):
         self.token_entry.insert(0, os.getenv("CRM_SYNC_TOKEN", ""))
+        self.tenant_slug_entry.insert(0, os.getenv("CRM_TENANT_SLUG", ""))
         self.db_path_entry.insert(0, os.getenv("FIREBIRD_DATABASE", ""))
         self.login_entry.insert(0, os.getenv("FIREBIRD_USER", "SYSDBA"))
         self.password_entry.insert(0, os.getenv("FIREBIRD_PASSWORD", ""))
@@ -428,6 +430,7 @@ class AgentGUI(ctk.CTk):
             ENV_FILE.touch()
         settings = {
             "CRM_SYNC_TOKEN": self.token_entry.get(),
+            "CRM_TENANT_SLUG": self.tenant_slug_entry.get(),
             "FIREBIRD_DATABASE": self.db_path_entry.get(),
             "FIREBIRD_USER": self.login_entry.get(),
             "FIREBIRD_PASSWORD": self.password_entry.get(),

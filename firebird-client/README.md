@@ -39,13 +39,13 @@ Depois preencha o arquivo `.env` com:
 
 - caminho do banco Firebird
 - usuário e senha
-- URL do CRM na VPS
-- slug do tenant
+- URL do CRM na VPS (o pacote oficial já traz o endereço padrão)
+- slug do tenant (opcional; o CRM identifica a empresa automaticamente pelo token)
 - token de sincronização
 
 O agente também informa sua identificação em cada heartbeat enviado ao CRM:
 
-- `AGENT_VERSION`: versão do executável instalado (release atual: `1.1.1`)
+- `AGENT_VERSION`: versão do executável instalado (release atual: `1.1.2`)
 - `AGENT_PROTOCOL_VERSION`: versão do contrato de comunicação com o backend
 
 Além do `tenantSlug` usado pelas versões atuais do backend, o heartbeat inclui

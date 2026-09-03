@@ -90,14 +90,59 @@ async function mergeImportedServiceOrderMirror(tenantId, pending, holder, seqOs)
   });
 }
 
-async function resolveTenantContext(tenantSlug) {
-  const tenant = await prisma.tenant.findUnique({
-    where: { slug: tenantSlug },
-    include: { settings: true, instances: true },
-  });
+function firebirdTokenFromRequest(req) {
+  const headerToken = typeof req?.header === 'function' ? req.header('x-firebird-token') : undefined;
+  const authorization = typeof req?.header === 'function' ? req.header('authorization') : undefined;
+  return String(headerToken || String(authorization || '').replace(/^Bearer\s+/i, '') || '').trim();
+}
+
+function tenantResolutionError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+/**
+ * Resolve the tenant for Firebird agents.
+ *
+ * New agents may send the slug explicitly, but older packages only know the
+ * opaque client token. In that case the token is used as the tenant binding;
+ * it must match exactly one TenantSettings row. Ambiguous tokens fail closed
+ * instead of guessing a company.
+ */
+async function resolveTenantContext(tenantSlug, req) {
+  const normalizedSlug = String(tenantSlug || '').trim();
+  let tenant;
+
+  if (normalizedSlug) {
+    tenant = await prisma.tenant.findUnique({
+      where: { slug: normalizedSlug },
+      include: { settings: true, instances: true },
+    });
+  } else {
+    const providedToken = firebirdTokenFromRequest(req);
+    if (!providedToken) {
+      throw tenantResolutionError('tenantSlug é obrigatório quando o token de sincronização não foi informado.', 400);
+    }
+
+    const matches = await prisma.tenantSettings.findMany({
+      where: { firebirdClientToken: providedToken },
+      include: { tenant: { include: { settings: true, instances: true } } },
+      take: 2,
+    });
+
+    if (matches.length > 1) {
+      throw tenantResolutionError('Token de sincronização associado a mais de uma empresa; informe o tenantSlug.', 409);
+    }
+    if (matches.length === 1) {
+      tenant = matches[0].tenant;
+    } else {
+      throw tenantResolutionError('Não foi possível identificar a empresa pelo token de sincronização.', 401);
+    }
+  }
 
   if (!tenant) {
-    throw new Error('Tenant não encontrado para o slug informado.');
+    throw tenantResolutionError('Tenant não encontrado para o slug informado.', 404);
   }
 
   const instance =
@@ -105,7 +150,7 @@ async function resolveTenantContext(tenantSlug) {
     tenant.instances[0];
 
   if (!instance) {
-    throw new Error('Nenhuma instância de WhatsApp encontrada para esse tenant.');
+    throw tenantResolutionError('Nenhuma instância de WhatsApp encontrada para esse tenant.', 422);
   }
 
   return { tenant, instance };
@@ -718,10 +763,6 @@ async function pushBatch(req, res) {
   try {
     const { tenantSlug, entity, records } = req.body || {};
 
-    if (!tenantSlug) {
-      return res.status(400).json({ error: 'tenantSlug é obrigatório.' });
-    }
-
     if (!entity || typeof entity !== 'string') {
       return res.status(400).json({ error: 'entity é obrigatório.' });
     }
@@ -730,7 +771,7 @@ async function pushBatch(req, res) {
       return res.status(400).json({ error: 'records deve ser uma lista.' });
     }
 
-    const { tenant, instance } = await resolveTenantContext(tenantSlug);
+    const { tenant, instance } = await resolveTenantContext(tenantSlug, req);
     assertToken(req, tenant);
 
     const source = 'firebird';
@@ -832,7 +873,7 @@ async function pushBatch(req, res) {
     });
   } catch (err) {
     console.error('[firebird-sync] erro:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 }
 
@@ -903,10 +944,7 @@ async function getPendingCommands(req, res) {
   try {
     const { tenantSlug } = req.query;
     const waitSeconds = Math.max(0, Math.min(Number.parseInt(req.query.wait, 10) || 0, 25));
-    if (!tenantSlug) {
-      return res.status(400).json({ error: 'tenantSlug é obrigatório.' });
-    }
-    const { tenant } = await resolveTenantContext(tenantSlug);
+    const { tenant } = await resolveTenantContext(tenantSlug, req);
     assertToken(req, tenant);
 
     const deadline = Date.now() + (waitSeconds * 1000);
@@ -1116,7 +1154,7 @@ async function getPendingCommands(req, res) {
     res.json(commands);
   } catch (err) {
     console.error('[pending-commands] erro:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 }
 
@@ -1125,10 +1163,7 @@ async function commandCallback(req, res) {
     const { id } = req.params;
     const { tenantSlug, success, result, error } = req.body || {};
 
-    if (!tenantSlug) {
-      return res.status(400).json({ error: 'tenantSlug é obrigatório.' });
-    }
-    const { tenant } = await resolveTenantContext(tenantSlug);
+    const { tenant } = await resolveTenantContext(tenantSlug, req);
     assertToken(req, tenant);
 
     if (id === 'PROCESS_BILLING') {
@@ -1417,17 +1452,14 @@ async function commandCallback(req, res) {
     // o stack completo é o que realmente ajuda a diagnosticar um 500 aqui
     // depois, sem precisar reproduzir o cenario as cegas.
     console.error('[pending-commands-callback] erro:', err.stack || err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 }
 
 async function agentPing(req, res) {
   try {
     const { tenantSlug } = req.body || {};
-    if (!tenantSlug) {
-      return res.status(400).json({ error: 'tenantSlug é obrigatório.' });
-    }
-    const { tenant } = await resolveTenantContext(tenantSlug);
+    const { tenant } = await resolveTenantContext(tenantSlug, req);
     assertToken(req, tenant);
 
     await prisma.tenantSettings.update({
@@ -1441,7 +1473,7 @@ async function agentPing(req, res) {
     res.json({ ok: true });
   } catch (err) {
     console.error('[agent-ping] erro:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 }
 
@@ -1452,6 +1484,8 @@ module.exports = {
   getPendingCommands,
   commandCallback,
   agentPing,
+  resolveTenantContext,
+  firebirdTokenFromRequest,
   isImportedServiceOrderMirror,
   mergeImportedServiceOrderMirror,
 };
