@@ -17,14 +17,14 @@ function sanitizeUrl(url) {
   return baseUrl.replace(/\/+$/, '');
 }
 
-function getClient(url, key) {
+function getClient(url, key, timeout = 60000) {
   const baseUrl = sanitizeUrl(url);
   return axios.create({
     baseURL: baseUrl,
     headers: { apikey: key, 'Content-Type': 'application/json' },
     maxContentLength: 100 * 1024 * 1024, // 100MB
     maxBodyLength: 100 * 1024 * 1024,    // 100MB
-    timeout: 60000 // 60 segundos
+    timeout // 60 segundos por padrão; o monitor usa um limite menor
   });
 }
 
@@ -308,8 +308,9 @@ async function getQrCode(url, key, instanceName) {
   return data;
 }
 
-async function getConnectionState(url, key, instanceName) {
-  const client = getClient(url, key);
+async function getConnectionState(url, key, instanceName, options = {}) {
+  const timeout = Number(options?.timeout);
+  const client = getClient(url, key, Number.isFinite(timeout) && timeout > 0 ? timeout : 60000);
   const { data } = await client.get(`/instance/connectionState/${instanceName}`);
   return data;
 }

@@ -45,6 +45,7 @@ const auditEventRoutes = require('./routes/auditEvents');
 const printGuardRoutes = require('./routes/printGuard');
 const telemetryRoutes = require('./routes/telemetry');
 const { setIo: setIoPrintGuard } = require('./services/printGuardService');
+const instanceHealthService = require('./services/instanceHealthService');
 
 const app = express();
 app.disable('x-powered-by');
@@ -94,6 +95,7 @@ setIoBilling(io);
 setIoManagerCopy(io);
 setIoBillingDocuments(io);
 setIoPrintGuard(io);
+instanceHealthService.setIo(io);
 
 app.use(cors({ origin: corsOrigin, credentials: true }));
 // Preserva os bytes exatos apenas para webhooks PrintGuard assinados. A
@@ -337,6 +339,7 @@ server.listen(PORT, () => {
   scheduleProcessor.start();
   campaignProcessor.start();
   printGuardScheduler.start();
+  instanceHealthService.start();
 
   // Auto-correção de URLs da Evolution inválidas (ex: contendo '@' ou emails)
   (async () => {

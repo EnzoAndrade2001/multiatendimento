@@ -219,6 +219,12 @@ model WaInstance {
   instanceName       String
   phone              String?
   status             String              @default("disconnected")
+  healthStatus       String              @default("unknown")
+  lastConnectionState String?
+  lastConnectionAt   DateTime?
+  lastWebhookAt      DateTime?
+  lastHealthCheckAt  DateTime?
+  lastHealthError    String?
   qrCode             String?
   provider           String              @default("evolution_qr")
   officialPhoneId    String?

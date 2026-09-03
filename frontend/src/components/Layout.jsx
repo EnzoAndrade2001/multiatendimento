@@ -28,6 +28,7 @@ import {
   ClipboardCheck,
   Activity,
   LayoutGrid,
+  AlertTriangle,
 } from 'lucide-react';
 import { getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
@@ -47,6 +48,15 @@ const MOBILE_LINKS = [
   { to: '/crm', icon: <Database size={22} />, label: 'CRM', permission: 'crm.view' },
   { to: '/settings', icon: <Settings size={22} />, label: 'Ajustes' },
 ];
+
+function getInstanceHealth(instance) {
+  const state = String(instance?.state || instance?.lastConnectionState || '').toLowerCase();
+  const health = String(instance?.healthStatus || '').toLowerCase();
+  if (instance?.status === 'connected' && (state === 'open' || health === 'healthy')) return 'healthy';
+  if (state === 'connecting' || health === 'unstable' || instance?.status === 'connecting') return 'unstable';
+  if (state === 'close' || health === 'offline' || instance?.status === 'disconnected') return 'offline';
+  return 'degraded';
+}
 
 export default function Layout() {
   const { can } = usePermissions();
@@ -75,6 +85,7 @@ export default function Layout() {
   const role = localStorage.getItem('role')?.toLowerCase();
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   const [instances, setInstances] = useState([]);
+  const [realtimeConnected, setRealtimeConnected] = useState(true);
   const isMobile = useIsMobile();
   const canUseInternalChat = can('internal_chat.view');
 
@@ -152,6 +163,9 @@ export default function Layout() {
       reconnectionDelayMax: 10000,
     });
     setInternalSocket(socket);
+    socket.on('connect', () => setRealtimeConnected(true));
+    socket.on('disconnect', () => setRealtimeConnected(false));
+    socket.on('connect_error', () => setRealtimeConnected(false));
 
     // /instance/list consulta a Evolution por instância (pode demorar/falhar).
     // Uma falha transitória aqui deixava o app sem lista de instâncias até um
@@ -175,6 +189,7 @@ export default function Layout() {
         });
     };
     loadInstances();
+    const instancesRefreshTimer = window.setInterval(loadInstances, 30000);
 
     socket.on('new_message', ({ message, contact, fromMe }) => {
       if (fromMe) return;
@@ -249,10 +264,12 @@ export default function Layout() {
       setInstances((prev) => 
         prev.map((inst) => {
           if (inst.instanceName === instance) {
-            const isConnected = data?.state === 'open';
-            const isDisconnected = data?.state === 'close';
-            if (isConnected) return { ...inst, status: 'connected' };
-            if (isDisconnected) return { ...inst, status: 'disconnected' };
+            const state = String(data?.state || '').toLowerCase();
+            const healthStatus = data?.healthStatus;
+            if (state === 'open') return { ...inst, status: 'connected', state: 'open', healthStatus: healthStatus || 'healthy', lastConnectionState: 'open', lastWebhookAt: data?.receivedAt || inst.lastWebhookAt };
+            if (state === 'connecting') return { ...inst, status: 'connecting', state: 'connecting', healthStatus: healthStatus || 'unstable', lastConnectionState: 'connecting', lastWebhookAt: data?.receivedAt || inst.lastWebhookAt };
+            if (state === 'close') return { ...inst, status: data?.confirmed ? 'disconnected' : 'connecting', state: 'close', healthStatus: healthStatus || (data?.confirmed ? 'offline' : 'unstable'), lastConnectionState: 'close', lastWebhookAt: data?.receivedAt || inst.lastWebhookAt };
+            if (healthStatus === 'degraded') return { ...inst, status: 'degraded', state: 'unknown', healthStatus, lastHealthError: data?.error || inst.lastHealthError };
           }
           return inst;
         })
@@ -262,7 +279,9 @@ export default function Layout() {
     return () => {
       window.clearTimeout(notificationTimerRef.current);
       window.removeEventListener('user-profile-updated', onProfileUpdated);
+      window.clearInterval(instancesRefreshTimer);
       setInternalSocket(null);
+      setRealtimeConnected(false);
       socket.disconnect();
     };
   }, [canUseInternalChat]);
@@ -305,9 +324,21 @@ export default function Layout() {
     return () => window.removeEventListener('keydown', handleShortcut);
   }, []);
 
-  const disconnectedInstances = React.useMemo(
-    () => instances.filter((instance) => instance.status !== 'connected'),
+  const unhealthyInstances = React.useMemo(
+    () => instances.filter((instance) => getInstanceHealth(instance) !== 'healthy'),
     [instances]
+  );
+  const unstableInstances = React.useMemo(
+    () => unhealthyInstances.filter((instance) => getInstanceHealth(instance) === 'unstable'),
+    [unhealthyInstances]
+  );
+  const degradedInstances = React.useMemo(
+    () => unhealthyInstances.filter((instance) => getInstanceHealth(instance) === 'degraded'),
+    [unhealthyInstances]
+  );
+  const disconnectedInstances = React.useMemo(
+    () => unhealthyInstances.filter((instance) => getInstanceHealth(instance) === 'offline'),
+    [unhealthyInstances]
   );
 
   const desktopLinks = React.useMemo(() => [
@@ -494,10 +525,31 @@ export default function Layout() {
         </div>
       </nav>
 
-      {disconnectedInstances.length > 0 && (
+      {(unstableInstances.length > 0 || degradedInstances.length > 0) && (
         <div style={{
-          backgroundColor: 'var(--danger, #EF4444)',
-          color: '#fff',
+          backgroundColor: 'var(--warning, #F59E0B)',
+          color: '#17130A',
+          padding: '0.65rem 1rem',
+          textAlign: 'center',
+          fontWeight: 700,
+          fontSize: isMobile ? '0.8rem' : '0.9rem',
+          zIndex: 90,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 'var(--space-2)',
+        }}>
+          <AlertTriangle size={16} />
+          {unstableInstances.length > 0
+            ? `A Evolution está reconectando ${unstableInstances.length === 1 ? 'uma conexão' : `${unstableInstances.length} conexões`}. As mensagens serão sincronizadas quando voltar.`
+            : 'A Evolution está sem resposta. O painel continuará verificando automaticamente.'}
+        </div>
+      )}
+
+      {(!realtimeConnected || disconnectedInstances.length > 0) && (
+        <div style={{
+          backgroundColor: !realtimeConnected ? 'var(--warning, #F59E0B)' : 'var(--danger, #EF4444)',
+          color: !realtimeConnected ? '#17130A' : '#fff',
           padding: '0.65rem 1rem',
           textAlign: 'center',
           fontWeight: 700,

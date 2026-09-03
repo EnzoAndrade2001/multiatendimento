@@ -1195,7 +1195,7 @@ export default function Settings() {
                 >
                   <option value="">Selecione uma instância...</option>
                   {instances.map((instance) => {
-                    const connected = instance.status === 'connected' || instance.state === 'open';
+                    const connected = instance.status === 'connected' && (instance.state === 'open' || instance.healthStatus === 'healthy' || (!instance.state && !instance.healthStatus));
                     return <option key={instance.id} value={instance.id}>{instance.instanceName} — {connected ? 'Conectada' : 'Desconectada'}</option>;
                   })}
                 </select>
@@ -1804,7 +1804,7 @@ export default function Settings() {
                     >
                       <option value="">Selecione uma instância...</option>
                       {instances.map((instance) => {
-                        const connected = instance.status === 'connected' || instance.state === 'open';
+                        const connected = instance.status === 'connected' && (instance.state === 'open' || instance.healthStatus === 'healthy' || (!instance.state && !instance.healthStatus));
                         const official = instance.provider === 'evolution_official';
                         return (
                           <option key={instance.id} value={instance.id}>

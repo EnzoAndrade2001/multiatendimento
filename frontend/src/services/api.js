@@ -160,6 +160,7 @@ export const getInstances = () => api.get('/instance/list');
 export const getInstanceQrCode = (id) => api.get(`/instance/qrcode/${id}`);
 export const createInstance = (payload) => api.post('/instance/create', typeof payload === 'string' ? { name: payload } : payload);
 export const repairInstance = (id) => api.post(`/instance/${id}/repair`);
+export const recoverInstanceMessages = (id, hours = 24) => api.post(`/instance/${id}/recover`, { hours });
 export const deleteInstance = (id) => api.delete(`/instance/${id}`);
 
 // Contacts

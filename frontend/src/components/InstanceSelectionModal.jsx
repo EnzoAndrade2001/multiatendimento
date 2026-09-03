@@ -6,7 +6,8 @@ import ActionButton from './ui/ActionButton';
 function isConnected(instance) {
   const status = String(instance?.status || '').toLowerCase();
   const state = String(instance?.state || '').toLowerCase();
-  return status === 'connected' || state === 'open';
+  const health = String(instance?.healthStatus || '').toLowerCase();
+  return status === 'connected' && (state === 'open' || health === 'healthy' || (!state && !health));
 }
 
 function getInstanceLabel(instance) {

@@ -1,11 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
-import { Plus, QrCode, RotateCcw, Smartphone, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, Clock3, History, Plus, QrCode, RotateCcw, Smartphone, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { toast } from '../utils/toast';
-import { getInstances, createInstance, deleteInstance, getInstanceQrCode, repairInstance } from '../services/api';
+import { getInstances, createInstance, deleteInstance, getInstanceQrCode, repairInstance, recoverInstanceMessages } from '../services/api';
 import { SOCKET_URL } from '../services/socket';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
+
+function getConnectionView(instance) {
+  const state = String(instance?.state || instance?.lastConnectionState || '').toLowerCase();
+  const health = String(instance?.healthStatus || '').toLowerCase();
+  if (instance?.status === 'connected' && (state === 'open' || health === 'healthy')) {
+    return { key: 'connected', label: 'Conectado', pill: 'Sessão ativa', color: 'var(--success)', icon: <Wifi size={20} /> };
+  }
+  if (state === 'connecting' || health === 'unstable' || instance?.status === 'connecting') {
+    return { key: 'unstable', label: 'Instável / reconectando', pill: 'Reconectando', color: 'var(--warning)', icon: <AlertTriangle size={20} /> };
+  }
+  if (state === 'close' || health === 'offline' || instance?.status === 'disconnected') {
+    return { key: 'offline', label: 'Desconectado', pill: 'Sessão inativa', color: 'var(--danger)', icon: <WifiOff size={20} /> };
+  }
+  return { key: 'degraded', label: 'Evolution sem resposta', pill: 'Verificação pendente', color: 'var(--warning)', icon: <AlertTriangle size={20} /> };
+}
+
+function formatHealthDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
 
 export default function Connections() {
   const [instances, setInstances] = useState([]);
@@ -20,6 +42,7 @@ export default function Connections() {
   const [saving, setSaving] = useState(false);
   const [repairingId, setRepairingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [recoveringId, setRecoveringId] = useState(null);
   const [showOfficialGuide, setShowOfficialGuide] = useState(false);
 
   useEffect(() => {
@@ -30,8 +53,9 @@ export default function Connections() {
     s.on('connection_update', () => {
       load();
     });
+    const refresh = window.setInterval(load, 30000);
 
-    return () => s.disconnect();
+    return () => { window.clearInterval(refresh); s.disconnect(); };
   }, []);
 
   async function load() {
@@ -43,6 +67,22 @@ export default function Connections() {
       toast.error(err.response?.data?.error || 'Erro ao carregar as conexoes. Tente novamente.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRecover(inst) {
+    if (recoveringId) return;
+    const confirmed = window.confirm(`Buscar mensagens mantidas pela Evolution nas últimas 24 horas da conexão ${inst.instanceName.split('_').pop()}?`);
+    if (!confirmed) return;
+    setRecoveringId(inst.id);
+    try {
+      const { data } = await recoverInstanceMessages(inst.id, 24);
+      toast.success(`${data.synced || 0} mensagem(ns) recuperada(s); ${data.scanned || 0} analisada(s).`, 7000);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível recuperar as mensagens.');
+    } finally {
+      setRecoveringId(null);
     }
   }
 
@@ -139,20 +179,23 @@ export default function Connections() {
       ) : (
         <div style={s.grid}>
           {instances.map(inst => {
-            const isConnected = inst.status === 'connected';
+            const connectionView = getConnectionView(inst);
+            const isConnected = connectionView.key === 'connected';
             const isOfficial = inst.provider === 'evolution_official';
             const label = inst.instanceName.split('_').pop().toUpperCase();
+            const lastCheck = formatHealthDate(inst.lastHealthCheckAt);
+            const lastWebhook = formatHealthDate(inst.lastWebhookAt);
 
             return (
               <div key={inst.id} className="glass-panel" style={s.card}>
                 <div style={s.cardTop}>
-                  <div style={{ ...s.statusIcon, color: isConnected ? 'var(--success)' : 'var(--danger)' }}>
-                    {isConnected ? <Wifi size={20} /> : <WifiOff size={20} />}
+                  <div style={{ ...s.statusIcon, color: connectionView.color }}>
+                    {connectionView.icon}
                   </div>
                   <div style={s.cardInfo}>
                     <h3 style={s.cardTitle} title={label}>{label}</h3>
-                    <span style={{ ...s.cardStatus, color: isConnected ? 'var(--success)' : 'var(--text-muted)' }}>
-                      {isConnected ? 'Conectado' : 'Desconectado'}
+                    <span style={{ ...s.cardStatus, color: connectionView.color }}>
+                      {connectionView.label}
                     </span>
                     {inst.phone && (
                       <div style={s.cardPhone}>
@@ -172,9 +215,9 @@ export default function Connections() {
 
                 <div style={s.cardMeta}>
                   <span style={s.providerPill}>{isOfficial ? 'API oficial' : 'QR Code'}</span>
-                  <span style={{ ...s.statusPill, color: isConnected ? 'var(--success)' : 'var(--warning)' }}>
-                    <span style={{ ...s.statusDot, background: isConnected ? 'var(--success)' : 'var(--warning)' }} />
-                    {isConnected ? 'Sessao ativa' : 'Aguardando pareamento'}
+                  <span style={{ ...s.statusPill, color: connectionView.color }}>
+                    <span style={{ ...s.statusDot, background: connectionView.color }} />
+                    {connectionView.pill}
                   </span>
                 </div>
 
@@ -183,6 +226,11 @@ export default function Connections() {
                     <div style={s.connectedBox}>
                       <Smartphone size={16} />
                       Pronto para uso
+                    </div>
+                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' ? (
+                    <div style={{ ...s.healthBox, borderColor: connectionView.key === 'unstable' ? 'var(--warning-border)' : 'var(--danger-border)', color: connectionView.color }}>
+                      <AlertTriangle size={16} />
+                      {inst.lastHealthError || (connectionView.key === 'unstable' ? 'A Evolution está reconectando. Aguarde alguns segundos.' : 'A Evolution não respondeu à última verificação.')}
                     </div>
                   ) : isOfficial ? (
                     <div style={s.officialBox}>Credenciais oficiais registradas. Atualize para consultar o estado na Evolution.</div>
@@ -196,6 +244,13 @@ export default function Connections() {
                       </button>
                     </div>
                   )}
+                  <div style={s.healthMeta}>
+                    <span><Clock3 size={13} /> Verificado: {lastCheck || 'aguardando'}</span>
+                    <span><History size={13} /> Último webhook: {lastWebhook || 'nenhum registrado'}</span>
+                  </div>
+                  <button type="button" style={s.recoverBtn} onClick={() => handleRecover(inst)} disabled={recoveringId === inst.id}>
+                    <History size={15} /> {recoveringId === inst.id ? 'Recuperando…' : 'Recuperar mensagens (24h)'}
+                  </button>
                 </div>
               </div>
             );
@@ -435,6 +490,41 @@ const s = {
     borderRadius: '12px',
     fontSize: '0.9rem',
     fontWeight: 800
+  },
+  healthBox: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    background: 'var(--warning-light)',
+    border: '1px solid var(--warning-border)',
+    padding: '0.85rem',
+    borderRadius: '12px',
+    fontSize: '0.82rem',
+    lineHeight: 1.4,
+    fontWeight: 700
+  },
+  healthMeta: {
+    display: 'grid',
+    gap: '0.3rem',
+    marginTop: '0.75rem',
+    color: 'var(--text-dim)',
+    fontSize: '0.72rem'
+  },
+  recoverBtn: {
+    width: '100%',
+    marginTop: '0.75rem',
+    background: 'transparent',
+    color: 'var(--text-muted)',
+    border: '1px dashed var(--border-color)',
+    padding: '0.6rem 0.75rem',
+    borderRadius: '10px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '7px',
+    fontSize: '0.78rem'
   },
   officialBox: { color: 'var(--text-muted)', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', padding: '0.85rem', borderRadius: '12px', fontSize: '0.86rem', lineHeight: 1.45 },
   empty: { padding: '4rem', textAlign: 'center', color: 'var(--text-muted)', gridColumn: '1 / -1' },

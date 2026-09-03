@@ -1,6 +1,8 @@
 const prisma = require('../lib/prisma');
 const evolution = require('../services/evolutionService');
 const metaCloudApi = require('../services/metaCloudApiService');
+const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
+const { syncMissedMessages } = require('../services/syncMissedMessagesService');
 
 async function getSettings(tenantId) {
   const s = await prisma.tenantSettings.findUnique({ where: { tenantId } });
@@ -31,8 +33,10 @@ async function list(req, res) {
 
     const result = await Promise.all(instances.map(async (inst) => {
       try {
-        const data = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName);
-        const state = data?.instance?.state || data?.state || 'close';
+        const checkedAt = new Date();
+        const data = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName, { timeout: 15000 });
+        const state = parseConnectionState(data) || 'unknown';
+        const health = healthForState(state);
         
         let phoneStr = inst.phone;
         if (state === 'open' && !phoneStr && inst.provider !== 'evolution_official') {
@@ -50,13 +54,33 @@ async function list(req, res) {
         const updated = await prisma.waInstance.update({
           where: { id: inst.id },
           data: { 
-            status: state === 'open' ? 'connected' : 'disconnected',
+            ...health,
+            lastConnectionState: state,
+            ...(inst.lastConnectionState !== state || inst.status !== health.status ? { lastConnectionAt: checkedAt } : {}),
+            lastHealthCheckAt: checkedAt,
+            lastHealthError: state === 'unknown' ? 'Evolution respondeu sem informar o estado da conexão.' : null,
             phone: phoneStr
           }
         });
-        return { ...updated, state };
-      } catch {
-        return { ...inst, state: 'close' };
+        return { ...updated, state, healthStatus: health.healthStatus };
+      } catch (error) {
+        const checkedAt = new Date();
+        const message = String(error?.response?.data?.message || error?.message || 'Evolution sem resposta').slice(0, 500);
+        try {
+          const updated = await prisma.waInstance.update({
+            where: { id: inst.id },
+            data: {
+              status: 'degraded',
+              healthStatus: 'degraded',
+              lastConnectionState: 'unknown',
+              lastHealthCheckAt: checkedAt,
+              lastHealthError: message,
+            },
+          });
+          return { ...updated, state: 'unknown', healthStatus: 'degraded' };
+        } catch {
+          return { ...inst, status: 'degraded', state: 'unknown', healthStatus: 'degraded', lastHealthCheckAt: checkedAt, lastHealthError: message };
+        }
       }
     }));
 
@@ -236,7 +260,7 @@ async function repair(req, res) {
 
     const updated = await prisma.waInstance.update({
       where: { id },
-      data: { status: 'disconnected', qrCode: null },
+      data: { status: 'disconnected', healthStatus: 'offline', lastConnectionState: 'close', lastHealthError: null, qrCode: null },
     });
 
     let qrData = null;
@@ -256,6 +280,21 @@ async function repair(req, res) {
   } catch (err) {
     console.error('[instanceController] Erro ao reparar instancia:', err.response?.data || err.message);
     res.status(err.statusCode || err.response?.status || 400).json({ error: err.response?.data?.message || err.message });
+  }
+}
+
+async function recoverMessages(req, res) {
+  try {
+    const inst = await prisma.waInstance.findFirst({
+      where: { id: req.params.id, tenantId: req.user.tenantId, instanceName: { not: { startsWith: 'DELETED_' } } },
+    });
+    if (!inst) return res.status(404).json({ error: 'Instancia nao encontrada' });
+
+    const hours = Number(req.body?.hours || req.query?.hours || 24);
+    const result = await syncMissedMessages(inst.instanceName, { hours, force: true });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 }
 
@@ -291,4 +330,4 @@ async function remove(req, res) {
   }
 }
 
-module.exports = { list, create, getQrCode, repair, remove };
+module.exports = { list, create, getQrCode, repair, recoverMessages, remove };

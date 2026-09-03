@@ -10,6 +10,7 @@ const technicalAssistantService = require('../services/technicalAssistantService
 const ticketSessionService = require('../services/ticketSessionService');
 const whatsappComplianceService = require('../services/whatsappComplianceService');
 const { classifyResponseOrigin } = require('../services/aiResponseAuditService');
+const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
 const {
   guardBotReply,
   isUnsafeOperationalClaim,
@@ -92,7 +93,7 @@ function clearPendingConnectionCheck(instanceName) {
 }
 
 function getConnectionStateValue(payload) {
-  return payload?.instance?.state || payload?.state || null;
+  return parseConnectionState(payload);
 }
 
 async function confirmDisconnected(instanceName, waInstanceId) {
@@ -116,12 +117,12 @@ async function confirmDisconnected(instanceName, waInstanceId) {
   if (state === 'open') {
     const updated = await prisma.waInstance.update({
       where: { id: waInstance.id },
-      data: { status: 'connected' },
+      data: { status: 'connected', healthStatus: 'healthy', lastConnectionState: 'open', lastConnectionAt: new Date(), lastHealthCheckAt: new Date(), lastHealthError: null },
     });
     if (io) io.to(updated.tenantId).emit('connection_update', {
       instance: instanceName,
       event: 'connection.update',
-      data: { state: 'open', confirmed: true },
+      data: { state: 'open', healthStatus: 'healthy', confirmed: true },
     });
     return;
   }
@@ -129,12 +130,12 @@ async function confirmDisconnected(instanceName, waInstanceId) {
   if (state === 'close') {
     const updated = await prisma.waInstance.update({
       where: { id: waInstance.id },
-      data: { status: 'disconnected' },
+      data: { status: 'disconnected', healthStatus: 'offline', lastConnectionState: 'close', lastConnectionAt: new Date(), lastHealthCheckAt: new Date(), lastHealthError: null },
     });
     if (io) io.to(updated.tenantId).emit('connection_update', {
       instance: instanceName,
       event: 'connection.update',
-      data: { state: 'close', confirmed: true },
+      data: { state: 'close', healthStatus: 'offline', confirmed: true },
     });
 
     const { sendSystemAlert } = require('../services/alertService');
@@ -142,6 +143,21 @@ async function confirmDisconnected(instanceName, waInstanceId) {
     return;
   }
 
+  const updated = await prisma.waInstance.update({
+    where: { id: waInstance.id },
+    data: {
+      status: 'degraded',
+      healthStatus: 'degraded',
+      lastConnectionState: state || 'unknown',
+      lastHealthCheckAt: new Date(),
+      lastHealthError: 'Nao foi possivel confirmar o estado da Evolution apos a reconexao.',
+    },
+  });
+  if (io) io.to(updated.tenantId).emit('connection_update', {
+    instance: instanceName,
+    event: 'connection.health',
+    data: { state: state || 'unknown', healthStatus: 'degraded', confirmed: true },
+  });
   console.log(`[webhook] Desconexao de ${instanceName} nao confirmada. Estado atual: ${state || 'desconhecido'}.`);
 }
 
@@ -854,11 +870,16 @@ async function handleWebhook(req, res) {
     if (ev === 'connection.update' || ev === 'qrcode.updated') {
       const waInstance = await prisma.waInstance.findFirst({ where: { instanceName: instance } });
       if (waInstance) {
-        if (io) io.to(waInstance.tenantId).emit('connection_update', { instance, event, data });
+        const receivedAt = new Date();
+        const state = ev === 'connection.update' ? getConnectionStateValue(data) : null;
+        const health = state ? healthForState(state) : null;
+        const wasNotHealthy = waInstance.status !== 'connected'
+          || waInstance.healthStatus !== 'healthy'
+          || waInstance.lastConnectionState !== 'open';
         
         // Atualiza status e telefone se disponível no evento de conexão
-        const isConnected = ev === 'connection.update' && data?.state === 'open';
-        const shouldConfirmDisconnect = ev === 'connection.update' && (data?.state === 'close' || data?.state === 'connecting');
+        const isConnected = ev === 'connection.update' && state === 'open';
+        const shouldConfirmDisconnect = ev === 'connection.update' && (state === 'close' || state === 'connecting');
         let phone = waInstance.phone;
         const owner = data?.owner || data?.ownerJid;
         if (owner && typeof owner === 'string') {
@@ -874,20 +895,41 @@ async function handleWebhook(req, res) {
         const updatedInstance = await prisma.waInstance.update({
           where: { id: waInstance.id },
           data: { 
-            status: isConnected ? 'connected' : waInstance.status,
+            ...(health ? {
+              // Mostra a instabilidade imediatamente; a confirmação de 45s
+              // continua evitando falso positivo de desconexão definitiva.
+              status: isConnected ? 'connected' : state === 'connecting' || state === 'close' ? 'connecting' : 'degraded',
+              healthStatus: isConnected ? 'healthy' : state === 'connecting' || state === 'close' ? 'unstable' : 'degraded',
+              lastConnectionState: state,
+              ...(waInstance.lastConnectionState !== state ? { lastConnectionAt: receivedAt } : {}),
+              lastHealthError: null,
+            } : {}),
+            lastWebhookAt: receivedAt,
+            lastHealthCheckAt: receivedAt,
             ...(phone && { phone })
           }
         });
         
         // Se a conexão foi estabelecida (reconexão), dispara rotina de sincronização de mensagens perdidas (em background)
-        if (isConnected && waInstance.status === 'disconnected' && waInstance.provider !== 'evolution_official') {
+        if (io) io.to(waInstance.tenantId).emit('connection_update', {
+          instance,
+          event,
+          data: {
+            ...(data || {}),
+            state: state || data?.state || 'unknown',
+            healthStatus: health?.healthStatus || updatedInstance.healthStatus,
+            receivedAt: receivedAt.toISOString(),
+          },
+        });
+
+        if (isConnected && wasNotHealthy && waInstance.provider !== 'evolution_official') {
           const { syncMissedMessages } = require('../services/syncMissedMessagesService');
-          syncMissedMessages(instance).catch(e => console.error('[webhook] Falha no sync automático:', e.message));
+          syncMissedMessages(instance, { hours: 24, limitPerChat: 20, maxChats: 50 }).catch(e => console.error('[webhook] Falha no sync automático:', e.message));
         }
         
         // Se a conexão caiu, avisa o admin
         if (shouldConfirmDisconnect) {
-          console.log(`[webhook] ${instance} reportou ${data?.state}; confirmando em ${DISCONNECT_CONFIRMATION_MS}ms antes de marcar como desconectado.`);
+          console.log(`[webhook] ${instance} reportou ${state || data?.state || 'desconhecido'}; painel marcado como instável e confirmando em ${DISCONNECT_CONFIRMATION_MS}ms antes de marcar como desconectado.`);
         }
       }
       return;
@@ -926,6 +968,14 @@ async function handleWebhook(req, res) {
 
     const waInstance = await prisma.waInstance.findFirst({ where: { instanceName: instance } });
     if (!waInstance) return;
+
+    // Registra a chegada do webhook mesmo quando a mensagem está sendo
+    // processada em segundo plano. Isso permite distinguir Evolution sem
+    // mensagens de Evolution sem comunicação.
+    prisma.waInstance.update({
+      where: { id: waInstance.id },
+      data: { lastWebhookAt: new Date(), lastHealthError: null },
+    }).catch((error) => console.warn(`[webhook] falha ao registrar heartbeat de ${instance}: ${error.message}`));
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: waInstance.tenantId },
