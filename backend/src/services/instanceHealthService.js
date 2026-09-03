@@ -51,6 +51,12 @@ function emitHealth(instance, state, healthStatus, checkedAt, error = null) {
 
 async function checkInstance(instance) {
   const checkedAt = new Date();
+  // O ambiente local de demonstração não deve tentar falar com a Evolution
+  // nem transformar instâncias fictícias em "desconectadas". Em produção essa
+  // variável nunca é habilitada e o monitor segue validando cada conexão.
+  if (String(process.env.LOCAL_DEMO || '').toLowerCase() === 'true') {
+    return instance;
+  }
   const settings = instance.tenant?.settings;
   const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
   const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;

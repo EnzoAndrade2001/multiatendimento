@@ -10,6 +10,7 @@ const { hasPermission } = require('../auth/permissions');
 const { mergeTicketUserStates } = require('./ticketPreferencesController');
 let io;
 function setIo(socketIo) { io = socketIo; }
+const isLocalDemo = () => String(process.env.LOCAL_DEMO || '').toLowerCase() === 'true';
 
 function hasMissingWhatsAppNumber(value) {
   if (Array.isArray(value)) return value.some(hasMissingWhatsAppNumber);
@@ -825,6 +826,35 @@ async function sendMessage(req, res) {
     const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
     const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
 
+    if (isLocalDemo()) {
+      const agent = await prisma.user.findUnique({ where: { id: req.user.userId } });
+      const messageBody = outbound.mode === 'template' ? outbound.renderedBody : String(body || '').trim();
+      if (!messageBody) return res.status(400).json({ error: 'Digite uma mensagem para enviar.' });
+      await ticketSessionService.ensureSessionForActivity(ticket);
+      const now = new Date();
+      const updatedTicket = await prisma.ticket.update({
+        where: { id },
+        data: {
+          status: 'open',
+          agentId: req.user.userId,
+          unreadCount: 0,
+          firstResponseAt: ticket.firstResponseAt || now,
+          lastMessageAt: now,
+        },
+      });
+      const message = await prisma.message.create({
+        data: {
+          ticketId: id,
+          agentId: req.user.userId,
+          body: messageBody,
+          fromMe: true,
+          externalId: `demo-${Date.now()}`,
+        },
+      });
+      if (io) io.to(req.user.tenantId).emit('new_message', { message, ticket: updatedTicket, contact: ticket.contact, fromMe: true });
+      return res.json(message);
+    }
+
     if (!evolutionUrl || !evolutionKey) {
       return res.status(400).json({ error: 'Integração com o WhatsApp (Evolution API) não configurada para esta empresa' });
     }
@@ -968,6 +998,39 @@ async function sendMediaMessage(req, res) {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
     const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
     const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+
+    if (isLocalDemo()) {
+      const mediaUrl = `/uploads/media/${file.filename}`;
+      const mediaType = file.mimetype?.startsWith('image/')
+        ? 'image'
+        : file.mimetype?.startsWith('video/')
+          ? 'video'
+          : file.mimetype?.startsWith('audio/')
+            ? 'audio'
+            : 'document';
+      await ticketSessionService.ensureSessionForActivity(ticket);
+      const now = new Date();
+      const updatedTicket = await prisma.ticket.update({
+        where: { id },
+        data: { status: 'open', agentId: req.user.userId, unreadCount: 0, firstResponseAt: ticket.firstResponseAt || now, lastMessageAt: now },
+      });
+      const message = await prisma.message.create({
+        data: {
+          ticketId: id,
+          agentId: req.user.userId,
+          body: caption,
+          fromMe: true,
+          mediaUrl,
+          mediaType,
+          mediaStatus: 'ok',
+          fileName: file.originalname,
+          externalId: `demo-media-${Date.now()}`,
+          quotedMsgId,
+        },
+      });
+      if (io) io.to(req.user.tenantId).emit('new_message', { message, ticket: updatedTicket, contact: ticket.contact, fromMe: true });
+      return res.json(message);
+    }
 
     if (!evolutionUrl || !evolutionKey) {
       return res.status(400).json({ error: 'Integração com o WhatsApp (Evolution API) não configurada para esta empresa' });

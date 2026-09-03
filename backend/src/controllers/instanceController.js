@@ -20,6 +20,15 @@ async function list(req, res) {
         instanceName: { not: { startsWith: 'DELETED_' } }
       } 
     });
+
+    // O perfil local de demonstração usa estados gravados no fixture e não
+    // deve chamar a Evolution real só para montar a tela de conexões.
+    if (String(process.env.LOCAL_DEMO || '').toLowerCase() === 'true') {
+      return res.json(instances.map((instance) => ({
+        ...instance,
+        state: instance.lastConnectionState || (instance.status === 'connected' ? 'open' : 'close'),
+      })));
+    }
     
     let settings;
     try {
