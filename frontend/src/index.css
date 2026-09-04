@@ -360,6 +360,66 @@ body {
   animation: ui-spin 0.7s linear infinite;
 }
 
+/* Shared application shell: one visual language across every module. */
+.app-layout-root {
+  background:
+    radial-gradient(circle at 50% -18%, rgba(41, 73, 108, 0.18), transparent 42%),
+    var(--bg-base) !important;
+}
+
+.app-global-nav {
+  height: 72px !important;
+  min-height: 72px !important;
+  background: linear-gradient(180deg, rgba(23, 29, 40, 0.98), rgba(16, 21, 30, 0.98)) !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.app-global-nav .primary-nav-link {
+  min-height: 40px !important;
+  border-radius: 10px !important;
+  color: var(--text-muted) !important;
+}
+
+.app-global-nav .primary-nav-link:hover,
+.app-global-nav .primary-nav-link:focus-visible {
+  background: rgba(255, 255, 255, 0.055) !important;
+  color: var(--text-main) !important;
+}
+
+.app-global-nav .primary-nav-link[aria-current="page"] {
+  background: var(--accent-light) !important;
+  color: var(--accent) !important;
+  box-shadow: inset 0 0 0 1px var(--accent-border) !important;
+}
+
+.app-global-nav .header-action-button {
+  min-height: 40px;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+.app-global-nav .header-action-button:hover {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: var(--accent-border) !important;
+}
+
+.app-layout-content {
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+}
+
+@media (max-width: 768px) {
+  .app-global-nav {
+    height: 62px !important;
+    min-height: 62px !important;
+  }
+}
+
 @keyframes ui-spin {
   to { transform: rotate(360deg); }
 }

@@ -36,7 +36,6 @@ import { ChatHeader, ContactPanel, ForwardModal, MessageComposer, MessageList, T
 import { Empty } from './inbox/helpers.jsx';
 import { useInboxMessages, useInboxRealtime, useInboxTickets } from './inbox/hooks';
 import { usePermissions } from '../auth/PermissionContext';
-import { Activity, Bell, CheckCircle2, MessageSquare } from 'lucide-react';
 
 const MAX_INBOX_FILE_SIZE = 20 * 1024 * 1024;
 const MAX_INBOX_FILES = 10;
@@ -97,7 +96,7 @@ export default function Inbox() {
   const [transferModal, setTransferModal] = useState(false);
   const [linkModal, setLinkModal] = useState(false);
   const [showOsModal, setShowOsModal] = useState(false);
-  const [showInfo, setShowInfo] = useState(() => window.innerWidth > 1199);
+  const [showInfo, setShowInfo] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [summary, setSummary] = useState(null);
   const [files, setFiles] = useState([]);
@@ -825,56 +824,6 @@ export default function Inbox() {
         .inbox-sidebar { width: clamp(282px, 19vw, 348px) !important; min-width: clamp(282px, 19vw, 348px) !important; }
         .inbox-message-lane { width: min(100%, 1240px); margin-inline: auto; }
         .inbox-contact-panel { width: clamp(330px, 22vw, 400px) !important; }
-        .inbox-workspace-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 1rem;
-          min-height: 68px;
-          padding: .72rem 1rem;
-          border: 1px solid rgba(148, 163, 184, .16);
-          border-radius: 18px;
-          background: linear-gradient(115deg, rgba(21, 30, 45, .96), rgba(13, 20, 32, .96));
-          box-shadow: 0 14px 34px rgba(0, 0, 0, .2);
-        }
-        .inbox-workspace-header-title { min-width: 0; display: flex; align-items: center; gap: .75rem; }
-        .inbox-workspace-header-eyebrow { color: var(--accent); font-size: .68rem; font-weight: 850; letter-spacing: .13em; text-transform: uppercase; white-space: nowrap; }
-        .inbox-workspace-header h1 { margin: 0; color: var(--text-main); font-size: clamp(1.05rem, 1.65vw, 1.42rem); letter-spacing: -.04em; white-space: nowrap; }
-        .inbox-live-status { display: inline-flex; align-items: center; gap: .4rem; color: var(--success); font-size: .74rem; font-weight: 800; white-space: nowrap; }
-        .inbox-live-status.offline { color: var(--warning); }
-        .inbox-live-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 15%, transparent); }
-        .inbox-workspace-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; min-width: 0; }
-        .inbox-channel-select { display: inline-flex; align-items: center; gap: .4rem; min-width: 180px; max-width: 270px; height: 38px; padding: 0 .65rem; border: 1px solid rgba(148, 163, 184, .2); border-radius: 11px; background: rgba(4, 9, 16, .48); color: var(--text-main); }
-        .inbox-channel-select svg { flex: 0 0 auto; color: var(--accent); }
-        .inbox-channel-select select { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: .76rem; font-weight: 750; }
-        .inbox-channel-select option { color: #111827; }
-        .inbox-header-online { display: inline-flex; align-items: center; gap: .4rem; padding: 0 .65rem; color: var(--success); font-size: .74rem; font-weight: 800; white-space: nowrap; }
-        .inbox-header-icon { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(148, 163, 184, .2); border-radius: 11px; background: rgba(255,255,255,.025); color: var(--text-muted); cursor: pointer; }
-        .inbox-header-icon:hover { color: var(--text-main); border-color: var(--accent-border); background: rgba(232,201,106,.08); }
-        .inbox-workspace-header-finalize { display: inline-flex; align-items: center; gap: .4rem; min-height: 38px; padding: 0 .85rem; border: 1px solid rgba(232,201,106,.35); border-radius: 11px; background: var(--accent); color: var(--text-inverse); font: inherit; font-size: .76rem; font-weight: 850; cursor: pointer; white-space: nowrap; box-shadow: 0 8px 18px rgba(232,201,106,.14); }
-        .inbox-workspace-header-finalize:hover { filter: brightness(1.04); transform: translateY(-1px); }
-        @media (min-width: 1200px) {
-          .inbox-workspace { display: grid !important; grid-template-columns: minmax(300px, 27%) minmax(0, 1fr) minmax(300px, 23%) !important; grid-template-rows: auto minmax(0, 1fr) !important; gap: 12px !important; padding: 12px 14px 14px !important; background: radial-gradient(circle at 48% -20%, rgba(34, 62, 91, .25), transparent 45%), linear-gradient(135deg, #080c13 0%, #0a111d 58%, #080c13 100%) !important; }
-          .inbox-workspace-header { grid-column: 1 / -1; grid-row: 1; }
-          .inbox-workspace > .inbox-sidebar { grid-column: 1; grid-row: 2; width: auto !important; min-width: 0 !important; border: 1px solid rgba(148,163,184,.16) !important; border-radius: 18px !important; box-shadow: 0 18px 38px rgba(0,0,0,.22); overflow: hidden; }
-          .inbox-workspace > .inbox-main { grid-column: 2; grid-row: 2; min-width: 0; border: 1px solid rgba(148,163,184,.16) !important; border-radius: 18px !important; box-shadow: 0 18px 38px rgba(0,0,0,.22); overflow: hidden; }
-          .inbox-workspace > .inbox-contact-panel { grid-column: 3; grid-row: 2; width: auto !important; min-width: 0 !important; position: static !important; inset: auto !important; height: auto !important; border: 1px solid rgba(148,163,184,.16) !important; border-radius: 18px !important; box-shadow: 0 18px 38px rgba(0,0,0,.22) !important; overflow: hidden; }
-          .inbox-workspace .inbox-chat-header { background: linear-gradient(115deg, rgba(22,31,46,.95), rgba(14,21,33,.95)) !important; }
-          .inbox-workspace .inbox-contact-panel { background: linear-gradient(180deg, rgba(17,25,38,.98), rgba(10,16,26,.98)) !important; }
-          .inbox-workspace .inbox-bubble { border-radius: 15px !important; box-shadow: 0 7px 18px rgba(0,0,0,.14); }
-        }
-        @media (max-width: 1199px) {
-          .inbox-workspace-header { border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
-          .inbox-workspace-header-eyebrow { display: none; }
-        }
-        @media (max-width: 768px) {
-          .inbox-workspace-header { min-height: 56px; padding: .55rem .7rem; gap: .5rem; }
-          .inbox-workspace-header-title { gap: .5rem; }
-          .inbox-workspace-header h1 { font-size: 1rem; }
-          .inbox-workspace-header-actions { gap: .25rem; }
-          .inbox-channel-select { min-width: 38px; width: 38px; padding: 0; justify-content: center; }
-          .inbox-channel-select select, .inbox-header-online, .inbox-workspace-header-finalize { display: none; }
-        }
         .inbox-workspace[data-density="compact"] .inbox-sidebar-header { padding: .72rem .8rem .58rem !important; }
         .inbox-workspace[data-density="compact"] .inbox-sidebar-subtitle { display: none; }
         .inbox-workspace[data-density="compact"] .inbox-tabs-wrap { padding: .55rem .7rem !important; }
@@ -906,29 +855,6 @@ export default function Inbox() {
           .inbox-chat-header { min-height: 58px !important; }
         }
       `}</style>
-      <div className="inbox-workspace-header" aria-label="Status do atendimento">
-        <div className="inbox-workspace-header-title">
-          <span className="inbox-workspace-header-eyebrow">Operação</span>
-          <h1>Central de Atendimento</h1>
-          <span className={`inbox-live-status${isDisconnected ? ' offline' : ''}`}>
-            <i className="inbox-live-dot" aria-hidden="true" />
-            {isDisconnected ? 'Reconectando' : 'Ao vivo'}
-          </span>
-        </div>
-        <div className="inbox-workspace-header-actions">
-          <label className="inbox-channel-select" title="Canal de saída">
-            <MessageSquare size={15} aria-hidden="true" />
-            <select aria-label="Canal de atendimento" value={outboundInstanceId || ''} onChange={(event) => setOutboundInstanceId(event.target.value)}>
-              <option value="">Canal</option>
-              {(instances || []).map((instance) => <option key={instance.id} value={instance.id}>{instance.instanceName || instance.name || 'WhatsApp'}{instance.provider ? ` · ${instance.provider}` : ''}</option>)}
-            </select>
-          </label>
-          <span className="inbox-header-online"><i className="inbox-live-dot" aria-hidden="true" />{isDisconnected ? 'Instável' : 'Online'}</span>
-          <button type="button" className="inbox-header-icon" onClick={onReconnect} aria-label="Reconectar atendimento" title="Reconectar atendimento"><Activity size={17} /></button>
-          <span className="inbox-header-icon" role="img" aria-label="Notificações" title="Notificações"><Bell size={17} /></span>
-          {selectedTicket && can('inbox.resolve') ? <button type="button" className="inbox-workspace-header-finalize" onClick={handleResolve}><CheckCircle2 size={16} />Finalizar atendimento</button> : null}
-        </div>
-      </div>
       {!notebookListHidden ? <TicketSidebar
         counts={counts}
         error={ticketsError}
