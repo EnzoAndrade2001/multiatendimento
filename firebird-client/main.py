@@ -589,6 +589,18 @@ class CRMClient:
             }
         )
 
+    @staticmethod
+    def _raise_for_status(response: requests.Response) -> None:
+        """Keep the CRM response body in the local log for actionable errors."""
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = response.text.strip()
+            if detail:
+                detail = detail[:500]
+                raise requests.HTTPError(f"{exc} - resposta do CRM: {detail}", response=response) from exc
+            raise
+
     def push(self, entity: str, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {"ok": True, "stats": {"received": 0}}
@@ -603,7 +615,7 @@ class CRMClient:
             },
             timeout=120,
         )
-        response.raise_for_status()
+        self._raise_for_status(response)
         return response.json()
 
     def process_pending_commands(
@@ -623,7 +635,7 @@ class CRMClient:
                 },
                 timeout=max(30, wait_seconds + 10),
             )
-            response.raise_for_status()
+            self._raise_for_status(response)
             commands = response.json()
             if not commands:
                 return
@@ -724,7 +736,7 @@ class CRMClient:
                     },
                     timeout=30
                 )
-                response.raise_for_status()
+                self._raise_for_status(response)
                 return
             except Exception as exc:
                 logging.error(
@@ -786,7 +798,7 @@ class CRMClient:
             },
             timeout=120,
         )
-        response.raise_for_status()
+        self._raise_for_status(response)
         return response.json()
 
     def log_test_billing(self, package: dict[str, Any]) -> None:
@@ -805,7 +817,7 @@ class CRMClient:
                 },
                 timeout=30,
             )
-            response.raise_for_status()
+            self._raise_for_status(response)
         except Exception as exc:
             # Nao interrompe o ciclo de teste por causa disso - e so um espelho
             # de conveniencia na tela do CRM, o log local continua valendo.

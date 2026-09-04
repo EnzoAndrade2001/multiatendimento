@@ -46,3 +46,36 @@ test('falha fechado se o token estiver associado a mais de um tenant', async (co
     (error) => error.statusCode === 409 && /mais de uma empresa/.test(error.message),
   );
 });
+
+test('prioriza o tenant do token quando o slug salvo pelo agente esta desatualizado', async (context) => {
+  const originalFindMany = prisma.tenantSettings.findMany;
+  const originalFindUnique = prisma.tenant.findUnique;
+  context.after(() => {
+    prisma.tenantSettings.findMany = originalFindMany;
+    prisma.tenant.findUnique = originalFindUnique;
+  });
+
+  prisma.tenant.findUnique = async () => ({
+    ...TENANT,
+    id: 'tenant-do-slug-antigo',
+    settings: { firebirdClientToken: 'token-antigo' },
+  });
+  prisma.tenantSettings.findMany = async () => [{ tenant: TENANT }];
+
+  const result = await resolveTenantContext('slug-antigo', requestWithToken());
+  assert.equal(result.tenant.id, TENANT.id);
+});
+
+test('nao exige instancia WhatsApp para heartbeat e polling do agente', async (context) => {
+  const originalFindMany = prisma.tenantSettings.findMany;
+  context.after(() => {
+    prisma.tenantSettings.findMany = originalFindMany;
+  });
+
+  const tenantWithoutInstance = { ...TENANT, instances: [] };
+  prisma.tenantSettings.findMany = async () => [{ tenant: tenantWithoutInstance }];
+
+  const result = await resolveTenantContext('', requestWithToken(), { requireInstance: false });
+  assert.equal(result.tenant.id, TENANT.id);
+  assert.equal(result.instance, undefined);
+});

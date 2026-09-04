@@ -110,21 +110,26 @@ function tenantResolutionError(message, statusCode = 400) {
  * it must match exactly one TenantSettings row. Ambiguous tokens fail closed
  * instead of guessing a company.
  */
-async function resolveTenantContext(tenantSlug, req) {
+async function resolveTenantContext(tenantSlug, req, { requireInstance = true } = {}) {
   const normalizedSlug = String(tenantSlug || '').trim();
+  const providedToken = firebirdTokenFromRequest(req);
   let tenant;
 
+  // O token é a credencial e o vínculo inequívoco da instalação. Primeiro
+  // preservamos a consulta por slug quando ele já pertence ao mesmo token;
+  // se o agente foi reaproveitado com o slug de outra empresa, resolvemos pelo
+  // token e ignoramos o valor antigo.
   if (normalizedSlug) {
     tenant = await prisma.tenant.findUnique({
       where: { slug: normalizedSlug },
       include: { settings: true, instances: true },
     });
-  } else {
-    const providedToken = firebirdTokenFromRequest(req);
-    if (!providedToken) {
-      throw tenantResolutionError('tenantSlug é obrigatório quando o token de sincronização não foi informado.', 400);
+    if (tenant && providedToken && resolveToken(tenant) !== providedToken) {
+      tenant = null;
     }
+  }
 
+  if (!tenant && providedToken) {
     const matches = await prisma.tenantSettings.findMany({
       where: { firebirdClientToken: providedToken },
       include: { tenant: { include: { settings: true, instances: true } } },
@@ -136,20 +141,21 @@ async function resolveTenantContext(tenantSlug, req) {
     }
     if (matches.length === 1) {
       tenant = matches[0].tenant;
-    } else {
-      throw tenantResolutionError('Não foi possível identificar a empresa pelo token de sincronização.', 401);
     }
   }
 
   if (!tenant) {
-    throw tenantResolutionError('Tenant não encontrado para o slug informado.', 404);
+    if (providedToken) {
+      throw tenantResolutionError('Não foi possível identificar a empresa pelo token de sincronização.', 401);
+    }
+    throw tenantResolutionError('tenantSlug é obrigatório quando o token de sincronização não foi informado.', 400);
   }
 
   const instance =
     tenant.instances.find((item) => String(item.status).toLowerCase() === 'connected') ||
     tenant.instances[0];
 
-  if (!instance) {
+  if (requireInstance && !instance) {
     throw tenantResolutionError('Nenhuma instância de WhatsApp encontrada para esse tenant.', 422);
   }
 
@@ -165,11 +171,11 @@ function assertToken(req, tenant) {
   const provided = req.header('x-firebird-token') || req.header('authorization')?.replace(/^Bearer\s+/i, '');
 
   if (!expected) {
-    throw new Error('Token de sincronização não configurado no CRM.');
+    throw tenantResolutionError('Token de sincronização não configurado no CRM.', 503);
   }
 
   if (!provided || provided !== expected) {
-    throw new Error('Token de sincronização inválido.');
+    throw tenantResolutionError('Token de sincronização inválido.', 401);
   }
 }
 
@@ -771,7 +777,12 @@ async function pushBatch(req, res) {
       return res.status(400).json({ error: 'records deve ser uma lista.' });
     }
 
-    const { tenant, instance } = await resolveTenantContext(tenantSlug, req);
+    // Somente a importação de O.S. precisa de uma instância para associar o
+    // contato ao canal. Cadastros, contratos e leituras podem ser validados e
+    // sincronizados antes de o cliente conectar o WhatsApp.
+    const { tenant, instance } = await resolveTenantContext(tenantSlug, req, {
+      requireInstance: entity === 'serviceOrders',
+    });
     assertToken(req, tenant);
 
     const source = 'firebird';
@@ -944,7 +955,7 @@ async function getPendingCommands(req, res) {
   try {
     const { tenantSlug } = req.query;
     const waitSeconds = Math.max(0, Math.min(Number.parseInt(req.query.wait, 10) || 0, 25));
-    const { tenant } = await resolveTenantContext(tenantSlug, req);
+    const { tenant } = await resolveTenantContext(tenantSlug, req, { requireInstance: false });
     assertToken(req, tenant);
 
     const deadline = Date.now() + (waitSeconds * 1000);
@@ -1163,7 +1174,7 @@ async function commandCallback(req, res) {
     const { id } = req.params;
     const { tenantSlug, success, result, error } = req.body || {};
 
-    const { tenant } = await resolveTenantContext(tenantSlug, req);
+    const { tenant } = await resolveTenantContext(tenantSlug, req, { requireInstance: false });
     assertToken(req, tenant);
 
     if (id === 'PROCESS_BILLING') {
@@ -1459,7 +1470,7 @@ async function commandCallback(req, res) {
 async function agentPing(req, res) {
   try {
     const { tenantSlug } = req.body || {};
-    const { tenant } = await resolveTenantContext(tenantSlug, req);
+    const { tenant } = await resolveTenantContext(tenantSlug, req, { requireInstance: false });
     assertToken(req, tenant);
 
     await prisma.tenantSettings.update({
