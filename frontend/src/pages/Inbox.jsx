@@ -127,7 +127,10 @@ export default function Inbox() {
   const [crmProfileTab, setCrmProfileTab] = useState('overview');
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => window.innerWidth > 768 && window.innerWidth <= 1599);
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  const [density, setDensity] = useState(() => localStorage.getItem('inbox-density') || 'auto');
+  // A caixa de entrada deve abrir sempre no modo mais previsível para a
+  // operação. A preferência confortável continua disponível no seletor,
+  // mas não pode deixar uma janela nova sem espaço para o compositor.
+  const [density, setDensity] = useState('compact');
   const [notebookListHidden, setNotebookListHidden] = useState(false);
   const openOsHandledRef = useRef(false);
   const isMobile = useIsMobile();
@@ -821,6 +824,9 @@ export default function Inbox() {
         .inbox-control:hover:not(:disabled) { border-color: var(--accent-border) !important; color: var(--text-main) !important; }
         .inbox-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .inbox-control:active:not(:disabled) { transform: translateY(1px); }
+        .inbox-workspace, .inbox-main { min-height: 0 !important; }
+        .inbox-messages { min-height: 0 !important; }
+        .inbox-composer { flex: 0 0 auto !important; min-height: 0 !important; }
         .inbox-sidebar { width: clamp(282px, 19vw, 348px) !important; min-width: clamp(282px, 19vw, 348px) !important; }
         .inbox-message-lane { width: min(100%, 1240px); margin-inline: auto; }
         .inbox-contact-panel { width: clamp(330px, 22vw, 400px) !important; }
@@ -859,6 +865,8 @@ export default function Inbox() {
         @media (max-height: 760px) and (min-width: 769px) {
           .inbox-sidebar-eyebrow, .inbox-updated-at { display: none !important; }
           .inbox-chat-header { min-height: 58px !important; }
+          .inbox-composer { padding: .35rem .65rem !important; gap: .3rem !important; }
+          .inbox-composer-shell { padding: .3rem !important; gap: .4rem !important; }
         }
       `}</style>
       {!notebookListHidden ? <TicketSidebar
