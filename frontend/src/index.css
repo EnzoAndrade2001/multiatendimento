@@ -4,9 +4,9 @@
 
 :root {
   /* Type */
-  --font-main: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-main: 'Hanken Grotesk', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-display: var(--font-main);
-  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-md: 1rem;
@@ -17,21 +17,23 @@
   --leading-normal: 1.5;
   --leading-relaxed: 1.65;
 
-  /* Graphite + Champagne */
-  --brand-solid: #C9A84E;
-  --brand-solid-hover: #D9BB65;
-  --brand-on-solid: #17130A;
-  --accent: #E8C96A;
-  --accent-hover: #F0D987;
-  --accent-light: rgba(201, 168, 78, 0.12);
-  --accent-border: rgba(201, 168, 78, 0.28);
-  --focus-ring: rgba(201, 168, 78, 0.34);
+  /* Graphite + laranja PrintGuard */
+  --brand-solid: #D4510B;
+  --brand-solid-hover: #B74408;
+  --brand-on-solid: #FFFFFF;
+  --accent: #FF6A00;
+  --accent-hover: #FF8533;
+  --accent-strong: #FFB070;
+  --accent-light: rgba(255, 106, 0, 0.13);
+  --accent-border: rgba(255, 106, 0, 0.34);
+  --focus-ring: rgba(255, 106, 0, 0.42);
 
   /* Semantic colors */
-  --danger: #EF4444;
-  --danger-text: #FCA5A5;
-  --danger-light: rgba(239, 68, 68, 0.1);
-  --danger-border: rgba(239, 68, 68, 0.26);
+  /* Criticidade: vermelho quente, sem o tom rosado dos vermelhos claros */
+  --danger: #FF453A;
+  --danger-text: #FF7A70;
+  --danger-light: rgba(176, 32, 27, 0.22);
+  --danger-border: rgba(255, 69, 58, 0.42);
   --success: #22C55E;
   --success-text: #86EFAC;
   --success-light: rgba(34, 197, 94, 0.1);
@@ -40,10 +42,14 @@
   --warning-text: #FCD34D;
   --warning-light: rgba(245, 158, 11, 0.1);
   --warning-border: rgba(245, 158, 11, 0.24);
-  --info: #3B82F6;
-  --info-text: #93C5FD;
-  --info-light: rgba(59, 130, 246, 0.1);
-  --info-border: rgba(59, 130, 246, 0.24);
+  --info: #F97316;
+  --info-text: #FDBA74;
+  --info-light: rgba(249, 115, 22, 0.1);
+  --info-border: rgba(249, 115, 22, 0.24);
+  /* Urgência real / SLA estourado — vermelho forte, um tom acima do --danger (ação destrutiva) */
+  --critical: #FF3B30;
+  --critical-light: rgba(151, 29, 24, 0.26);
+  --critical-border: rgba(255, 59, 48, 0.46);
   --overlay-bg: rgba(0, 0, 0, 0.65);
 
   /* Spacing */
@@ -85,7 +91,7 @@
   --text-main: #F4F6FA;
   --text-muted: #AAB4C5;
   --text-dim: #7C899E;
-  --text-inverse: #17130A;
+  --text-inverse: #241006;
   --lead-form-bg: linear-gradient(180deg, rgba(18, 24, 37, 0.88), rgba(14, 18, 30, 0.98));
   --lead-preview-bg: linear-gradient(180deg, rgba(16, 22, 35, 0.96), rgba(13, 17, 28, 0.98));
   --lead-preview-header-bg: rgba(13, 18, 28, 0.92);
@@ -113,17 +119,18 @@ body.dark-theme {
   --text-main: #F4F6FA;
   --text-muted: #AAB4C5;
   --text-dim: #7C899E;
-  --text-inverse: #17130A;
-  --accent: #E8C96A;
-  --accent-hover: #F0D987;
+  --text-inverse: #241006;
+  --accent: #FF6A00;
+  --accent-hover: #FF8533;
+  --accent-strong: #FFB070;
   color-scheme: dark;
-  
+
   /* Message Bubbles - Dark */
   --bg-msg-me: #1d5f52;
   --text-msg-me: #eefbf6;
-  --bg-msg-ai: rgba(59, 130, 246, 0.16);
-  --text-msg-ai: #cfe2ff;
-  --border-msg-ai: rgba(59, 130, 246, 0.22);
+  --bg-msg-ai: rgba(255, 106, 0, 0.16);
+  --text-msg-ai: #ffe0c2;
+  --border-msg-ai: rgba(255, 106, 0, 0.26);
   --bg-msg-contact: #181d27;
   --text-msg-contact: var(--text-main);
   --glass-bg: rgba(17, 21, 29, 0.86);
@@ -134,15 +141,15 @@ body.dark-theme {
 }
 
 body.light-theme {
-  --bg-base: #F5F7FA;
+  --bg-base: #F4F5F3;
   --bg-surface: #FFFFFF;
-  --bg-panel: #F8FAFC;
-  --bg-panel-hover: #EEF2F6;
-  --border-color: #DCE2EA;
-  --border-light: rgba(0, 0, 0, 0.06);
-  --text-main: #111827;
-  --text-muted: #475569;
-  --text-dim: #64748B;
+  --bg-panel: #F6F7F4;
+  --bg-panel-hover: #EDEEEA;
+  --border-color: #E0E2DD;
+  --border-light: rgba(15, 20, 15, 0.06);
+  --text-main: #1B1E1A;
+  --text-muted: #4C574F;
+  --text-dim: #727B74;
   --text-inverse: #FFFFFF;
   --lead-form-bg: linear-gradient(180deg, #ffffff, #f8fafc);
   --lead-preview-bg: linear-gradient(180deg, #ffffff, #f5f7fb);
@@ -158,23 +165,30 @@ body.light-theme {
   --lead-preview-hint: #64748b;
   --lead-preview-time: #64748b;
   --lead-preview-image-bg: #e2e8f0;
-  --accent: #806515;
-  --accent-hover: #674F0C;
-  --accent-light: rgba(128, 101, 21, 0.09);
-  --accent-border: rgba(128, 101, 21, 0.24);
-  --focus-ring: rgba(128, 101, 21, 0.25);
+  --accent: #D4510B;
+  --accent-hover: #B74408;
+  --accent-strong: #963B06;
+  --accent-light: rgba(212, 81, 11, 0.10);
+  --accent-border: rgba(212, 81, 11, 0.28);
+  --focus-ring: rgba(212, 81, 11, 0.30);
+  --danger: #B42318;
+  --danger-light: rgba(180, 35, 24, 0.09);
+  --danger-border: rgba(180, 35, 24, 0.26);
+  --critical: #C81E1E;
+  --critical-light: rgba(200, 30, 30, 0.09);
+  --critical-border: rgba(200, 30, 30, 0.26);
   --danger-text: #B91C1C;
   --success-text: #15803D;
   --warning-text: #A16207;
-  --info-text: #1D4ED8;
+  --info-text: #C2410C;
   color-scheme: light;
 
   /* Message Bubbles - Light */
   --bg-msg-me: #dff4ea;
   --text-msg-me: #113328;
-  --bg-msg-ai: rgba(59, 130, 246, 0.08);
-  --text-msg-ai: #1c4384;
-  --border-msg-ai: rgba(59, 130, 246, 0.18);
+  --bg-msg-ai: rgba(212, 81, 11, 0.09);
+  --text-msg-ai: #7c2d0a;
+  --border-msg-ai: rgba(212, 81, 11, 0.20);
   --bg-msg-contact: #FFFFFF;
   --text-msg-contact: var(--text-main);
   --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
@@ -186,6 +200,67 @@ body.light-theme {
   --chat-header-bg: rgba(255, 255, 255, 0.92);
   --chat-meta-bg: rgba(71, 85, 105, 0.08);
   --chat-meta-border: rgba(71, 85, 105, 0.12);
+}
+
+/* ============================================================
+   Inbox "Bancada": dois trilhos de grafite emoldurando a
+   conversa, que fica sobre papel. Tokens locais ao workspace —
+   nao vazam para o resto do app.
+   ============================================================ */
+body .inbox-workspace {
+  /* trilhos de grafite: constantes nos dois temas de fundo */
+  --rail-bg: #262A30;
+  --rail-raise: #2F343C;
+  --rail-line: #3A414A;
+  --rail-ink: #E9EBEE;
+  --rail-dim: #A2ABB5;
+  --rail-faint: #7A838F;
+  --rail-cyan: #FF6A00;
+  --rail-magenta: #FF3B30; /* nome histórico; hoje é o vermelho de urgência/SLA */
+
+  /* papel: a conversa. Neutro levemente frio, nunca creme. */
+  --paper: #F4F5F2;
+  --paper-raise: #FFFFFF;
+  --paper-line: #E3E4DF;
+  --ink: #1C1F1B;
+  --ink-dim: #5B615A;
+  --ink-faint: #7C817A;
+  --inbound: #EAECE4;
+  --outbound: #E4EDEF;
+  --note: #F4EDD1;
+  --note-line: #D9CA8C;
+  --note-ink: #5A4B16;
+  --lcd-bg: #DFE4DA;
+  --lcd-line: #C6CFBF;
+  --lcd-ink: #242C20;
+}
+
+/* No tema escuro nao ha metafora de papel: e um dark limpo, alinhado a
+   paleta do app, apenas com a mesma hierarquia e o acento laranja. */
+body.dark-theme .inbox-workspace {
+  --rail-bg: #11151D;
+  --rail-raise: #171C26;
+  --rail-line: #293241;
+  --rail-ink: #F4F6FA;
+  --rail-dim: #AAB4C5;
+  --rail-faint: #7C899E;
+  --rail-cyan: #FF6A00;
+  --rail-magenta: #F26D6D;
+
+  --paper: #0B0D12;
+  --paper-raise: #11151D;
+  --paper-line: #293241;
+  --ink: #F4F6FA;
+  --ink-dim: #AAB4C5;
+  --ink-faint: #7C899E;
+  --inbound: #171C26;
+  --outbound: #16303A;
+  --note: #241F12;
+  --note-line: #4A3F1E;
+  --note-ink: #E8C96A;
+  --lcd-bg: #0C0F0A;
+  --lcd-line: #263021;
+  --lcd-ink: #BFE0AD;
 }
 
 

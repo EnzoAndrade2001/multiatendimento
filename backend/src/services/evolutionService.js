@@ -31,12 +31,14 @@ function getClient(url, key, timeout = 60000) {
 function buildQuotedPayload(quoted) {
   if (!quoted) return undefined;
   if (typeof quoted === 'object' && quoted !== null) {
+    const quotedBody = quoted.body || quoted.text || quoted.message?.conversation;
     return {
       key: {
         id: quoted.id || quoted,
         ...(quoted.remoteJid ? { remoteJid: quoted.remoteJid } : {}),
         ...(typeof quoted.fromMe === 'boolean' ? { fromMe: quoted.fromMe } : {})
-      }
+      },
+      ...(quotedBody ? { message: { conversation: String(quotedBody) } } : {})
     };
   }
   return { key: { id: quoted } };
@@ -105,6 +107,9 @@ async function sendMediaMultipart(url, key, instanceName, phone, { mediatype, mi
   const form = new FormData();
   form.append('number', phone);
   form.append('mediatype', mediatype);
+  // Algumas versões da Evolution usam este campo para validar o anexo antes
+  // de ler o contentType enviado no stream multipart.
+  form.append('mimetype', mimetype || 'application/octet-stream');
   form.append('caption', caption || '');
   form.append('fileName', filename || path.basename(filePath) || 'arquivo');
   // Evolution API 2.4.0 recebe o arquivo multipart no campo "file".

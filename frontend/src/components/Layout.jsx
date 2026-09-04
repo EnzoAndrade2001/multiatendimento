@@ -83,7 +83,8 @@ export default function Layout() {
   const desktopMenuRef = React.useRef(null);
   const userMenuRef = React.useRef(null);
   const role = localStorage.getItem('role')?.toLowerCase();
-  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  // Tema claro é o padrão apenas para o primeiro acesso; uma preferência já salva permanece intacta.
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
   const [instances, setInstances] = useState([]);
   const [realtimeConnected, setRealtimeConnected] = useState(true);
   const isMobile = useIsMobile();
@@ -111,6 +112,7 @@ export default function Layout() {
 
   React.useEffect(() => {
     document.body.className = theme === 'dark' ? 'dark-theme' : 'light-theme';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0B0D12' : '#F4F5F3');
     localStorage.setItem('theme', theme);
   }, [theme]);
 

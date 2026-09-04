@@ -177,13 +177,13 @@ export default function Dashboard() {
           accentColor="#10b981"
         />
         <KpiCard
-          icon={<Clock color="#3b82f6" />}
+          icon={<Clock color="var(--accent)" />}
           label="Tempo de resolução (mediana)"
           value={formatDuration(kpis.medianTMA)}
           hint={kpis.tmaSampleSize
             ? `Tempo útil ${formatDuration(kpis.medianBusinessTMA)} · Média corrida ${formatDuration(kpis.avgTMA)} · P90 ${formatDuration(kpis.p90TMA)} · ${kpis.tmaSampleSize} sessões`
             : 'Sem sessões encerradas no período'}
-          accentColor="#3b82f6"
+          accentColor="var(--accent)"
         />
         <KpiCard
           icon={<Star color="#f59e0b" />}

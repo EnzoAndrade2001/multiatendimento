@@ -84,6 +84,39 @@ function formatSendError(error) {
 
   return parts.join(' - ');
 }
+
+function getQuotedPreview(message) {
+  if (!message) return null;
+  return message.body
+    || (message.mediaType === 'image' ? '📷 Foto'
+      : message.mediaType === 'video' ? '🎥 Vídeo'
+        : message.mediaType === 'audio' ? '🎤 Áudio'
+          : message.mediaType === 'document' ? '📎 Documento'
+            : 'Mensagem');
+}
+
+async function findQuotedMessage(ticketId, tenantId, quotedMsgId, contactId = null) {
+  const requestedId = String(quotedMsgId || '').trim();
+  if (!requestedId) return null;
+
+  // O front pode enviar o externalId (mensagens reais da Evolution) ou o id
+  // interno (históricos/demo que ainda não receberam externalId). Sempre
+  // restringimos a busca ao cliente/tenant para permitir citações no histórico
+  // de sessões anteriores sem cruzar empresas ou contatos.
+  return prisma.message.findFirst({
+    where: {
+      ticket: contactId
+        ? { tenantId, contactId }
+        : { tenantId, id: ticketId },
+      OR: [{ externalId: requestedId }, { id: requestedId }],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+function getStoredQuotedId(message, requestedId) {
+  return message?.externalId || message?.id || (String(requestedId || '').trim() || null);
+}
 const avatarRefreshCache = new Map();
 const AVATAR_REFRESH_TTL_MS = 6 * 60 * 60 * 1000;
 const AVATAR_REFRESH_LIMIT = 10;
@@ -830,6 +863,7 @@ async function sendMessage(req, res) {
       const agent = await prisma.user.findUnique({ where: { id: req.user.userId } });
       const messageBody = outbound.mode === 'template' ? outbound.renderedBody : String(body || '').trim();
       if (!messageBody) return res.status(400).json({ error: 'Digite uma mensagem para enviar.' });
+      const quoted = await findQuotedMessage(id, req.user.tenantId, quotedMsgId, ticket.contactId);
       await ticketSessionService.ensureSessionForActivity(ticket);
       const now = new Date();
       const updatedTicket = await prisma.ticket.update({
@@ -849,6 +883,8 @@ async function sendMessage(req, res) {
           body: messageBody,
           fromMe: true,
           externalId: `demo-${Date.now()}`,
+          quotedMsgId: getStoredQuotedId(quoted, quotedMsgId),
+          quotedMsgBody: getQuotedPreview(quoted),
         },
       });
       if (io) io.to(req.user.tenantId).emit('new_message', { message, ticket: updatedTicket, contact: ticket.contact, fromMe: true });
@@ -874,13 +910,17 @@ async function sendMessage(req, res) {
 
     let quotedMsgBody = null;
     let quotedObj = null;
+    let storedQuotedMsgId = null;
     if (quotedMsgId && outbound.instance.id === ticket.instanceId) {
-      const quoted = await prisma.message.findFirst({ where: { externalId: quotedMsgId } });
+      const quoted = await findQuotedMessage(id, req.user.tenantId, quotedMsgId, ticket.contactId);
       if (quoted) {
-        quotedMsgBody = quoted.body || (quoted.mediaType === 'image' ? '📷 Foto' : (quoted.mediaType === 'video' ? '🎥 Vídeo' : (quoted.mediaType === 'audio' ? '🎤 Áudio' : (quoted.mediaType === 'document' ? '📎 Documento' : 'Mensagem'))));
-        quotedObj = { id: quoted.externalId, remoteJid, fromMe: quoted.fromMe };
-      } else {
-        quotedObj = quotedMsgId;
+        quotedMsgBody = getQuotedPreview(quoted);
+        storedQuotedMsgId = getStoredQuotedId(quoted, quotedMsgId);
+        // A Evolution precisa do id remoto para montar a citação. O id
+        // interno continua salvo para preservar a referência no histórico.
+        quotedObj = quoted.externalId
+          ? { id: quoted.externalId, remoteJid, fromMe: quoted.fromMe, body: quotedMsgBody }
+          : null;
       }
     }
 
@@ -942,7 +982,7 @@ async function sendMessage(req, res) {
     }
 
     const message = await prisma.message.create({
-      data: { ticketId: id, agentId: req.user.userId, body: messageBody, fromMe: true, externalId, quotedMsgId, quotedMsgBody },
+      data: { ticketId: id, agentId: req.user.userId, body: messageBody, fromMe: true, externalId, quotedMsgId: storedQuotedMsgId, quotedMsgBody },
     });
 
     // Atualiza lastMessageAt para ordenação da lista
@@ -1001,6 +1041,7 @@ async function sendMediaMessage(req, res) {
 
     if (isLocalDemo()) {
       const mediaUrl = `/uploads/media/${file.filename}`;
+      const quoted = await findQuotedMessage(id, req.user.tenantId, quotedMsgId, ticket.contactId);
       const mediaType = file.mimetype?.startsWith('image/')
         ? 'image'
         : file.mimetype?.startsWith('video/')
@@ -1025,7 +1066,8 @@ async function sendMediaMessage(req, res) {
           mediaStatus: 'ok',
           fileName: file.originalname,
           externalId: `demo-media-${Date.now()}`,
-          quotedMsgId,
+          quotedMsgId: getStoredQuotedId(quoted, quotedMsgId),
+          quotedMsgBody: getQuotedPreview(quoted),
         },
       });
       if (io) io.to(req.user.tenantId).emit('new_message', { message, ticket: updatedTicket, contact: ticket.contact, fromMe: true });
@@ -1077,13 +1119,15 @@ async function sendMediaMessage(req, res) {
 
     let quotedMsgBody = null;
     let quotedObj = null;
+    let storedQuotedMsgId = null;
     if (quotedMsgId) {
-      const quoted = await prisma.message.findFirst({ where: { externalId: quotedMsgId } });
+      const quoted = await findQuotedMessage(id, req.user.tenantId, quotedMsgId, ticket.contactId);
       if (quoted) {
-        quotedMsgBody = quoted.body || (quoted.mediaType === 'image' ? '📷 Foto' : (quoted.mediaType === 'video' ? '🎥 Vídeo' : (quoted.mediaType === 'audio' ? '🎤 Áudio' : (quoted.mediaType === 'document' ? '📎 Documento' : 'Mensagem'))));
-        quotedObj = { id: quoted.externalId, remoteJid, fromMe: quoted.fromMe };
-      } else {
-        quotedObj = quotedMsgId;
+        quotedMsgBody = getQuotedPreview(quoted);
+        storedQuotedMsgId = getStoredQuotedId(quoted, quotedMsgId);
+        quotedObj = quoted.externalId
+          ? { id: quoted.externalId, remoteJid, fromMe: quoted.fromMe, body: quotedMsgBody }
+          : null;
       }
     }
 
@@ -1210,7 +1254,8 @@ async function sendMediaMessage(req, res) {
         mediaType,
         fileName: file.originalname,
         externalId,
-        quotedMsgId,
+        mediaStatus: 'ok',
+        quotedMsgId: storedQuotedMsgId,
         quotedMsgBody
       },
     });

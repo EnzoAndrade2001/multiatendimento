@@ -2,7 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-const backendProxy = { target: 'http://localhost:3002', changeOrigin: true };
+// O alvo acompanha o ambiente em execucao. Assim o demo isolado pode usar
+// 3003 sem que o proxy tente atingir o banco/servidor local padrao em 3002.
+const backendTarget = process.env.VITE_API_URL || 'http://localhost:3002';
+const backendProxy = { target: backendTarget, changeOrigin: true };
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],

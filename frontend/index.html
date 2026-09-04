@@ -8,17 +8,28 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800&family=Exo+2:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800&family=Exo+2:wght@300;400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
     
     <!-- PWA Meta Tags -->
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#0B0D12" />
+    <meta name="theme-color" content="#F4F5F3" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="MultiPRO" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
   </head>
   <body>
+    <script>
+      // Evita um flash do tema escuro e deixa o primeiro acesso claro.
+      // Uma escolha anterior do usuário continua prevalecendo.
+      try {
+        const savedTheme = localStorage.getItem('theme');
+        document.body.className = savedTheme === 'dark' ? 'dark-theme' : 'light-theme';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', savedTheme === 'dark' ? '#0B0D12' : '#F4F5F3');
+      } catch {
+        document.body.className = 'light-theme';
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>

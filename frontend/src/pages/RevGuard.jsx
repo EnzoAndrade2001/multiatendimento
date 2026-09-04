@@ -64,6 +64,7 @@ export default function RevGuard() {
   const [detectiveData, setDetectiveData] = useState(null);
   const [auditList, setAuditList] = useState([]);
   const [auditSummary, setAuditSummary] = useState(null);
+  const [parkSummary, setParkSummary] = useState(null);
   
   // Loading states
   const [loadingCrisis, setLoadingCrisis] = useState(true);
@@ -243,7 +244,7 @@ export default function RevGuard() {
     const isFlat = Math.abs(delta) < (format === 'currency' ? 1 : 0.05);
     const isUp = delta > 0;
     const isGood = isFlat ? null : (isUp ? !increaseIsBad : increaseIsBad);
-    const color = isFlat ? 'var(--text-dim)' : (isGood ? '#10b981' : '#ef4444');
+    const color = isFlat ? 'var(--text-dim)' : (isGood ? 'var(--success)' : 'var(--critical)');
     const arrow = isFlat ? '→' : (isUp ? '▲' : '▼');
     const formatted = format === 'currency'
       ? formatCurrency(Math.abs(delta))
@@ -305,26 +306,11 @@ export default function RevGuard() {
           <p style={s.subtitle}>Decida sobre o parque, acompanhe O.S., proteja SLAs e melhore a qualidade dos atendimentos.</p>
         </div>
         <div style={s.statusBadge} title={syncState?.error || undefined}>
-          <span style={{ ...s.dot, background: syncIsHealthy === false ? '#f59e0b' : '#10b981', boxShadow: syncIsHealthy === false ? '0 0 10px rgba(245,158,11,0.4)' : '0 0 10px rgba(16,185,129,0.4)' }} /> {syncStatusLabel}
+          <span style={{ ...s.dot, background: syncIsHealthy === false ? 'var(--warning)' : 'var(--success)' }} /> {syncStatusLabel}
         </div>
       </header>
 
       {/* Navegação de Abas */}
-      <div style={s.tabs}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            title={t.description}
-            aria-label={`${t.label}. ${t.description}`}
-            style={{ ...s.tab, ...(activeTab === t.key ? s.tabActive : {}) }}
-            onClick={() => setActiveTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div style={s.tabPurpose}><strong>{TABS.find((tab) => tab.key === activeTab)?.label}</strong><span>{TABS.find((tab) => tab.key === activeTab)?.description}</span></div>
-
       {syncState && (
         <div style={{ ...s.syncBanner, ...(syncState.stale ? s.syncBannerStale : {}) }}>
           <div>
@@ -339,8 +325,40 @@ export default function RevGuard() {
         </div>
       )}
 
+      {activeTab === 'crise' && crisisData && (
+        <div style={s.sourceBanner} role="status">
+          <strong>Fonte dos indicadores</strong>
+          <span>MRR: {sourceSummary(crisisData.dataQuality?.mrr)}</span>
+          <span>Orçamentos: {sourceSummary(crisisData.dataQuality?.stalledEstimates)}</span>
+        </div>
+      )}
+
+      {activeTab === 'parque' && (
+        <div style={s.sourceBanner} role="status">
+          <strong>Fonte</strong>
+          <span>{parkSummary?.dataSource || 'PrintGuard'} · janela de {Math.round((parkSummary?.windowHours || 168) / 24)} dia(s)</span>
+          <span style={s.sourceMeta}>
+            {parkSummary?.affectedCustomers || 0} cliente(s) afetado(s) · {parkSummary?.withoutCustomerPhone || 0} sem telefone · {parkSummary?.withMeterHistory || 0} com histórico de contador
+          </span>
+        </div>
+      )}
+
+      <div style={s.tabs}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            title={t.description}
+            aria-label={`${t.label}. ${t.description}`}
+            style={{ ...s.tab, ...(activeTab === t.key ? s.tabActive : {}) }}
+            onClick={() => setActiveTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* ABA 0: CENTRO DE CRISE */}
-      {activeTab === 'parque' && <SaudeParque />}
+      {activeTab === 'parque' && <SaudeParque onSummaryChange={setParkSummary} />}
 
       {activeTab === 'crise' && (
         loadingCrisis ? (
@@ -369,7 +387,7 @@ export default function RevGuard() {
                 style={{ ...s.kpiCard, cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
                 onClick={() => handleOpenDrilldown('mrr_risk', 'MRR Sob Risco (Detalhado)')}
               >
-                <div style={{ ...s.kpiIcon, color: '#3b82f6' }}><Coins size={22} /></div>
+                <div style={{ ...s.kpiIcon, color: 'var(--accent)' }}><Coins size={22} /></div>
                 <div style={s.kpiContent}>
                   <span style={s.kpiLabel}>Locações Sob Risco (MRR)</span>
                   <span style={s.kpiValue}>{formatCurrency(crisisData.mrrInRisk)}</span>
@@ -393,14 +411,13 @@ export default function RevGuard() {
                     </div>
                   </div>
                 )}
-                <span style={s.sourceHint}>Origem dos valores: {sourceSummary(crisisData.dataQuality?.mrr)}</span>
               </div>
 
               <div 
                 style={{ ...s.kpiCard, cursor: 'pointer' }}
                 onClick={() => handleOpenDrilldown('stalled_estimates', 'Orçamentos Avulsos Parados')}
               >
-                <div style={{ ...s.kpiIcon, color: '#f59e0b' }}><Zap size={22} /></div>
+                <div style={{ ...s.kpiIcon, color: 'var(--warning)' }}><Zap size={22} /></div>
                 <div style={s.kpiContent}>
                   <span style={s.kpiLabel}>Orçamentos Avulsos Parados</span>
                   <span style={s.kpiValue}>{crisisData.stalledEstimatesCount ?? 0} O.S.</span>
@@ -409,7 +426,6 @@ export default function RevGuard() {
                       ? `${formatCurrency(crisisData.stalledEstimatesValue)} aguardando aprovação do cliente`
                       : 'Aguardando aprovação do cliente (iLux)'}
                   </span>
-                  <span style={s.sourceHint}>Origem dos valores: {sourceSummary(crisisData.dataQuality?.stalledEstimates)}</span>
                 </div>
               </div>
 
@@ -462,7 +478,7 @@ export default function RevGuard() {
                           title={causa.prioridade === 'alta' ? 'Prioridade alta' : 'Prioridade média'}
                           style={{
                             ...s.priorityDot,
-                            background: causa.prioridade === 'alta' ? '#ef4444' : '#f59e0b',
+                            background: causa.prioridade === 'alta' ? 'var(--critical)' : 'var(--warning)',
                             boxShadow: causa.prioridade === 'alta' ? '0 0 8px rgba(239,68,68,0.5)' : '0 0 8px rgba(245,158,11,0.5)'
                           }}
                         />
@@ -534,7 +550,7 @@ export default function RevGuard() {
                           <td style={s.tdClientName}>
                             <span style={{ fontWeight: '600' }}>#{i+1} {client.clientName}</span>
                           </td>
-                          <td style={{ ...s.td, color: '#ef4444', fontWeight: 'bold' }}>
+                          <td style={{ ...s.td, color: 'var(--critical)', fontWeight: 'bold' }}>
                             {formatCurrency(client.mrr)}
                             <span style={s.inlineSource}>{sourceLabel(client.valueSource)}</span>
                           </td>
@@ -585,7 +601,7 @@ export default function RevGuard() {
                   <BarChart 
                     data={[
                       { name: 'Novas O.S.', value: crisisData.funnel.novosChamados, fill: '#8b5cf6' },
-                      { name: 'Em Atendimento', value: crisisData.funnel.emAtendimento, fill: '#3b82f6' },
+                      { name: 'Em Atendimento', value: crisisData.funnel.emAtendimento, fill: 'var(--accent)' },
                       { name: 'Aguardando', value: crisisData.funnel.aguardandoCliente, fill: '#f59e0b' },
                       { name: 'Finalizadas', value: crisisData.funnel.finalizadosMes, fill: '#10b981' }
                     ]} 
@@ -601,7 +617,7 @@ export default function RevGuard() {
                     <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                       {[
                         <Cell key="0" fill="#8b5cf6" />,
-                        <Cell key="1" fill="#3b82f6" />,
+                        <Cell key="1" fill="var(--accent)" />,
                         <Cell key="2" fill="#f59e0b" />,
                         <Cell key="3" fill="#10b981" />
                       ]}
@@ -617,10 +633,10 @@ export default function RevGuard() {
                 </p>
                 <div style={{ ...s.causeRow, background: 'rgba(239,68,68,0.04)', borderColor: 'rgba(239,68,68,0.2)' }}>
                   <div>
-                    <strong style={{ color: '#ef4444', fontSize: '0.88rem', display: 'block' }}>Vazamento Estimado no Funil</strong>
+                    <strong style={{ color: 'var(--critical)', fontSize: '0.88rem', display: 'block' }}>Vazamento Estimado no Funil</strong>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{crisisData.funnel.vazamentoMes || 0} O.S. paradas há mais de 30 dias</span>
                   </div>
-                  <strong style={{ fontSize: '1.2rem', color: '#ef4444' }}>{formatCurrency(crisisData.funnel.vazamentoValor || 0)}</strong>
+                  <strong style={{ fontSize: '1.2rem', color: 'var(--critical)' }}>{formatCurrency(crisisData.funnel.vazamentoValor || 0)}</strong>
                 </div>
                 {crisisData.funnel.vazamentoSemValorCount > 0 && (
                   <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-dim)', lineHeight: 1.4 }}>
@@ -628,13 +644,13 @@ export default function RevGuard() {
                   </p>
                 )}
                 {crisisData.funnel.vazamentoFallbackValueCount > 0 && (
-                  <p style={{ margin: 0, fontSize: '0.72rem', color: '#f59e0b', lineHeight: 1.4 }}>
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--warning)', lineHeight: 1.4 }}>
                     {crisisData.funnel.vazamentoFallbackValueCount} O.S. sem valor no Firebird usaram o valor mÃ©dio configurado como estimativa ({formatCurrency(crisisData.dataQuality?.leakage?.manualFallbackValue || 0)}).
                   </p>
                 )}
                 <div style={{ ...s.causeRow, background: 'rgba(16,185,129,0.04)', borderColor: 'rgba(16,185,129,0.2)' }}>
                   <div>
-                    <strong style={{ color: '#10b981', fontSize: '0.88rem', display: 'block' }}>Taxa de Resolução (30 dias)</strong>
+                    <strong style={{ color: 'var(--success)', fontSize: '0.88rem', display: 'block' }}>Taxa de Resolução (30 dias)</strong>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{crisisData.funnel.finalizadosMes} de {crisisData.funnel.osOpenedLast30d ?? '?'} O.S. abertas nos últimos 30 dias já finalizadas</span>
                   </div>
                   <strong style={{ fontSize: '1.2rem', color: 'var(--text-main)' }}>
@@ -696,9 +712,9 @@ export default function RevGuard() {
                       const bgGradient = `linear-gradient(to right, rgba(16, 185, 129, 0.08) ${pct}%, transparent ${pct}%)`;
                       let slaColor = 'var(--text-main)';
                       if (c.avgSla) {
-                        if (c.avgSla <= 24) slaColor = '#10b981';
-                        else if (c.avgSla <= 72) slaColor = '#f59e0b';
-                        else slaColor = '#ef4444';
+                        if (c.avgSla <= 24) slaColor = 'var(--success)';
+                        else if (c.avgSla <= 72) slaColor = 'var(--warning)';
+                        else slaColor = 'var(--critical)';
                       }
                       return (
                         <tr key={c.id} style={s.tr}>
@@ -709,7 +725,7 @@ export default function RevGuard() {
                           <td style={{ ...s.td, textAlign: 'center', color: slaColor, fontWeight: 'bold' }}>
                             {c.avgSla ? `${c.avgSla}h` : '--'}
                           </td>
-                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 'bold', color: c.avgCsat && c.avgCsat <= 3.0 ? '#ef4444' : '#10b981' }} title={!c.csatLinked ? 'Este cliente não tem contato de WhatsApp vinculado — CSAT indisponível' : c.avgCsat ? `${c.csatSampleSize} avaliação(ões)` : undefined}>
+                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 'bold', color: c.avgCsat && c.avgCsat <= 3.0 ? 'var(--critical)' : 'var(--success)' }} title={!c.csatLinked ? 'Este cliente não tem contato de WhatsApp vinculado — CSAT indisponível' : c.avgCsat ? `${c.csatSampleSize} avaliação(ões)` : undefined}>
                             {c.avgCsat ? `★ ${c.avgCsat} (${c.csatSampleSize})` : c.csatLinked ? '--' : 'sem vínculo'}
                           </td>
                         </tr>
@@ -729,7 +745,7 @@ export default function RevGuard() {
             <div style={s.chartSection}>
               <div style={s.sectionHeader}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Users size={20} color="#3b82f6" />
+                  <Users size={20} color="var(--accent)" />
                   <h2 style={s.sectionTitle}>Performance de Atendentes</h2>
                 </div>
               </div>
@@ -747,12 +763,12 @@ export default function RevGuard() {
                     {benchmarkData.atendentes.map((a, idx) => {
                       const maxOS = benchmarkData.atendentes[0]?.osCount || 1;
                       const pct = Math.min((a.osCount / maxOS) * 100, 100);
-                      const bgGradient = `linear-gradient(to right, rgba(59, 130, 246, 0.08) ${pct}%, transparent ${pct}%)`;
+                      const bgGradient = `linear-gradient(to right, var(--accent-light) ${pct}%, transparent ${pct}%)`;
                       let slaColor = 'var(--text-main)';
                       if (a.avgSla) {
-                        if (a.avgSla <= 24) slaColor = '#10b981';
-                        else if (a.avgSla <= 72) slaColor = '#f59e0b';
-                        else slaColor = '#ef4444';
+                        if (a.avgSla <= 24) slaColor = 'var(--success)';
+                        else if (a.avgSla <= 72) slaColor = 'var(--warning)';
+                        else slaColor = 'var(--critical)';
                       }
                       let medal = '';
                       if (idx === 0) medal = '🥇 ';
@@ -765,7 +781,7 @@ export default function RevGuard() {
                           </td>
                           <td style={{ ...s.td, textAlign: 'center', background: bgGradient, fontWeight: 'bold' }}>{a.osCount}</td>
                           <td style={{ ...s.td, textAlign: 'center', color: slaColor, fontWeight: 'bold' }}>{a.avgSla ? `${a.avgSla}h` : '--'}</td>
-                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 'bold', color: a.avgCsat && a.avgCsat <= 3.0 ? '#ef4444' : '#10b981' }} title={!a.matched ? 'Nome do técnico no Firebird não bateu com nenhum usuário do sistema — CSAT indisponível' : a.avgCsat ? `${a.csatSampleSize} avaliação(ões)` : undefined}>
+                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 'bold', color: a.avgCsat && a.avgCsat <= 3.0 ? 'var(--critical)' : 'var(--success)' }} title={!a.matched ? 'Nome do técnico no Firebird não bateu com nenhum usuário do sistema — CSAT indisponível' : a.avgCsat ? `${a.csatSampleSize} avaliação(ões)` : undefined}>
                             {a.avgCsat ? `★ ${a.avgCsat} (${a.csatSampleSize})` : a.matched ? '--' : 'sem vínculo'}
                           </td>
                         </tr>
@@ -804,7 +820,7 @@ export default function RevGuard() {
                   {detectiveData.stats.atual.tickets}
                   <span style={{ 
                     ...s.diffBadge, 
-                    color: detectiveData.stats.atual.tickets >= detectiveData.stats.anterior.tickets ? '#ef4444' : '#10b981'
+                    color: detectiveData.stats.atual.tickets >= detectiveData.stats.anterior.tickets ? 'var(--critical)' : 'var(--success)'
                   }}>
                     {detectiveData.stats.atual.tickets >= detectiveData.stats.anterior.tickets ? '▲' : '▼'} vs {detectiveData.stats.anterior.tickets}
                   </span>
@@ -816,7 +832,7 @@ export default function RevGuard() {
                   {detectiveData.stats.atual.os}
                   <span style={{ 
                     ...s.diffBadge, 
-                    color: detectiveData.stats.atual.os >= detectiveData.stats.anterior.os ? '#3b82f6' : 'var(--text-muted)'
+                    color: detectiveData.stats.atual.os >= detectiveData.stats.anterior.os ? 'var(--accent)' : 'var(--text-muted)'
                   }}>
                     vs {detectiveData.stats.anterior.os}
                   </span>
@@ -828,7 +844,7 @@ export default function RevGuard() {
                   {detectiveData.stats.atual.overdue}
                   <span style={{ 
                     ...s.diffBadge, 
-                    color: detectiveData.stats.atual.overdue > detectiveData.stats.anterior.overdue ? '#ef4444' : '#10b981'
+                    color: detectiveData.stats.atual.overdue > detectiveData.stats.anterior.overdue ? 'var(--critical)' : 'var(--success)'
                   }}>
                     {detectiveData.stats.atual.overdue > detectiveData.stats.anterior.overdue ? '▲' : '▼'} vs {detectiveData.stats.anterior.overdue}
                   </span>
@@ -840,7 +856,7 @@ export default function RevGuard() {
                   ★ {detectiveData.stats.atual.csat}
                   <span style={{ 
                     ...s.diffBadge, 
-                    color: detectiveData.stats.atual.csat >= detectiveData.stats.anterior.csat ? '#10b981' : '#ef4444'
+                    color: detectiveData.stats.atual.csat >= detectiveData.stats.anterior.csat ? 'var(--success)' : 'var(--critical)'
                   }}>
                     vs ★ {detectiveData.stats.anterior.csat}
                   </span>
@@ -884,7 +900,7 @@ export default function RevGuard() {
                   </div>
                 </div>
                 <div style={s.kpiCard}>
-                  <div style={{ ...s.kpiIcon, color: auditSummary.avgAuditScore == null ? 'var(--text-dim)' : auditSummary.avgAuditScore >= 80 ? '#10b981' : auditSummary.avgAuditScore >= 50 ? '#f59e0b' : '#ef4444' }}><ShieldAlert size={22} /></div>
+                  <div style={{ ...s.kpiIcon, color: auditSummary.avgAuditScore == null ? 'var(--text-dim)' : auditSummary.avgAuditScore >= 80 ? 'var(--success)' : auditSummary.avgAuditScore >= 50 ? 'var(--warning)' : 'var(--critical)' }}><ShieldAlert size={22} /></div>
                   <div style={s.kpiContent}>
                     <span style={s.kpiLabel}>Nota Média de Conformidade</span>
                     <span style={s.kpiValue}>{auditSummary.avgAuditScore != null ? auditSummary.avgAuditScore : '--'}</span>
@@ -892,7 +908,7 @@ export default function RevGuard() {
                   </div>
                 </div>
                 <div style={s.kpiCard}>
-                  <div style={{ ...s.kpiIcon, color: '#ef4444' }}><AlertTriangle size={22} /></div>
+                  <div style={{ ...s.kpiIcon, color: 'var(--critical)' }}><AlertTriangle size={22} /></div>
                   <div style={s.kpiContent}>
                     <span style={s.kpiLabel}>Notas Baixas (&lt; 60)</span>
                     <span style={s.kpiValue}>{auditSummary.scoreDistribution.baixo}</span>
@@ -942,7 +958,7 @@ export default function RevGuard() {
                           <span style={s.csatBadge}>★ {ticket.rating}</span>
                         )}
                         {ticket.auditScore !== null ? (
-                          <span style={{ ...s.scoreBadge, background: ticket.auditScore >= 80 ? 'rgba(16,185,129,0.1)' : ticket.auditScore >= 50 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)', color: ticket.auditScore >= 80 ? '#10b981' : ticket.auditScore >= 50 ? '#f59e0b' : '#ef4444' }}>
+                          <span style={{ ...s.scoreBadge, background: ticket.auditScore >= 80 ? 'rgba(16,185,129,0.1)' : ticket.auditScore >= 50 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)', color: ticket.auditScore >= 80 ? 'var(--success)' : ticket.auditScore >= 50 ? 'var(--warning)' : 'var(--critical)' }}>
                             Nota: {ticket.auditScore}
                           </span>
                         ) : (
@@ -1007,7 +1023,7 @@ export default function RevGuard() {
                         <span style={s.metadataLabel}>CSAT Cliente</span>
                         <span style={{ 
                           ...s.metadataValue, 
-                          color: selectedTicket.rating ? '#10b981' : 'var(--text-dim)',
+                          color: selectedTicket.rating ? 'var(--success)' : 'var(--text-dim)',
                           fontWeight: selectedTicket.rating ? 'bold' : 'normal'
                         }}>
                           {selectedTicket.rating ? `★ ${selectedTicket.rating}/5` : 'Não avaliado'}
@@ -1023,7 +1039,7 @@ export default function RevGuard() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                           <div style={{
                             ...s.scoreCircle,
-                            borderColor: selectedTicket.auditScore >= 80 ? '#10b981' : selectedTicket.auditScore >= 50 ? '#f59e0b' : '#ef4444'
+                            borderColor: selectedTicket.auditScore >= 80 ? 'var(--success)' : selectedTicket.auditScore >= 50 ? 'var(--warning)' : 'var(--critical)'
                           }}>
                             {selectedTicket.auditScore}
                           </div>
@@ -1038,7 +1054,7 @@ export default function RevGuard() {
                       <div style={s.reportBox}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', color: 'var(--accent)' }}>
                           <Award size={16} />
-                          <strong style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Parecer da Auditoria</strong>
+                          <strong style={{ fontSize: '0.85rem', fontWeight: 600 }}>Parecer da auditoria</strong>
                         </div>
                         {renderMarkdown(selectedTicket.auditResult)}
                       </div>
@@ -1108,8 +1124,8 @@ export default function RevGuard() {
                               {item.externalId ? <span>O.S. #{item.externalId}</span> : <span>N/A</span>}
                               {item.osType && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{item.osType}</span>}
                               {item.equipmentModel && <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{item.equipmentModel}</span>}
-                              {item.count && <span style={{ fontSize: '0.7rem', color: '#f59e0b' }}>{item.count} chamados</span>}
-                              {item.rating != null && <span style={{ fontSize: '0.7rem', color: '#ef4444' }}>★ {item.rating}/5</span>}
+                              {item.count && <span style={{ fontSize: '0.7rem', color: 'var(--warning)' }}>{item.count} chamados</span>}
+                              {item.rating != null && <span style={{ fontSize: '0.7rem', color: 'var(--critical)' }}>★ {item.rating}/5</span>}
                             </div>
                           </td>
                           <td style={s.td}>
@@ -1124,8 +1140,8 @@ export default function RevGuard() {
                               </button>
                             )}
                             {fone && (
-                              <button 
-                                style={{ ...s.actionBtn, background: '#10b981', marginLeft: '6px' }} 
+                              <button
+                                style={{ ...s.actionBtn, background: 'var(--success)', marginLeft: '6px' }}
                                 onClick={() => {
                                   const num = fone.replace(/\D/g, '');
                                   const text = encodeURIComponent(`Olá, tudo bem? Referente à O.S. ${item.externalId || ''}, gostaríamos de verificar como podemos ajudá-lo.`);
@@ -1152,87 +1168,88 @@ export default function RevGuard() {
 
 const s = {
   container: { padding: '2rem', background: 'var(--bg-base)', flex: 1, overflowY: 'auto', color: 'var(--text-main)' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' },
   headerInfo: { display: 'flex', flexDirection: 'column', gap: '0.3rem' },
   kickerGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
-  kicker: { color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' },
-  intelligenceBadge: { background: 'var(--accent-light)', color: 'var(--accent)', fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: '6px' },
-  title: { fontSize: '1.75rem', fontWeight: 800, margin: '4px 0 0 0', letterSpacing: '-0.02em', fontFamily: 'var(--font-display)' },
+  kicker: { fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 500, letterSpacing: 0 },
+  intelligenceBadge: { fontFamily: 'var(--font-mono)', background: 'var(--accent-light)', color: 'var(--accent-strong, var(--accent))', fontSize: '0.66rem', fontWeight: 500, padding: '2px 8px', borderRadius: 'var(--radius-xs)' },
+  title: { fontSize: '1.7rem', fontWeight: 600, margin: '4px 0 0 0', letterSpacing: '-0.02em' },
   subtitle: { color: 'var(--text-muted)', fontSize: '0.88rem' },
-  statusBadge: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', padding: '0.55rem 0.95rem', borderRadius: '100px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' },
-  dot: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 10px rgba(16,185,129,0.4)' },
-  syncBanner: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem', padding: '0.7rem 1rem', borderRadius: '12px', border: '1px solid rgba(16,185,129,0.22)', background: 'rgba(16,185,129,0.06)', color: 'var(--text-muted)', fontSize: '0.75rem' },
-  syncBannerStale: { borderColor: 'rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.08)' },
-  syncError: { color: '#f59e0b', fontWeight: 800, cursor: 'help', flexShrink: 0 },
-  
-  tabs: { display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border-color)', marginBottom: '2rem', overflowX: 'auto', scrollbarWidth: 'none' },
-  tabPurpose: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginTop: '-1.35rem', marginBottom: '1.5rem', color: 'var(--text-muted)', fontSize: '0.8rem' },
-  tab: { padding: '0.8rem 1.1rem', border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-muted)', borderBottom: '2px solid transparent', transition: 'all 0.2s', fontWeight: 600, whiteSpace: 'nowrap' },
-  tabActive: { color: 'var(--accent)', borderBottom: '2px solid var(--accent)', fontWeight: 800 },
-  periodBtn: { padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-pill)', border: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
-  periodBtnActive: { background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' },
+  statusBadge: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', padding: '0.5rem 0.9rem', borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' },
+  dot: { width: '7px', height: '7px', borderRadius: '50%', background: 'var(--success)', flexShrink: 0 },
+  syncBanner: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: '0.65rem', padding: '0.55rem 0.85rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--success-border)', background: 'var(--success-light)', color: 'var(--text-muted)', fontSize: '0.75rem' },
+  syncBannerStale: { borderColor: 'var(--warning-border)', background: 'var(--warning-light)' },
+  syncError: { color: 'var(--warning)', fontWeight: 600, cursor: 'help', flexShrink: 0 },
+  sourceBanner: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem 1rem', marginBottom: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--accent-border)', background: 'var(--accent-light)', color: 'var(--text-muted)', fontSize: '0.7rem' },
+  sourceMeta: { marginLeft: 'auto', textAlign: 'right' },
 
-  kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' },
-  riskCard: { background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.18)', borderRadius: '24px', padding: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '10px', minWidth: 0 },
-  riskCardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-  pulseAlert: { animation: 'pulse-alert 2s infinite' },
-  riskLabel: { color: '#ef4444', fontSize: 'var(--text-xs)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' },
-  riskValue: { fontSize: '2.1rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' },
+  tabs: { display: 'flex', gap: '0.9rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem', overflowX: 'auto', scrollbarWidth: 'none' },
+  tabPurpose: { display: 'none' },
+  tab: { padding: '0.75rem 0.9rem', border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.86rem', color: 'var(--text-muted)', borderBottom: '2px solid transparent', transition: 'all 0.2s', fontWeight: 600, whiteSpace: 'nowrap' },
+  tabActive: { color: 'var(--text-main)', borderBottom: '2px solid var(--accent)', fontWeight: 600 },
+  periodBtn: { padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-pill)', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' },
+  periodBtnActive: { background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--text-inverse)' },
+
+  kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' },
+  riskCard: { background: 'var(--critical-light)', border: '1px solid var(--critical-border)', borderRadius: 'var(--radius-sm)', padding: '1rem 1.1rem', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 },
+  riskCardHeader: { display: 'flex', alignItems: 'center', gap: '8px' },
+  pulseAlert: {},
+  riskLabel: { fontFamily: 'var(--font-mono)', color: 'var(--critical)', fontSize: 'var(--text-xs)', fontWeight: 500, letterSpacing: 0 },
+  riskValue: { fontFamily: 'var(--font-mono)', fontSize: '1.9rem', fontWeight: 600, color: 'var(--text-main)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' },
   riskHint: { color: 'var(--text-muted)', fontSize: '0.75rem', margin: 0, lineHeight: 1.4 },
 
-  kpiCard: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '24px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.6rem', alignItems: 'center', textAlign: 'center', minWidth: 0 },
-  kpiIcon: { background: 'var(--bg-base)', padding: '0.7rem', borderRadius: '14px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  kpiContent: { display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '0.25rem', minWidth: 0, width: '100%' },
-  kpiLabel: { color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' },
-  kpiValue: { fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' },
+  kpiCard: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '1rem 1.1rem', display: 'flex', flexDirection: 'column', gap: '0.6rem', minWidth: 0 },
+  kpiIcon: { background: 'var(--bg-base)', padding: '0.6rem', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--accent)' },
+  kpiContent: { display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0, width: '100%' },
+  kpiLabel: { fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 500, letterSpacing: 0 },
+  kpiValue: { fontFamily: 'var(--font-mono)', fontSize: '1.4rem', fontWeight: 600, color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' },
   kpiHint: { color: 'var(--text-dim)', fontSize: '0.72rem' },
-  sourceHint: { color: 'var(--text-dim)', fontSize: '0.65rem', lineHeight: 1.35, textAlign: 'center' },
-  inlineSource: { display: 'block', color: 'var(--text-dim)', fontSize: '0.62rem', fontWeight: 600, marginTop: '2px' },
+  inlineSource: { display: 'block', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: '0.64rem', fontWeight: 500, marginTop: '2px' },
 
-  mainGrid: { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem' },
-  chartSection: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '24px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', minWidth: 0 },
+  mainGrid: { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem' },
+  chartSection: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.1rem', minWidth: 0 },
   sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitle: { fontSize: '0.98rem', fontWeight: 800, margin: 0, fontFamily: 'var(--font-display)', color: 'var(--text-main)' },
-  badge: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 700, padding: '3px 8px', borderRadius: '100px' },
+  sectionTitle: { fontSize: '0.95rem', fontWeight: 600, margin: 0, color: 'var(--text-main)' },
+  badge: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.68rem', fontWeight: 500, padding: '3px 8px', borderRadius: 'var(--radius-pill)' },
 
-  causesList: { display: 'flex', flexDirection: 'column', gap: '0.75rem' },
-  causeRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.9rem 1.1rem', borderRadius: '16px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', transition: 'transform 0.2s ease', gap: '1rem' },
+  causesList: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  causeRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 0.95rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-base)', border: '1px solid var(--border-color)', gap: '1rem' },
   causeInfo: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
-  priorityDot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
-  causeText: { fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)' },
+  priorityDot: { width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0 },
+  causeText: { fontSize: '0.82rem', fontWeight: 500, color: 'var(--text-main)' },
   causeStats: { textAlign: 'right', flexShrink: 0 },
-  causeCount: { fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main)', display: 'block', fontVariantNumeric: 'tabular-nums' },
-  causeSub: { fontSize: '0.62rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  causeCount: { fontFamily: 'var(--font-mono)', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-main)', display: 'block', fontVariantNumeric: 'tabular-nums' },
+  causeSub: { fontFamily: 'var(--font-mono)', fontSize: '0.64rem', color: 'var(--text-dim)', letterSpacing: 0 },
   emptyHint: { color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0, textAlign: 'center', padding: '0.5rem 0' },
 
-  miniFunnelRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg-base)', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' },
+  miniFunnelRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.7rem 1rem', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' },
 
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' },
-  th: { padding: '10px', borderBottom: '2px solid var(--border-color)', color: 'var(--text-dim)', fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.05em', textAlign: 'left' },
+  th: { padding: '10px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: '0.72rem', letterSpacing: 0, textAlign: 'left' },
   tr: { borderBottom: '1px solid var(--border-color)', hover: { background: 'var(--bg-base)' } },
   td: { padding: '12px 10px', color: 'var(--text-main)', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' },
-  tdClientName: { padding: '12px 10px', color: 'var(--text-main)', fontSize: '0.82rem', fontWeight: 700, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  tdClientName: { padding: '12px 10px', color: 'var(--text-main)', fontSize: '0.82rem', fontWeight: 600, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
 
-  detectiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' },
-  detectiveCard: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '18px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '8px' },
-  detectiveCardTitle: { margin: 0, fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' },
-  detectiveCardValue: { fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-main)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', fontVariantNumeric: 'tabular-nums' },
-  diffBadge: { fontSize: '0.7rem', fontWeight: 700, marginLeft: '8px' },
+  detectiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' },
+  detectiveCard: { background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '1.1rem', display: 'flex', flexDirection: 'column', gap: '8px' },
+  detectiveCardTitle: { margin: 0, fontFamily: 'var(--font-mono)', fontSize: '0.72rem', fontWeight: 500, color: 'var(--text-dim)', letterSpacing: 0 },
+  detectiveCardValue: { fontFamily: 'var(--font-mono)', fontSize: '1.35rem', fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', fontVariantNumeric: 'tabular-nums' },
+  diffBadge: { fontFamily: 'var(--font-mono)', fontSize: '0.7rem', fontWeight: 500, marginLeft: '8px' },
   diagnosisContent: { fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6 },
 
-  auditGrid: { display: 'grid', gridTemplateColumns: '1.1fr 1.3fr', gap: '1.5rem' },
-  auditRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', borderRadius: '16px', border: '1px solid var(--border-color)', cursor: 'pointer', transition: 'all 0.2s ease', gap: '0.75rem' },
+  auditGrid: { display: 'grid', gridTemplateColumns: '1.1fr 1.3fr', gap: '1.25rem' },
+  auditRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', cursor: 'pointer', transition: 'all 0.2s ease', gap: '0.75rem' },
   auditRowName: { fontSize: '0.85rem', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  auditSearchBox: { display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem' },
+  auditSearchBox: { display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0 0.75rem' },
   auditSearchInput: { flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-main)', fontSize: '0.82rem', padding: '0.55rem 0' },
-  csatBadge: { background: 'rgba(16,185,129,0.08)', color: '#10b981', fontSize: '0.7rem', fontWeight: 800, padding: '2px 6px', borderRadius: '6px', fontVariantNumeric: 'tabular-nums' },
-  scoreBadge: { fontSize: '0.7rem', fontWeight: 800, padding: '2px 6px', borderRadius: '6px', fontVariantNumeric: 'tabular-nums' },
-  pendingAuditBadge: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', color: 'var(--text-dim)', fontSize: '0.68rem', padding: '2px 6px', borderRadius: '6px' },
-  auditBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: '0.45rem 0.85rem', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', transition: 'opacity 0.2s' },
-  auditScorePanel: { padding: '1rem', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '16px' },
-  scoreCircle: { width: '48px', height: '48px', borderRadius: '50%', border: '4px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
-  reportBox: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '1.25rem' },
-  
+  csatBadge: { fontFamily: 'var(--font-mono)', background: 'var(--success-light)', color: 'var(--success-text)', fontSize: '0.7rem', fontWeight: 500, padding: '2px 6px', borderRadius: 'var(--radius-xs)', fontVariantNumeric: 'tabular-nums' },
+  scoreBadge: { fontFamily: 'var(--font-mono)', fontSize: '0.7rem', fontWeight: 500, padding: '2px 6px', borderRadius: 'var(--radius-xs)', fontVariantNumeric: 'tabular-nums' },
+  pendingAuditBadge: { fontFamily: 'var(--font-mono)', background: 'var(--bg-base)', border: '1px solid var(--border-color)', color: 'var(--text-dim)', fontSize: '0.68rem', padding: '2px 6px', borderRadius: 'var(--radius-xs)' },
+  auditBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: '0.45rem 0.85rem', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' },
+  auditScorePanel: { padding: '1rem', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' },
+  scoreCircle: { width: '48px', height: '48px', borderRadius: '50%', border: '3px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
+  reportBox: { background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '1.25rem' },
+
   auditDetailHeader: {
     borderBottom: '1px solid var(--border-color)',
     paddingBottom: '16px',
@@ -1245,7 +1262,7 @@ const s = {
     marginTop: '12px',
     background: 'var(--bg-base)',
     padding: '12px',
-    borderRadius: '12px',
+    borderRadius: 'var(--radius-sm)',
     border: '1px solid var(--border-color)'
   },
   metadataItem: {
@@ -1255,30 +1272,30 @@ const s = {
     minWidth: 0
   },
   metadataLabel: {
-    fontSize: '0.65rem',
-    fontWeight: 800,
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.68rem',
+    fontWeight: 500,
     color: 'var(--text-dim)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em'
+    letterSpacing: 0
   },
   metadataValue: {
     fontSize: '0.8rem',
-    fontWeight: 600,
+    fontWeight: 500,
     color: 'var(--text-main)',
     fontVariantNumeric: 'tabular-nums'
   },
 
   loadingBox: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center', justifyContent: 'center', minHeight: '300px', color: 'var(--text-muted)', fontSize: '0.85rem' },
   spinner: { width: '28px', height: '28px', borderRadius: '50%', border: '3px solid var(--border-color)', borderTopColor: 'var(--accent)', animation: 'spin-sk 1s infinite linear' },
-  errorBox: { padding: '2rem', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '18px', color: '#ef4444', fontSize: '0.85rem', textAlign: 'center' },
+  errorBox: { padding: '2rem', background: 'var(--critical-light)', border: '1px solid var(--critical-border)', borderRadius: 'var(--radius-sm)', color: 'var(--critical)', fontSize: '0.85rem', textAlign: 'center' },
 
   // Drilldown Modal
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 },
-  modalContent: { background: 'var(--bg-panel)', width: '90%', maxWidth: '750px', borderRadius: '24px', border: '1px solid var(--border-color)', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '85vh' },
-  modalHeader: { padding: '1.5rem 1.8rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-base)' },
-  modalCloseBtn: { background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.2rem', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--overlay-bg)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 },
+  modalContent: { background: 'var(--bg-surface)', width: '90%', maxWidth: '750px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '85vh' },
+  modalHeader: { padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  modalCloseBtn: { background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '1rem', cursor: 'pointer', padding: '0.4rem', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modalBody: { padding: '0', overflowY: 'auto' },
-  actionBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', color: '#fff', padding: '0.45rem 1rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', transition: 'opacity 0.2s', whiteSpace: 'nowrap' }
+  actionBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', color: 'var(--text-inverse)', padding: '0.45rem 1rem', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s', whiteSpace: 'nowrap' }
 };
 
 // Adiciona estilos globais para as animações

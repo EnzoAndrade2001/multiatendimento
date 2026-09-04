@@ -125,7 +125,7 @@ function recommendationOf(item) {
   return { action: 'MONITOR', label: 'Monitorar com prazo', explanation: 'Acompanhe a próxima leitura antes de abrir chamado.', confidence: 'low' };
 }
 
-export default function DecisionCenter({ osTypes = [] }) {
+export default function DecisionCenter({ osTypes = [], onSummaryChange }) {
   const { user, can } = usePermissions();
   const canManage = can('telemetry.manage');
   const canAudit = can('audit.view');
@@ -154,6 +154,7 @@ export default function DecisionCenter({ osTypes = [] }) {
         getUsers().catch(() => ({ data: [] })),
       ]);
       setData(queue);
+      onSummaryChange?.(queue?.summary || {});
       setUsers(Array.isArray(usersResult.data) ? usersResult.data.filter((u) => u.active !== false) : []);
       setLastUpdatedAt(new Date());
     } catch (error) {
@@ -162,7 +163,7 @@ export default function DecisionCenter({ osTypes = [] }) {
       loadingRef.current = false;
       if (silent) setRefreshing(false); else setLoading(false);
     }
-  }, []);
+  }, [onSummaryChange]);
   useEffect(() => {
     load();
     const timer = window.setInterval(() => load({ silent: true }), 60 * 1000);
@@ -389,13 +390,18 @@ export default function DecisionCenter({ osTypes = [] }) {
   ];
 
   return <div className="park-decision">
-    <div className="park-data-note" role="status">
-      <span><b>Fonte:</b> {data.summary?.dataSource || 'PrintGuard'} - janela de {Math.round((data.summary?.windowHours || 72) / 24)} dia(s)</span>
-      <span>{data.summary?.affectedCustomers || 0} cliente(s) afetado(s) - {data.summary?.withoutCustomerPhone || 0} sem telefone - {data.summary?.withMeterHistory || 0} com histórico de contador</span>
-    </div>
     <div className="park-kpi-groups">
-      <section className="park-kpi-group" aria-labelledby="park-management-title">
-        <header><div><b id="park-management-title">Gestão de hoje</b><span>Ritmo, SLA e distribuição do trabalho</span></div></header>
+      <section className="park-kpi-group" aria-labelledby="park-alerts-title">
+        <header><div><b id="park-alerts-title">Alertas da fila</b><span>Clique em um indicador para filtrar as ocorrências</span></div></header>
+        <div className="park-kpis alerts">
+          {kpis.map(([key, label, value, Icon, tone, definition]) => <button key={key} className={`park-kpi ${filter === key ? 'active' : ''}`} title={definition} aria-label={`${label}: ${fmtInt(value)}. ${definition}`} onClick={() => setFilter(filter === key ? 'all' : key)}>
+            <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span>
+            <span><b>{fmtInt(value)}</b><small>{label}</small></span>
+          </button>)}
+        </div>
+      </section>
+      <details className="park-kpi-more">
+        <summary><span><b>Gestão de hoje</b><small>ritmo, SLA e distribuição do trabalho</small></span><ChevronRight size={14} /></summary>
         <div className="park-kpis management">
           {[
             ['Decisões hoje', management.completedToday, CheckCircle2, 'success'],
@@ -408,16 +414,7 @@ export default function DecisionCenter({ osTypes = [] }) {
             <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span><span><b>{value}</b><small>{label}</small></span>
           </div>)}
         </div>
-      </section>
-      <section className="park-kpi-group" aria-labelledby="park-alerts-title">
-        <header><div><b id="park-alerts-title">Alertas da fila</b><span>Clique em um indicador para filtrar as ocorrências</span></div></header>
-        <div className="park-kpis alerts">
-          {kpis.map(([key, label, value, Icon, tone, definition]) => <button key={key} className={`park-kpi ${filter === key ? 'active' : ''}`} title={definition} aria-label={`${label}: ${fmtInt(value)}. ${definition}`} onClick={() => setFilter(filter === key ? 'all' : key)}>
-            <span className={`park-kpi-icon ${tone}`}><Icon size={17} /></span>
-            <span><b>{fmtInt(value)}</b><small>{label}</small></span>
-          </button>)}
-        </div>
-      </section>
+      </details>
     </div>
 
     <section className="park-toolbar">

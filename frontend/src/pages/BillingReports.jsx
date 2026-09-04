@@ -450,9 +450,9 @@ export default function BillingReports() {
           <div style={s.kpiCard}>
             <div style={s.kpiHeader}>
               <span style={s.kpiTitle}>Base Opt-in CRM</span>
-              <Users size={18} color="var(--accent, #3b82f6)" />
+              <Users size={18} color="var(--accent)" />
             </div>
-            <div style={{ ...s.kpiValue, color: 'var(--accent, #3b82f6)' }}>{stats?.totalOptIn || 0}</div>
+            <div style={{ ...s.kpiValue, color: 'var(--accent)' }}>{stats?.totalOptIn || 0}</div>
             <div style={s.kpiSub}>Total de clientes que aceitam cobrança no CRM</div>
           </div>
 

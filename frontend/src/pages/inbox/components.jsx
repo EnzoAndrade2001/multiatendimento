@@ -35,6 +35,7 @@ import {
   Mail,
   Smile,
   LoaderCircle,
+  Play,
 } from 'lucide-react';
 import { toast } from '../../utils/toast';
 import { Empty, fmt, statusColor, statusLabel } from './helpers.jsx';
@@ -56,8 +57,38 @@ function getInstanceLabel(ticket) {
   if (!rawName) return 'Sem instância';
 
   const parts = rawName.split('_');
-  const label = parts[parts.length - 1] || rawName;
-  return label.toUpperCase();
+  return parts[parts.length - 1] || rawName;
+}
+
+// 5551998765432 -> "+55 51 99876-5432". Tolera entrada ja formatada, DDI ausente,
+// fixo de 8 digitos. Sempre exibir com var(--font-mono) + tabular-nums.
+function formatPhone(raw) {
+  const digits = getSafeText(raw).replace(/\D/g, '');
+  if (!digits) return getSafeText(raw);
+
+  let rest = digits;
+  let ddi = '';
+  if (rest.length > 11 && rest.startsWith('55')) {
+    ddi = '+55 ';
+    rest = rest.slice(2);
+  }
+
+  if (rest.length === 11) return `${ddi}${rest.slice(0, 2)} ${rest.slice(2, 7)}-${rest.slice(7)}`;
+  if (rest.length === 10) return `${ddi}${rest.slice(0, 2)} ${rest.slice(2, 6)}-${rest.slice(6)}`;
+  if (rest.length === 9) return `${ddi}${rest.slice(0, 5)}-${rest.slice(5)}`;
+  if (rest.length === 8) return `${ddi}${rest.slice(0, 4)}-${rest.slice(4)}`;
+  return ddi ? `${ddi}${rest}` : getSafeText(raw);
+}
+
+// Nº da ficha para o "canhoto" do cavalete: usa o número real do ticket quando
+// existir; senão deriva 4 dígitos estáveis do id (o backend local não numera).
+function getDocketNumber(ticket) {
+  const explicit = ticket?.number ?? ticket?.protocol ?? ticket?.seq;
+  if (explicit != null && String(explicit).trim()) return `#${String(explicit).trim()}`;
+  const id = String(ticket?.id || '');
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return `#${String(Math.abs(hash) % 10000).padStart(4, '0')}`;
 }
 
 function getSafeText(value, fallback = '') {
@@ -401,7 +432,9 @@ function DraftAttachmentPreview({ file, onRemove, styles }) {
       )}
 
       <div style={styles.draftAttachmentInfo}>
-        <div style={styles.draftAttachmentName}>{getSafeText(file?.name, 'Arquivo')}</div>
+        {file?.type?.startsWith('image/') ? null : (
+          <div style={styles.draftAttachmentName}>{getSafeText(file?.name, 'Arquivo')}</div>
+        )}
         <div style={styles.draftAttachmentMeta}>
           {meta.label} - {formatFileSize(file?.size)}
         </div>
@@ -427,6 +460,113 @@ function triggerMediaDownload(url, fileName = '') {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+// Texto longo colapsado com "Ler mais", no espírito do WhatsApp.
+const READ_MORE_LIMIT = 520;
+function MessageBody({ text, fromMe, styles }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > READ_MORE_LIMIT + 40;
+  const shown = expanded || !long
+    ? text
+    : `${text.slice(0, READ_MORE_LIMIT).replace(/\s+\S*$/, '')}… `;
+  return (
+    <div style={{ ...styles.messageText, fontWeight: fromMe ? 500 : 400 }}>
+      {shown}
+      {long ? (
+        <button type="button" className="inbox-readmore" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? 'Ler menos' : 'Ler mais'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// Vídeo com capa + botão de play + duração, em vez do <video controls> cru.
+function VideoMessage({ src, poster, styles }) {
+  const ref = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState('');
+  return (
+    <div style={styles.videoWrap}>
+      <video
+        ref={ref}
+        src={src}
+        poster={poster || undefined}
+        preload="metadata"
+        style={styles.videoEl}
+        controls={playing}
+        onLoadedMetadata={(event) => {
+          const d = event.currentTarget.duration;
+          if (Number.isFinite(d) && d > 0) {
+            setDuration(`${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}`);
+          }
+        }}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onClick={() => { if (!playing) ref.current?.play(); }}
+      />
+      {!playing ? (
+        <button type="button" style={styles.videoPlay} aria-label="Reproduzir vídeo" onClick={() => ref.current?.play()}>
+          <Play size={22} fill="currentColor" strokeWidth={0} />
+        </button>
+      ) : null}
+      {duration && !playing ? <span style={styles.videoDur}>{duration}</span> : null}
+    </div>
+  );
+}
+
+function PdfPreview({ src, fileName, styles }) {
+  const [blobUrl, setBlobUrl] = useState('');
+  const [failed, setFailed] = useState(false);
+  const blobUrlRef = useRef('');
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setBlobUrl('');
+    setFailed(false);
+
+    fetch(src, { signal: controller.signal, credentials: 'omit' })
+      .then((response) => {
+        if (!response.ok) throw new Error(`PDF HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        const nextUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = nextUrl;
+        setBlobUrl(nextUrl);
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') setFailed(true);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = '';
+    };
+  }, [src]);
+
+  if (blobUrl) {
+    return (
+      <iframe
+        src={`${blobUrl}#page=1&view=FitH&toolbar=0&navpanes=0`}
+        title={`Prévia de ${fileName}`}
+        style={styles.pdfPreviewFrame}
+      />
+    );
+  }
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+      <FileText size={34} strokeWidth={1.7} style={{ color: 'var(--accent)' }} />
+      <strong style={{ fontSize: '0.78rem', color: 'var(--ink)' }}>{failed ? 'Prévia indisponível' : 'Carregando prévia…'}</strong>
+      {failed ? <span style={{ fontSize: '0.7rem' }}>Use o botão abaixo para abrir o PDF.</span> : null}
+    </div>
+  );
 }
 
 export function MediaContent({ message, onImageClick, styles }) {
@@ -477,34 +617,42 @@ export function MediaContent({ message, onImageClick, styles }) {
     return (
       <div style={styles.attachmentCard}>
         <div style={styles.attachmentPreviewWrap}>
-          <img src={url} alt={fileName} style={styles.attachmentPreviewImage} onClick={() => onImageClick(url)} />
+          <img src={url} alt="Imagem" style={styles.attachmentPreviewImage} onClick={() => onImageClick(url)} />
+          {message.fileName ? (
+            <button type="button" style={styles.attachmentImageDownload} onClick={() => triggerMediaDownload(url, fileName)} title="Baixar imagem" aria-label="Baixar imagem">
+              <Download size={15} strokeWidth={2.2} />
+            </button>
+          ) : null}
         </div>
-        {message.fileName && (
-          <button type="button" style={styles.attachmentFooterBtn} onClick={() => triggerMediaDownload(url, fileName)} title="Abrir imagem" aria-label={`Abrir ${fileName}`}>
-            <Download size={14} strokeWidth={2.2} />
-            <span style={styles.attachmentFooterText}>{fileName}</span>
-          </button>
-        )}
       </div>
     );
   }
-  if (url && message.mediaType === 'video') return <video src={url} controls style={styles.imgMedia} />;
+  if (url && message.mediaType === 'video') {
+    return <VideoMessage src={url} poster={getMediaUrl(message.thumbnailUrl || message.previewUrl || '')} styles={styles} />;
+  }
   if (url && message.mediaType === 'audio') return <AudioPlayer src={url} fromMe={message.fromMe} transcription={message.transcription} styles={styles} />;
   if (url && message.mediaType === 'sticker') return <img src={url} alt="" style={{ maxWidth: 150, borderRadius: 8 }} />;
   if (url && message.mediaType === 'document') {
     const isPdf = fileName.toLowerCase().endsWith('.pdf');
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)', maxWidth: '320px' }}>
-        <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'var(--accent-light)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <FileText size={20} strokeWidth={2.1} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0, background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)', overflow: 'hidden', maxWidth: '360px' }}>
+        {isPdf ? (
+          <div style={styles.pdfPreviewWrap} aria-label="Prévia do documento PDF">
+            <PdfPreview src={url} fileName={fileName} styles={styles} />
+          </div>
+        ) : null}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+          <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'var(--accent-light)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <FileText size={20} strokeWidth={2.1} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fileName}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>{isPdf ? 'Documento PDF' : 'Arquivo'}</div>
+          </div>
+          <button type="button" onClick={() => triggerMediaDownload(url, fileName)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: 'rgba(255,255,255,0.05)', color: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} title="Baixar" aria-label={`Baixar ${fileName}`}>
+            <Download size={16} strokeWidth={2.2} />
+          </button>
         </div>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fileName}</div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>{isPdf ? 'Documento PDF' : 'Arquivo'}</div>
-        </div>
-        <button type="button" onClick={() => triggerMediaDownload(url, fileName)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: 'rgba(255,255,255,0.05)', color: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} title="Baixar" aria-label={`Baixar ${fileName}`}>
-          <Download size={16} strokeWidth={2.2} />
-        </button>
       </div>
     );
   }
@@ -648,43 +796,46 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
 
   const equipmentOwner = contact;
 
+  // Atendimento de cobrança (tag financeiro/boleto/fatura) ganha a seção de
+  // cobrança logo no topo; os demais veem Equipamentos primeiro.
+  const isBillingContext = tags.some((tag) => /financ|boleto|cobran|fatura/i.test(String(tag)));
+
+  const billingSection = (
+    <div style={styles.infoSection}>
+      <h5 style={styles.infoLabel}>Cobrança</h5>
+      <div style={styles.infoBilling}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={enableWhatsAppBilling}
+            onChange={(e) => handleToggleBilling(e.target.checked)}
+            style={{ width: '15px', height: '15px', accentColor: 'var(--rail-cyan)', cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: '0.83rem', color: 'var(--rail-ink)', fontWeight: 600 }}>
+            Enviar faturas por WhatsApp
+          </span>
+        </label>
+        <div style={{ fontSize: '0.74rem', color: 'var(--rail-dim)', marginTop: '4px', paddingLeft: '25px', lineHeight: 1.35 }}>
+          Envia boletos e cobranças deste contato automaticamente.
+        </div>
+      </div>
+    </div>
+  );
+
   const overviewTab = (
     <>
-      <div style={{ ...styles.infoSnapshotGrid, gridTemplateColumns: isMobile ? '1fr' : styles.infoSnapshotGrid.gridTemplateColumns }}>
-        <div style={styles.infoSnapshotCard}>
-          <span style={styles.infoSnapshotLabel}>Responsavel</span>
-          <strong style={styles.infoSnapshotValue}>{ticket.agent?.name || ticket.team?.name || 'Aguardando'}</strong>
+      <div style={styles.infoSection}>
+        <div style={styles.infoKvRow}>
+          <span style={styles.infoKvKey}>Responsável</span>
+          <span style={styles.infoKvVal}>{ticket.agent?.name || ticket.team?.name || 'Aguardando'}</span>
         </div>
-        <div style={styles.infoSnapshotCard}>
-          <span style={styles.infoSnapshotLabel}>Canal</span>
-          <strong style={styles.infoSnapshotValue}>{getInstanceLabel(ticket)}</strong>
-        </div>
-        <div style={styles.infoSnapshotCard}>
-          <span style={styles.infoSnapshotLabel}>Cidade</span>
-          <strong style={styles.infoSnapshotValue}>{city || 'Nao informada'}</strong>
-        </div>
-        <div style={styles.infoSnapshotCard}>
-          <span style={styles.infoSnapshotLabel}>UF</span>
-          <strong style={styles.infoSnapshotValue}>{state || '--'}</strong>
+        <div style={{ ...styles.infoKvRow, borderBottom: 'none' }}>
+          <span style={styles.infoKvKey}>Canal</span>
+          <span style={styles.infoKvVal}>{getInstanceLabel(ticket)}</span>
         </div>
       </div>
 
-      <div style={{ ...styles.infoSection, marginTop: '1rem', marginBottom: '1rem', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '12px 14px', background: 'rgba(255, 255, 255, 0.01)' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none' }}>
-          <input 
-            type="checkbox" 
-            checked={enableWhatsAppBilling} 
-            onChange={(e) => handleToggleBilling(e.target.checked)} 
-            style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
-          />
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-main)', fontWeight: 700 }}>
-            Enviar Faturas no WhatsApp
-          </span>
-        </label>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px', paddingLeft: '26px', lineHeight: '1.25' }}>
-          Habilita o envio automático de boletos e cobranças para este contato via WhatsApp.
-        </div>
-      </div>
+      {isBillingContext ? billingSection : null}
 
       <div style={styles.infoSection}>
         <h5 style={styles.infoLabel}>Etiquetas</h5>
@@ -704,10 +855,10 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
       </div>
 
       <div style={styles.infoSection}>
-        <h5 style={styles.infoLabel}>Localizacao</h5>
+        <h5 style={styles.infoLabel}>Localização</h5>
         <div style={{ display: 'flex', gap: '8px', flexDirection: isMobile ? 'column' : 'row' }}>
-          <input style={{ ...styles.modalInput, flex: 2, padding: '8px 12px', fontSize: '0.85rem', height: 'auto', minHeight: '42px' }} placeholder="Cidade" value={city} onChange={(e) => setCity(e.target.value)} onBlur={saveContact} />
-          <input style={{ ...styles.modalInput, flex: 1, padding: '8px 12px', fontSize: '0.85rem', height: 'auto', minHeight: '42px' }} placeholder="UF" value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} onBlur={saveContact} />
+          <input style={{ ...styles.infoInput, flex: 2, minHeight: '40px' }} placeholder="Cidade" value={city} onChange={(e) => setCity(e.target.value)} onBlur={saveContact} />
+          <input style={{ ...styles.infoInput, flex: 1, minHeight: '40px' }} placeholder="UF" value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} onBlur={saveContact} />
         </div>
       </div>
 
@@ -715,15 +866,18 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
         <h5 style={styles.infoLabel}>Prioridade do ticket</h5>
         <div style={styles.priorityGrid}>
           {[
-            { id: 'urgent', label: 'Urgente', color: 'var(--danger)' },
+            { id: 'urgent', label: 'Urgente', color: 'var(--critical)' },
             { id: 'high', label: 'Alta', color: 'var(--warning)' },
-            { id: 'medium', label: 'Normal', color: 'var(--accent)' },
-            { id: 'low', label: 'Baixa', color: 'var(--info)' }
-          ].map((priorityOption) => (
-            <button key={priorityOption.id} onClick={() => handlePriorityChange(priorityOption.id)} style={{ ...styles.priorityBtn, background: priority === priorityOption.id ? priorityOption.color : 'var(--bg-panel)', color: priority === priorityOption.id ? 'var(--text-inverse)' : 'var(--text-muted)', borderColor: priority === priorityOption.id ? priorityOption.color : 'var(--border-color)' }}>
-              {priorityOption.label}
-            </button>
-          ))}
+            { id: 'medium', label: 'Normal', color: 'var(--rail-cyan)' },
+            { id: 'low', label: 'Baixa', color: 'var(--rail-dim)' }
+          ].map((priorityOption) => {
+            const on = priority === priorityOption.id;
+            return (
+              <button key={priorityOption.id} onClick={() => handlePriorityChange(priorityOption.id)} style={{ ...styles.priorityBtn, background: on ? 'var(--rail-raise)' : 'transparent', color: on ? priorityOption.color : 'var(--rail-dim)', borderColor: on ? priorityOption.color : 'var(--rail-line)' }}>
+                {priorityOption.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -773,11 +927,13 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
         </div>
       </div>
 
+      {isBillingContext ? null : billingSection}
+
       <div style={styles.infoSection}>
-        <h5 style={styles.infoLabel}>Detalhes tecnicos</h5>
+        <h5 style={styles.infoLabel}>Detalhes do ticket</h5>
         <div style={styles.techInfo}>
-          <div style={styles.techRow}><span>ID Ticket</span> <span>#{ticket.id}</span></div>
-          <div style={styles.techRow}><span>Criado em</span> <span>{new Date(ticket.createdAt).toLocaleDateString()}</span></div>
+          <div style={styles.techRow}><span>Ficha</span> <span>{getDocketNumber(ticket)}</span></div>
+          <div style={styles.techRow}><span>Criado em</span> <span>{new Date(ticket.createdAt).toLocaleDateString('pt-BR')}</span></div>
           <div style={styles.techRow}><span>Atendente</span> <span>{ticket.agent?.name || 'Aguardando'}</span></div>
         </div>
       </div>
@@ -788,15 +944,15 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
     <>
       <div style={styles.infoSection}>
         <h5 style={styles.infoLabel}>Notas internas</h5>
-        <textarea style={{ ...styles.notesArea, minHeight: isMobile ? '200px' : '240px' }} value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={saveContact} placeholder="Adicione observacoes sobre este cliente..." />
+        <textarea style={{ ...styles.notesArea, minHeight: isMobile ? '200px' : '240px' }} value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={saveContact} placeholder="Observações sobre este cliente…" />
       </div>
 
       <div style={styles.infoSection}>
-        <h5 style={styles.infoLabel}>Resumo rapido</h5>
+        <h5 style={styles.infoLabel}>Resumo rápido</h5>
         <div style={styles.infoCardList}>
           <div style={styles.infoListCard}>
             <div style={styles.infoListTitle}>Ficha resumida</div>
-            <div style={styles.infoListSubtle}>{buildContactSnapshot() || 'Nenhuma informacao adicional.'}</div>
+            <div style={styles.infoListSubtle}>{buildContactSnapshot() || 'Nenhuma informação adicional.'}</div>
           </div>
         </div>
       </div>
@@ -825,15 +981,15 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
           {media.filter((item) => item.mediaType === 'document' || item.mediaType === 'audio').map((item) => {
             const docName = getSafeText(item.body || item.mediaUrl.split('/').pop(), item.mediaType === 'audio' ? 'Áudio' : 'Documento');
             return (
-              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: 'var(--bg-panel)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-sm)', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--text-muted)' }}>
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: 'var(--rail-raise)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--rail-line)' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-sm)', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--rail-dim)' }}>
                   {item.mediaType === 'audio' ? <Mic size={16} /> : <FileText size={16} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{docName}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{new Date(item.createdAt).toLocaleDateString('pt-BR')}</div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--rail-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{docName}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--rail-faint)' }}>{new Date(item.createdAt).toLocaleDateString('pt-BR')}</div>
                 </div>
-                <button type="button" onClick={() => triggerMediaDownload(getMediaUrl(item.mediaUrl), docName)} aria-label={`Baixar ${docName}`} title={`Baixar ${docName}`} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <button type="button" onClick={() => triggerMediaDownload(getMediaUrl(item.mediaUrl), docName)} aria-label={`Baixar ${docName}`} title={`Baixar ${docName}`} style={{ background: 'none', border: 'none', color: 'var(--rail-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                   <Download size={16} />
                 </button>
               </div>
@@ -927,17 +1083,17 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
           <div style={styles.infoIdentityMain}>
           {isEditingName ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, width: '100%', padding: '0 10px' }}>
-              <input 
-                style={{ ...styles.modalInput, flex: 1, margin: 0, padding: '8px', fontSize: '1.1rem', fontWeight: 800, textAlign: 'center', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-main)' }} 
-                value={newName} 
+              <input
+                style={{ ...styles.infoInput, flex: 1, margin: 0, fontSize: '1rem', fontWeight: 600 }}
+                value={newName}
                 onChange={e => setNewName(e.target.value)}
                 autoFocus
                 onKeyDown={e => e.key === 'Enter' && handleSaveName()}
                 placeholder="Nome do cliente"
               />
-              <button 
-                onClick={handleSaveName} 
-                style={{ ...styles.infoActionBtn, padding: '8px 16px', minHeight: 0, height: 'auto', background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', fontWeight: 700 }}
+              <button
+                onClick={handleSaveName}
+                style={{ ...styles.infoActionBtn, ...styles.infoActionBtnPrimary, padding: '8px 14px', minHeight: 0, height: 'auto' }}
               >
                 Salvar
               </button>
@@ -954,47 +1110,34 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
             type="button"
             className="inbox-control"
             onClick={() => copyText(contactPhone, 'Telefone copiado')}
-            style={{ ...styles.infoPhone, ...styles.infoPhoneButton, marginTop: '0.3rem', marginBottom: '0.5rem' }}
+            style={{ ...styles.infoPhone, ...styles.infoPhoneButton, marginTop: '0.3rem', marginBottom: '0.55rem' }}
             title="Copiar telefone"
-            aria-label={`Copiar telefone ${contactPhone}`}
+            aria-label={`Copiar telefone ${formatPhone(contactPhone)}`}
           >
-            {contactPhone}
+            {formatPhone(contactPhone) || 'Sem telefone'}
           </button>
           {linkedCrm ? (
             <button
               type="button"
               className="inbox-control"
               onClick={() => onOpenCRM?.(linkedCrm)}
-              style={{ ...styles.infoActionBtn, ...styles.infoActionBtnPrimary, width: '100%', marginBottom: '0.5rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '7px' }}
+              style={{ ...styles.infoActionBtn, ...styles.infoActionBtnPrimary, width: '100%', marginBottom: '0.6rem', minHeight: '38px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '7px' }}
               title="Abrir visão 360 sem sair da conversa"
             >
               <ClipboardList size={15} /> Visão 360 — {linkedCrm.fantasyName || linkedCrm.name}
             </button>
           ) : contact.fantasyName ? (
-            <div style={{ color: 'var(--accent)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', padding: '4px 12px', background: 'var(--accent-light)', borderRadius: '8px', display: 'inline-block' }}>
-              CRM {contact.fantasyName}
+            <div style={{ ...styles.infoBadge, color: 'var(--rail-cyan)', borderColor: 'var(--rail-cyan)', marginBottom: '0.6rem' }}>
+              CRM · {contact.fantasyName}
             </div>
           ) : null}
           <div style={styles.infoBadgeRow}>
-            <span
-              style={{
-                ...styles.infoBadge,
-                background: statusMeta.background,
-                color: statusMeta.color,
-                border: statusMeta.border,
-              }}
-            >
+            <span style={styles.infoBadge}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: ticket.status === 'open' ? 'var(--rail-cyan)' : 'var(--rail-faint)' }} />
               {statusMeta.label}
             </span>
             {priorityMeta ? (
-              <span
-                style={{
-                  ...styles.infoBadge,
-                  background: priorityMeta.background,
-                  color: priorityMeta.color,
-                  border: priorityMeta.border,
-                }}
-              >
+              <span style={{ ...styles.infoBadge, color: priority === 'urgent' ? 'var(--rail-magenta)' : 'var(--rail-dim)' }}>
                 {priorityMeta.label}
               </span>
             ) : null}
@@ -1007,7 +1150,7 @@ export function ContactPanel({ ticket, onClose, onUpdate, onImageClick, isMobile
               Copiar ficha
             </button>
             {linkedCrm ? (
-              <button type="button" className="inbox-control" onClick={onUnlinkCRM} style={{ ...styles.infoActionBtn, color: 'var(--text-muted)' }} title="Desvincular este contato do CRM">
+              <button type="button" className="inbox-control" onClick={onUnlinkCRM} style={styles.infoActionBtn} title="Desvincular este contato do CRM">
                 Desvincular
               </button>
             ) : (
@@ -1208,12 +1351,19 @@ export function ForwardModal({ onClose, onForward, styles }) {
 const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, onPreference, styles, now }) {
   const priorityMeta = getPriorityMeta(ticket.priority);
   const statusMeta = getStatusMeta(ticket.status);
-  const phoneLabel = getContactPhone(ticket.contact, 'Sem telefone');
-  const ownerLabel = ticket.agent?.name || ticket.team?.name || 'Sem responsavel';
+  const phoneLabel = formatPhone(getContactPhone(ticket.contact));
+  const ownerLabel = ticket.agent?.name || ticket.team?.name || 'Sem responsável';
   const tags = getSafeTags(ticket.contact?.tags).slice(0, 2);
   const contactName = getContactDisplayName(ticket.contact);
   const slaMeta = getSlaMeta(ticket, now);
   const awaitingCustomer = isAwaitingCustomer(ticket);
+
+  const docketNum = getDocketNumber(ticket);
+  const isOpen = ticket.status === 'open';
+  const isWaiting = ticket.status === 'pending' || ticket.status === 'bot';
+  // SLA só aparece quando aperta (esgotado ou < 60 min). Fora disso, mostra o tempo desde a última mensagem.
+  const showSla = slaMeta && slaMeta.tone !== 'ok';
+  const showPriority = ticket.priority === 'urgent' || ticket.priority === 'high';
 
   return (
     <div
@@ -1221,7 +1371,7 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
       role="button"
       tabIndex={0}
       aria-current={isSelected ? 'true' : undefined}
-      aria-label={`Abrir conversa com ${contactName}. Status: ${statusMeta.label}.${ticket.isUnread || ticket.unreadCount > 0 ? ` ${ticket.unreadCount || 1} mensagem(ns) não lida(s).` : ''}${awaitingCustomer ? ' Aguardando resposta do cliente.' : ''}`}
+      aria-label={`Abrir conversa com ${contactName}. Ficha ${docketNum}. Status: ${statusMeta.label}.${ticket.isUnread || ticket.unreadCount > 0 ? ` ${ticket.unreadCount || 1} mensagem(ns) não lida(s).` : ''}${awaitingCustomer ? ' Aguardando resposta do cliente.' : ''}`}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -1231,53 +1381,40 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
       className="inbox-ticket-row"
       style={{ ...styles.row, ...(isSelected ? styles.rowActive : {}) }}
     >
-      <Avatar name={contactName} src={ticket.contact?.avatarUrl} size={36} />
+      <Avatar name={contactName} src={ticket.contact?.avatarUrl} size={40} />
       <div style={styles.rowInfo}>
+        <span style={styles.rowDocket}>{docketNum}</span>
         <div style={styles.rowTop}>
-          <span style={styles.rowName}>{ticket.isPinned ? <Pin size={12} fill="currentColor" aria-label="Conversa fixada" /> : null}{contactName}</span>
-          <span style={styles.rowTime} title={formatTicketTimestamp(ticket.lastMessageAt || ticket.updatedAt)}>
-            {formatElapsed(ticket.lastMessageAt || ticket.updatedAt, now)}
-          </span>
+          <span style={styles.rowName}>{ticket.isPinned ? <Pin size={11} fill="currentColor" aria-label="Conversa fixada" /> : null}{contactName}</span>
+          {showSla ? (
+            <span style={{ ...styles.slaPill, ...(slaMeta.tone === 'danger' ? styles.slaDanger : styles.slaWarning) }}>
+              {slaMeta.label.replace(/^SLA /, '')}
+            </span>
+          ) : (
+            <span style={styles.rowTime} title={formatTicketTimestamp(ticket.lastMessageAt || ticket.updatedAt)}>
+              {formatElapsed(ticket.lastMessageAt || ticket.updatedAt, now)}
+            </span>
+          )}
         </div>
 
-        <div style={styles.rowPreview}>{phoneLabel}</div>
+        {phoneLabel ? <div style={styles.rowPhone}>{phoneLabel}</div> : null}
 
         <div style={styles.rowSub}>
-          <span
-            style={{
-              ...styles.rowStatusPill,
-              background: statusMeta.background,
-              color: statusMeta.color,
-               border: statusMeta.border,
-             }}
-             role="status"
-             aria-label={`Status: ${statusMeta.label}`}
-           >
-            <span style={{ ...styles.dot, background: statusMeta.color, color: statusMeta.color, boxShadow: 'none' }} />
-            {getInstanceLabel(ticket)} - {statusMeta.label}
-          </span>
-          {priorityMeta ? (
-            <span
-              style={{
-                ...styles.priorityPill,
-                background: priorityMeta.background,
-                color: priorityMeta.color,
-                border: priorityMeta.border,
-              }}
-            >
+          {isWaiting ? (
+            <span style={styles.statusStamp} role="status" aria-label={`Status: ${statusMeta.label}`}>{statusMeta.label}</span>
+          ) : (
+            <span style={styles.rowStatusPill} role="status" aria-label={`Status: ${statusMeta.label}`}>
+              <span style={{ ...styles.dot, background: isOpen ? 'var(--rail-cyan)' : 'var(--rail-faint)' }} />
+              {statusMeta.label}
+            </span>
+          )}
+          {showPriority && priorityMeta ? (
+            <span style={{ ...styles.priorityPill, color: ticket.priority === 'urgent' ? 'var(--rail-magenta)' : 'var(--warning)' }}>
               {priorityMeta.label}
             </span>
           ) : null}
+          {awaitingCustomer ? <span style={styles.awaitingCustomerPill}>aguardando cliente</span> : null}
           {(ticket.isUnread || ticket.unreadCount > 0) ? <div style={styles.unreadBadge} role="status" aria-label={`${ticket.unreadCount > 0 ? ticket.unreadCount : 1} mensagem(ns) não lida(s)`}>{ticket.unreadCount > 0 ? ticket.unreadCount : '•'}</div> : null}
-        </div>
-
-        <div className="inbox-ticket-operations" style={styles.rowOperationalLine}>
-          {awaitingCustomer ? <span style={styles.awaitingCustomerPill}>Aguardando cliente</span> : null}
-          {slaMeta ? (
-            <span style={{ ...styles.slaPill, ...(slaMeta.tone === 'danger' ? styles.slaDanger : slaMeta.tone === 'warning' ? styles.slaWarning : styles.slaOk) }}>
-              {slaMeta.label}
-            </span>
-          ) : null}
         </div>
 
         <div className="inbox-ticket-meta" style={styles.rowMetaLine}>
@@ -1296,12 +1433,12 @@ const TicketRow = React.memo(function TicketRow({ ticket, isSelected, onSelect, 
           ) : (
             <span style={styles.rowMetaSpacer} />
           )}
-          <div style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
+          <div className="inbox-ticket-hover" style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
             <button type="button" className="inbox-control" style={styles.ticketQuickAction} title={ticket.isPinned ? 'Desafixar conversa' : 'Fixar conversa no topo'} aria-label={ticket.isPinned ? 'Desafixar conversa' : 'Fixar conversa'} aria-pressed={Boolean(ticket.isPinned)} onClick={(event) => { event.stopPropagation(); onPreference(ticket.id, { isPinned: !ticket.isPinned }); }}>
-              {ticket.isPinned ? <PinOff size={13} /> : <Pin size={13} />}
+              {ticket.isPinned ? <PinOff size={12} /> : <Pin size={12} />}
             </button>
             <button type="button" className="inbox-control" style={styles.ticketQuickAction} title="Marcar como não lida" aria-label="Marcar conversa como não lida" aria-pressed={Boolean(ticket.isUnread || ticket.unreadCount > 0)} onClick={(event) => { event.stopPropagation(); onPreference(ticket.id, { isUnread: true }); }}>
-              <Mail size={13} />
+              <Mail size={12} />
             </button>
           </div>
         </div>
@@ -1428,11 +1565,10 @@ export const TicketSidebar = React.memo(function TicketSidebar({
     >
       <div className="inbox-sidebar-header" style={styles.sidebarHeader}>
         <div style={{ minWidth: 0 }}>
-          <div className="inbox-sidebar-eyebrow" style={styles.sidebarEyebrow}>Operacao</div>
-          <div style={styles.sidebarTitle}>Inbox</div>
-          <div className="inbox-sidebar-subtitle" style={styles.sidebarSubtitle}>{activeTabLabel}</div>
+          <div style={styles.sidebarTitle}>Atendimentos</div>
+          <div className="inbox-sidebar-eyebrow" style={styles.sidebarEyebrow}>{activeTabLabel}</div>
         </div>
-        <select style={{ ...styles.sortSelect, flex: '0 0 auto', width: 92 }} value={density} onChange={(event) => setDensity(event.target.value)} aria-label="Densidade da lista" title="Densidade visual">
+        <select style={{ ...styles.sortSelect, flex: '0 0 auto', width: 96 }} value={density} onChange={(event) => setDensity(event.target.value)} aria-label="Densidade da lista" title="Densidade visual">
           <option value="auto">Auto</option>
           <option value="compact">Compacta</option>
           <option value="comfortable">Confortável</option>
@@ -1515,7 +1651,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
               {savedFilters.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
             </select>
           ) : null}
-          <button type="button" className="inbox-control" style={styles.saveFilterBtn} onClick={saveCurrentFilter} title="Salvar filtros e ordenação atuais">Salvar</button>
+          <button type="button" className="inbox-control" style={styles.saveFilterBtn} onClick={saveCurrentFilter} title="Salvar filtros e ordenação atuais">Salvar visão</button>
         </div>
 
         {filtersOpen ? <div style={{ ...styles.filterBar, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
@@ -1652,17 +1788,15 @@ export const ChatHeader = React.memo(function ChatHeader({
   summarizing,
 }) {
   const contactName = getContactDisplayName(selectedTicket.contact);
-  const contactPhone = getContactPhone(selectedTicket.contact);
+  const orgName = getSafeText(selectedTicket.contact?.fantasyName) || getSafeText(selectedTicket.crmCustomer?.fantasyName);
   const [actionsOpen, setActionsOpen] = useState(false);
   const statusMeta = getStatusMeta(selectedTicket.status);
   const slaMeta = getSlaMeta(selectedTicket);
   const awaitingCustomer = isAwaitingCustomer(selectedTicket);
-  const ownerLabel = selectedTicket.agent?.name
-    ? `Com ${selectedTicket.agent.name}`
-    : selectedTicket.team?.name
-      ? `Fila ${selectedTicket.team.name}`
-      : `Bot ${botName}`;
-
+  const equipment = selectedTicket.equipment || selectedTicket.contact?.equipments?.[0] || null;
+  const equipmentLabel = equipment ? getEquipmentDisplayName(equipment) : '';
+  const subjectLabel = getSafeText(selectedTicket.subject).trim();
+  const showSla = slaMeta && slaMeta.tone !== 'ok';
   useEffect(() => {
     setActionsOpen(false);
   }, [selectedTicket.id]);
@@ -1717,50 +1851,52 @@ export const ChatHeader = React.memo(function ChatHeader({
           >
             {contactName}
           </div>
-          <span
-            style={{
-              ...styles.chatStatusPill,
-              background: statusMeta.background,
-              color: statusMeta.color,
-              border: statusMeta.border,
-            }}
-          >
-            {statusMeta.label}
-          </span>
+          {orgName ? <span style={styles.chatOrg}>· {orgName}</span> : null}
         </div>
 
-        <div style={styles.chatMetaRow}>
-          {contactPhone ? <span style={styles.chatMetaText}>{contactPhone}</span> : null}
-          <span style={styles.chatMetaText}>{getInstanceLabel(selectedTicket)}</span>
-          {!isMobile ? <span style={styles.chatMetaText}>{ownerLabel}</span> : null}
-          {!isMobile ? <span style={styles.chatMetaText}>{getPriorityMeta(selectedTicket.priority)?.label || 'Sem prioridade'}</span> : null}
-          {awaitingCustomer ? <span style={styles.chatAwaitingCustomer}>Aguardando cliente</span> : null}
-          {slaMeta ? <span style={{ ...styles.chatSlaText, ...(slaMeta.tone === 'danger' ? styles.slaDanger : slaMeta.tone === 'warning' ? styles.slaWarning : styles.slaOk) }}>{slaMeta.label}</span> : null}
-        </div>
+        {(equipmentLabel || subjectLabel || showSla || awaitingCustomer) ? (
+          <div style={styles.chatMetaRow}>
+            {equipmentLabel ? (
+              <span style={styles.chatMachineChip}>
+                {equipmentLabel}{equipment?.serialNumber ? ` · ${equipment.serialNumber}` : ''}
+              </span>
+            ) : subjectLabel ? (
+              <span style={styles.chatMetaText}>{subjectLabel}</span>
+            ) : null}
+            {awaitingCustomer ? <span style={styles.chatAwaitingCustomer}>aguardando cliente</span> : null}
+            {showSla ? (
+              <span style={{ ...styles.chatSlaText, ...(slaMeta.tone === 'danger' ? styles.slaDanger : styles.slaWarning) }}>
+                {slaMeta.label}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div style={styles.headerActions}>
-        {canCreateOs ? <button
-          type="button"
-          className="inbox-control"
-          style={isMobile || isCompactDesktop ? styles.headerGhostIconBtn : styles.headerPrimaryOutlineBtn}
-          onClick={() => setShowOsModal(true)}
-          title="Gerar ordem de servico"
-          aria-label="Gerar ordem de servico"
-        >
-          <ClipboardList size={16} strokeWidth={2.2} />
-          {isMobile || isCompactDesktop ? null : 'Gerar O.S.'}
-        </button> : null}
+        {canCreateOs && !isMobile ? (
+          <button
+            type="button"
+            className="inbox-control"
+            style={styles.headerGhostBtn}
+            onClick={() => setShowOsModal(true)}
+            title="Gerar ordem de serviço"
+            aria-label="Gerar ordem de serviço"
+          >
+            <ClipboardList size={15} strokeWidth={2.2} />
+            Gerar O.S.
+          </button>
+        ) : null}
 
         {selectedTicket.status !== 'resolved' && canResolve ? (
           <button className="inbox-control" style={styles.resolveBtn} onClick={handleResolve} aria-label="Encerrar atendimento" title="Encerrar atendimento">
             <CheckCheck size={16} strokeWidth={2.2} />
-            {isMobile || isCompactDesktop ? null : 'Encerrar'}
+            {isMobile ? null : 'Encerrar'}
           </button>
         ) : selectedTicket.status === 'resolved' && canReopen ? (
           <button
             className="inbox-control"
-            style={{ ...styles.resolveBtn, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)', boxShadow: 'none' }}
+            style={{ ...styles.resolveBtn, background: 'transparent', color: 'var(--ink-dim)', border: '1px solid var(--paper-line)', boxShadow: 'none' }}
             onClick={handleReopen}
             aria-label="Reabrir atendimento"
             title="Reabrir atendimento"
@@ -1799,6 +1935,12 @@ export const ChatHeader = React.memo(function ChatHeader({
 
           {actionsOpen ? (
             <div style={styles.headerMenuPanel}>
+              {canCreateOs && isMobile ? (
+                <button type="button" className="inbox-control" style={styles.headerMenuItem} onClick={() => { setShowOsModal(true); setActionsOpen(false); }}>
+                  <ClipboardList size={15} strokeWidth={2.2} />
+                  Gerar O.S.
+                </button>
+              ) : null}
               <button type="button" className="inbox-control" style={styles.headerMenuItem} onClick={() => { handleSummarize(); setActionsOpen(false); }} disabled={summarizing}>
                 <Sparkles size={15} strokeWidth={2.2} />
                 {summarizing ? 'Gerando resumo...' : 'Resumo IA'}
@@ -1842,7 +1984,46 @@ export const MessageList = React.memo(function MessageList({
   const [draftSearch, setDraftSearch] = useState(historySearch || '');
   const [historySearchOpen, setHistorySearchOpen] = useState(Boolean(historySearch));
   const [openMenu, setOpenMenu] = useState(null);
+  const [flashKey, setFlashKey] = useState(null);
+  const pendingQuoteRef = useRef(null);
+  const quoteAttemptsRef = useRef(0);
   const trimmedHistorySearch = getSafeText(historySearch).trim();
+
+  const cssEscape = (value) => (typeof window !== 'undefined' && window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/"/g, '\\"'));
+
+  // Clicar numa citação leva à mensagem original: rola, pisca um destaque e,
+  // se ela estiver fora da página carregada, puxa mais histórico e tenta de novo.
+  const scrollToMessage = React.useCallback((externalId) => {
+    const id = getSafeText(externalId).trim();
+    if (!id) return;
+    const node = scrollRef.current?.querySelector(`[data-msg-key="${cssEscape(id)}"]`);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashKey(id);
+      window.setTimeout(() => setFlashKey((current) => (current === id ? null : current)), 1600);
+      pendingQuoteRef.current = null;
+      quoteAttemptsRef.current = 0;
+      return;
+    }
+    if (hasMoreMessages && quoteAttemptsRef.current < 12) {
+      pendingQuoteRef.current = id;
+      quoteAttemptsRef.current += 1;
+      handleLoadMoreMessages();
+    } else {
+      pendingQuoteRef.current = null;
+      quoteAttemptsRef.current = 0;
+      toast.info('A mensagem citada está fora do histórico disponível.');
+    }
+  }, [scrollRef, hasMoreMessages, handleLoadMoreMessages]);
+
+  useEffect(() => {
+    if (pendingQuoteRef.current) scrollToMessage(pendingQuoteRef.current);
+  }, [messages, scrollToMessage]);
+
+  useEffect(() => {
+    pendingQuoteRef.current = null;
+    quoteAttemptsRef.current = 0;
+  }, [selectedTicket.id]);
 
   useEffect(() => {
     setDraftSearch(historySearch || '');
@@ -1959,8 +2140,8 @@ export const MessageList = React.memo(function MessageList({
               aria-label="Buscar no historico desta conversa"
               title="Buscar no historico"
             >
-              <Search size={15} />
-              {isMobile ? null : 'Buscar historico'}
+              <Search size={14} />
+              {isMobile ? null : 'Buscar no histórico'}
             </button>
           </div>
         )}
@@ -2013,7 +2194,7 @@ export const MessageList = React.memo(function MessageList({
                     <div style={styles.separator}>
                       <div style={styles.sepLine} />
                       <div style={styles.sepLabel}>
-                        {message.isCurrent ? 'Sessao atual' : `Sessao anterior - ${new Date(message.date).toLocaleDateString('pt-BR')}`}
+                        {message.isCurrent ? 'sessão atual' : `sessão anterior · ${new Date(message.date).toLocaleDateString('pt-BR')}`}
                       </div>
                       <div style={styles.sepLine} />
                     </div>
@@ -2087,45 +2268,77 @@ export const MessageList = React.memo(function MessageList({
                 );
               }
 
-              const senderName = message.fromMe ? (message.fromBot ? `BOT ${botName}` : messageAgentName) : selectedContactName;
+              const senderName = message.fromMe ? (message.fromBot ? `Bot ${botName}` : messageAgentName) : selectedContactName;
               const hasCardMedia = Boolean(message.mediaUrl) && ['image', 'document', 'video'].includes(message.mediaType);
-              const senderColor = message.fromMe
-                ? (hasCardMedia ? '#1b2b49' : (message.fromBot ? 'var(--text-msg-ai)' : 'var(--text-msg-me)'))
-                : (hasCardMedia ? '#1b2b49' : 'var(--text-main)');
+              const senderColor = message.fromBot ? 'var(--text-msg-ai)' : 'var(--ink-dim)';
               const messageTime = fmt(message.createdAt);
+              // Agrupa mensagens seguidas do mesmo remetente (5 min) — cara de conversa.
+              let prevMsg = null;
+              for (let back = index - 1; back >= 0; back -= 1) {
+                const candidate = messageItems[back];
+                if (candidate && typeof candidate === 'object' && !candidate._separator && candidate._type !== 'event') { prevMsg = candidate; break; }
+              }
+              const sameGroup = Boolean(
+                prevMsg
+                && Boolean(prevMsg.fromMe) === Boolean(message.fromMe)
+                && Boolean(prevMsg.fromBot) === Boolean(message.fromBot)
+                && Math.abs(new Date(message.createdAt).getTime() - new Date(prevMsg.createdAt).getTime()) < 5 * 60 * 1000
+              );
+              const bubbleBg = message.fromBot
+                ? 'var(--bg-msg-ai)'
+                : (message.fromMe ? 'var(--outbound)' : 'var(--inbound)');
+              const bubbleBorder = message.fromBot ? '1px solid var(--border-msg-ai)' : '1px solid transparent';
+              const quoteExternalId = getSafeText(message.quotedMsgId).trim();
+              const quotedOriginal = quoteExternalId
+                ? messageItems.find((item) => item && typeof item === 'object' && (
+                  getSafeText(item.externalId).trim() === quoteExternalId
+                  || getSafeText(item.id).trim() === quoteExternalId
+                ))
+                : null;
+              const quotedSender = quotedOriginal
+                ? (quotedOriginal.fromMe ? getSafeText(quotedOriginal.agent?.name, 'Você') : selectedContactName)
+                : (message.fromMe ? selectedContactName : 'Você');
               return (
                 <MessageRenderErrorBoundary key={messageKey} messageId={message.id}>
-                  <div className="animate-fade-in-up" style={{ ...styles.bubbleWrap, justifyContent: message.fromMe ? 'flex-end' : 'flex-start' }}>
+                  <div
+                    className="inbox-msg-row"
+                    data-msg-key={getSafeText(message.externalId) || messageKey}
+                    data-flash={flashKey && flashKey === (getSafeText(message.externalId).trim() || messageKey) ? '1' : undefined}
+                    style={{ ...styles.bubbleWrap, justifyContent: message.fromMe ? 'flex-end' : 'flex-start', marginTop: sameGroup ? '2px' : '0.7rem' }}
+                  >
                     <div
                       className="inbox-bubble"
+                      data-from={message.fromMe ? 'out' : 'in'}
+                      data-tail={sameGroup ? '0' : '1'}
                       style={{
                         ...styles.bubble,
+                        '--bubble-bg': bubbleBg,
                         maxWidth: isMobile ? '88%' : styles.bubble.maxWidth,
-                        background: hasCardMedia ? 'var(--bg-surface)' : (message.fromMe ? (message.fromBot ? 'var(--bg-msg-ai)' : 'var(--bg-msg-me)') : 'var(--bg-msg-contact)'),
-                        color: hasCardMedia ? 'var(--text-main)' : (message.fromMe ? (message.fromBot ? 'var(--text-msg-ai)' : 'var(--text-msg-me)') : 'var(--text-msg-contact)'),
+                        background: 'var(--bubble-bg)',
+                        color: message.fromBot ? 'var(--text-msg-ai)' : 'var(--ink)',
                         opacity: message.isDeleted ? 0.6 : 1,
                         textDecoration: message.isDeleted ? 'line-through' : 'none',
-                        border: hasCardMedia ? '1px solid var(--border-color)' : (message.fromMe ? (message.fromBot ? '1px solid var(--border-msg-ai)' : '1px solid transparent') : '1px solid var(--border-color)'),
+                        border: bubbleBorder,
                         alignItems: 'flex-start',
-                        borderBottomRightRadius: message.fromMe ? 'var(--radius-sm)' : 'var(--radius-md)',
-                        borderBottomLeftRadius: message.fromMe ? 'var(--radius-md)' : 'var(--radius-sm)',
                       }}
                     >
-                      <div style={styles.messageHeader}>
-                        <div
-                          style={{
-                            ...styles.messageSender,
-                            color: senderColor,
-                            opacity: message.fromBot ? 0.88 : 1,
-                          }}
-                        >
-                          {message.fromBot ? <Bot size={13} strokeWidth={2.2} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> : null}
-                          {senderName}
-                        </div>
+                      <div style={{ ...styles.messageHeader, marginBottom: sameGroup ? '0.15rem' : '0.3rem' }}>
+                        {sameGroup ? <span /> : (
+                          <div
+                            style={{
+                              ...styles.messageSender,
+                              color: senderColor,
+                              opacity: message.fromBot ? 0.88 : 1,
+                            }}
+                          >
+                            {message.fromBot ? <Bot size={13} strokeWidth={2.2} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> : null}
+                            {senderName}
+                          </div>
+                        )}
                         <div style={styles.messageHeaderSide}>
                           <div style={styles.messageHeaderTime}>{messageTime}</div>
                           {!message.isDeleted && (
-                            <div style={styles.messageMenuRoot} data-message-menu-root="true">
+                            <div className="inbox-msg-menu" style={styles.messageMenuRoot} data-message-menu-root="true">
                               <button
                                 type="button"
                                 onClick={(event) => {
@@ -2137,7 +2350,7 @@ export const MessageList = React.memo(function MessageList({
                                   });
                                 }}
                                 style={styles.messageMenuTrigger}
-                                title="Mais acoes"
+                                title="Mais ações"
                               >
                                 <MoreVertical size={15} strokeWidth={2.3} />
                               </button>
@@ -2148,20 +2361,25 @@ export const MessageList = React.memo(function MessageList({
                       </div>
 
                       {quotedText ? (
-                        <div
-                          style={{
-                            ...styles.quotedBlock,
-                            background: message.fromMe ? 'rgba(255,255,255,0.18)' : 'rgba(15, 23, 42, 0.04)',
-                            borderLeft: `2px solid ${message.fromMe ? 'rgba(255,255,255,0.58)' : 'var(--info-border)'}`,
-                            color: message.fromMe ? 'rgba(255,255,255,0.78)' : 'var(--text-muted)',
-                          }}
+                        <button
+                          type="button"
+                          className="inbox-quote"
+                          style={styles.quotedRich}
+                          onClick={() => quoteExternalId && scrollToMessage(quoteExternalId)}
+                          disabled={!quoteExternalId}
+                          title={quoteExternalId ? 'Ir para a mensagem original' : undefined}
                         >
-                          {quotedText}
-                        </div>
+                          <span style={styles.quotedSender}>{quotedSender}</span>
+                          <span style={styles.quotedSnippet}>{quotedText}</span>
+                        </button>
                       ) : null}
 
                       <MediaContent message={message} onImageClick={onImageClick} styles={styles} />
-                      {bodyText ? <div style={{ ...styles.messageText, fontWeight: message.fromMe ? 500 : 400, marginTop: message.mediaUrl ? '10px' : 0 }}>{bodyText}</div> : null}
+                      {bodyText ? (
+                        <div style={{ marginTop: message.mediaUrl ? '10px' : 0 }}>
+                          <MessageBody text={bodyText} fromMe={message.fromMe} styles={styles} />
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </MessageRenderErrorBoundary>
@@ -2392,9 +2610,21 @@ export const MessageComposer = React.memo(function MessageComposer({
     padding: '5px 10px', borderRadius: 'var(--radius-sm)', fontSize: '0.74rem', fontWeight: 600,
   };
   const outboundFieldStyle = {
-    padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
-    background: 'var(--bg-panel)', color: 'var(--text-primary)', fontSize: '0.8rem', maxWidth: '100%',
+    padding: '4px 8px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--paper-line)',
+    background: 'var(--paper)', color: 'var(--ink-dim)', fontFamily: 'var(--font-mono)',
+    fontSize: '0.74rem', maxWidth: '100%',
   };
+  const composerTabStyle = (active) => ({
+    padding: '3px 2px 6px',
+    background: 'none',
+    border: 'none',
+    borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+    color: active ? 'var(--ink)' : 'var(--ink-faint)',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'color .15s, border-color .15s',
+  });
 
   function insertEmoji(emoji) {
     const input = textInputRef.current;
@@ -2423,16 +2653,24 @@ export const MessageComposer = React.memo(function MessageComposer({
       )}
 
       <div className="inbox-composer" style={{ ...styles.inputArea, padding: isMobile ? '0.75rem' : '1rem 1.5rem' }}>
-        {/* Canal e tipo de envio compartilham a mesma barra para poupar altura. */}
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
+        {/* Tipo de envio à esquerda (abas), canal de saída à direita (discreto). */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '4px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '16px' }}>
+            <button type="button" onClick={() => setIsNote(false)} style={composerTabStyle(!isNote)}>
+              Responder
+            </button>
+            <button type="button" onClick={() => setIsNote(true)} style={composerTabStyle(isNote)}>
+              Nota interna
+            </button>
+          </div>
           {!isNote && showInstancePicker ? (
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>ENVIAR POR</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--ink-faint)', whiteSpace: 'nowrap' }}>enviar por</span>
               <select
                 aria-label="Enviar mensagem pela instância"
                 value={outboundInstanceId || ''}
                 onChange={(event) => setOutboundInstanceId?.(event.target.value)}
-                style={{ ...outboundFieldStyle, maxWidth: isMobile ? 150 : 210 }}
+                style={{ ...outboundFieldStyle, maxWidth: isMobile ? 150 : 220 }}
               >
                 <option value="">Selecione a instância…</option>
                 {(instances || [])
@@ -2444,44 +2682,9 @@ export const MessageComposer = React.memo(function MessageComposer({
                     </option>
                   ))}
               </select>
-              {outboundOptionsLoading ? <span aria-label="Validando instância" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>…</span> : null}
+              {outboundOptionsLoading ? <span aria-label="Validando instância" style={{ fontSize: '0.72rem', color: 'var(--ink-faint)' }}>…</span> : null}
             </label>
           ) : null}
-          <button
-            type="button"
-            onClick={() => setIsNote(false)}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 'var(--radius-lg)',
-              fontSize: '0.75rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              border: '1px solid var(--border-color)',
-              background: !isNote ? 'var(--accent)' : 'transparent',
-              color: !isNote ? 'var(--text-inverse)' : 'var(--text-muted)',
-              transition: 'all 0.15s'
-            }}
-          >
-            Mensagem (WhatsApp)
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsNote(true)}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 'var(--radius-lg)',
-              fontSize: '0.75rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              border: '1px solid var(--border-color)',
-              background: isNote ? 'var(--accent-light)' : 'transparent',
-              color: isNote ? 'var(--accent)' : 'var(--text-muted)',
-              borderColor: isNote ? 'var(--accent-border)' : 'var(--border-color)',
-              transition: 'all 0.15s'
-            }}
-          >
-            Nota Interna (Privado)
-          </button>
         </div>
 
         {!isNote && (outboundOptions?.optedOut || outboundOptions?.mode === 'official') ? (

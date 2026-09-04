@@ -26,9 +26,9 @@ import {
 
 // Custom SVGs for Athenix Labs branding
 const LogoSymbol = ({ size = 42 }) => (
-  <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 10px rgba(46, 123, 255, 0.6))' }}>
+  <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 10px rgba(255, 106, 0, 0.6))' }}>
     <path d="M48 12L15 85H27L38 58H62L73 85H85L52 12H48ZM50 25.5L59.5 49H40.5L50 25.5Z" fill="url(#goldGradient)" />
-    <path d="M50 39L43 49L50 59L57 49L50 39Z" fill="url(#crystalGradient)" style={{ filter: 'drop-shadow(0 0 6px #2E7BFF)' }} />
+    <path d="M50 39L43 49L50 59L57 49L50 39Z" fill="url(#crystalGradient)" style={{ filter: 'drop-shadow(0 0 6px #FF6A00)' }} />
     <path d="M30 65C45 59 55 59 70 65" stroke="url(#goldGradient)" strokeWidth="3" strokeLinecap="round" />
     <defs>
       <linearGradient id="goldGradient" x1="15" y1="12" x2="85" y2="85" gradientUnits="userSpaceOnUse">
@@ -37,9 +37,9 @@ const LogoSymbol = ({ size = 42 }) => (
         <stop offset="100%" stopColor="#9A7B1C" />
       </linearGradient>
       <linearGradient id="crystalGradient" x1="43" y1="39" x2="57" y2="59" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stopColor="#5DA0FF" />
-        <stop offset="50%" stopColor="#2E7BFF" />
-        <stop offset="100%" stopColor="#0B3C95" />
+        <stop offset="0%" stopColor="#FF9A52" />
+        <stop offset="50%" stopColor="#FF6A00" />
+        <stop offset="100%" stopColor="#A63D00" />
       </linearGradient>
     </defs>
   </svg>
@@ -51,7 +51,7 @@ const HelmetIcon = () => (
     <path d="M26 48C26 34 36 30 50 30C64 30 74 34 74 48V63C74 68 70 73 66 75L50 65L34 75C30 73 26 68 26 63V48Z" fill="url(#goldGradientIcon)" stroke="#D4AF37" strokeWidth="1" />
     <path d="M46 48H54V63C54 65 52 67 50 67C48 67 46 65 46 63V48Z" fill="#0D1B2A" />
     <path d="M36 48H64V53H36V48Z" fill="#0D1B2A" />
-    <path d="M50 37L47 42L50 47L53 42L50 37Z" fill="#2E7BFF" style={{ filter: 'drop-shadow(0 0 4px #2E7BFF)' }} />
+    <path d="M50 37L47 42L50 47L53 42L50 37Z" fill="#FF6A00" style={{ filter: 'drop-shadow(0 0 4px #FF6A00)' }} />
     <defs>
       <linearGradient id="goldGradientIcon" x1="22" y1="6" x2="78" y2="75" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#F2D06B" />
@@ -66,8 +66,8 @@ const OwlIcon = () => (
     <path d="M50 15C35 15 25 25 25 45C25 65 35 83 50 83C65 83 75 65 75 45C75 25 65 15 50 15Z" stroke="#D4AF37" strokeWidth="2.5" fill="#0D1B2A" />
     <circle cx="40" cy="38" r="11" stroke="#D4AF37" strokeWidth="2" fill="#0A0A0A" />
     <circle cx="60" cy="38" r="11" stroke="#D4AF37" strokeWidth="2" fill="#0A0A0A" />
-    <circle cx="40" cy="38" r="4.5" fill="#2E7BFF" style={{ filter: 'drop-shadow(0 0 5px #2E7BFF)' }} />
-    <circle cx="60" cy="38" r="4.5" fill="#2E7BFF" style={{ filter: 'drop-shadow(0 0 5px #2E7BFF)' }} />
+    <circle cx="40" cy="38" r="4.5" fill="#FF6A00" style={{ filter: 'drop-shadow(0 0 5px #FF6A00)' }} />
+    <circle cx="60" cy="38" r="4.5" fill="#FF6A00" style={{ filter: 'drop-shadow(0 0 5px #FF6A00)' }} />
     <path d="M50 43L46 49H54L50 43Z" fill="#D4AF37" />
     <path d="M38 58C45 61 55 61 62 58" stroke="#D4AF37" strokeWidth="2" strokeLinecap="round" />
     <path d="M41 64C47 66 53 66 59 64" stroke="#D4AF37" strokeWidth="1.5" strokeLinecap="round" />
@@ -76,31 +76,31 @@ const OwlIcon = () => (
 );
 
 const CrystalIcon = () => (
-  <svg aria-hidden="true" focusable="false" width="50" height="50" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 10px rgba(46, 123, 255, 0.6))' }}>
+  <svg aria-hidden="true" focusable="false" width="50" height="50" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 10px rgba(255, 106, 0, 0.6))' }}>
     <path d="M50 8L82 40L50 92L18 40L50 8Z" stroke="#D4AF37" strokeWidth="2.5" fill="url(#crystalGradIcon)" />
     <path d="M50 8V92" stroke="rgba(212, 175, 55, 0.4)" strokeWidth="1.5" />
     <path d="M18 40H82" stroke="rgba(212, 175, 55, 0.4)" strokeWidth="1.5" />
-    <path d="M50 8L34 40L50 92L66 40L50 8Z" stroke="rgba(212, 175, 55, 0.5)" strokeWidth="1.5" fill="rgba(46, 123, 255, 0.1)" />
+    <path d="M50 8L34 40L50 92L66 40L50 8Z" stroke="rgba(212, 175, 55, 0.5)" strokeWidth="1.5" fill="rgba(255, 106, 0, 0.1)" />
     <defs>
       <linearGradient id="crystalGradIcon" x1="18" y1="8" x2="82" y2="92" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stopColor="#5DA0FF" />
-        <stop offset="50%" stopColor="#2E7BFF" />
-        <stop offset="100%" stopColor="#0B3C95" />
+        <stop offset="0%" stopColor="#FF9A52" />
+        <stop offset="50%" stopColor="#FF6A00" />
+        <stop offset="100%" stopColor="#A63D00" />
       </linearGradient>
     </defs>
   </svg>
 );
 
 const OrbitIcon = () => (
-  <svg aria-hidden="true" focusable="false" width="50" height="50" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 8px rgba(46, 123, 255, 0.5))' }}>
-    <circle cx="50" cy="50" r="11" fill="#2E7BFF" style={{ filter: 'drop-shadow(0 0 8px #2E7BFF)' }} />
+  <svg aria-hidden="true" focusable="false" width="50" height="50" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 8px rgba(255, 106, 0, 0.5))' }}>
+    <circle cx="50" cy="50" r="11" fill="#FF6A00" style={{ filter: 'drop-shadow(0 0 8px #FF6A00)' }} />
     <circle cx="50" cy="50" r="11" stroke="#D4AF37" strokeWidth="1.5" />
     <ellipse cx="50" cy="50" rx="38" ry="13" stroke="#D4AF37" strokeWidth="1.8" style={{ transform: 'rotate(30deg)', transformOrigin: '50px 50px' }} />
-    <circle cx="20" cy="33" r="4.5" fill="#2E7BFF" />
+    <circle cx="20" cy="33" r="4.5" fill="#FF6A00" />
     <ellipse cx="50" cy="50" rx="38" ry="13" stroke="#D4AF37" strokeWidth="1.8" style={{ transform: 'rotate(-30deg)', transformOrigin: '50px 50px' }} />
     <circle cx="80" cy="33" r="4.5" fill="#D4AF37" />
-    <ellipse cx="50" cy="50" rx="38" ry="13" stroke="#2E7BFF" strokeWidth="1.5" style={{ transform: 'rotate(90deg)', transformOrigin: '50px 50px' }} />
-    <circle cx="50" cy="12" r="4.5" fill="#2E7BFF" />
+    <ellipse cx="50" cy="50" rx="38" ry="13" stroke="#FF6A00" strokeWidth="1.5" style={{ transform: 'rotate(90deg)', transformOrigin: '50px 50px' }} />
+    <circle cx="50" cy="12" r="4.5" fill="#FF6A00" />
   </svg>
 );
 
@@ -194,7 +194,7 @@ export default function LandingPage() {
         }
         
         .glow-hover:hover {
-          box-shadow: 0 0 25px rgba(46, 123, 255, 0.45);
+          box-shadow: 0 0 25px rgba(255, 106, 0, 0.45);
           transform: translateY(-2px);
         }
         
@@ -360,7 +360,7 @@ export default function LandingPage() {
         <div className="hero-grid" style={s.heroGrid}>
           <div className="hero-text-align" style={s.heroTextSide}>
             <div style={s.badge}>
-              <Sparkles size={14} color="#2E7BFF" style={{ marginRight: '8px' }} />
+              <Sparkles size={14} color="#FF6A00" style={{ marginRight: '8px' }} />
               <span>INTELIGÊNCIA • ESTRATÉGIA • INOVAÇÃO</span>
             </div>
             
@@ -463,7 +463,7 @@ export default function LandingPage() {
                     {(demoStep >= 1) && (
                       <div style={{ ...s.msgContainerLeft, animation: 'fadeIn 0.5s ease-out' }}>
                         <div style={s.msgAi}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#2E7BFF', fontWeight: 800, marginBottom: '6px', fontSize: '0.8rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#FF6A00', fontWeight: 800, marginBottom: '6px', fontSize: '0.8rem' }}>
                             <Bot size={14} />
                             <span>ATHENIX AI (GEMINI)</span>
                           </div>
@@ -570,7 +570,7 @@ export default function LandingPage() {
               <CrystalIcon />
             </div>
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#2E7BFF', letterSpacing: '0.15em' }}>MÓDULO GEMINI ACTIVATED</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#FF6A00', letterSpacing: '0.15em' }}>MÓDULO GEMINI ACTIVATED</span>
               <h3 style={{ fontSize: '1.5rem', marginTop: '0.5rem', color: '#D4AF37', fontFamily: "'Cinzel', serif" }}>Athenix Cognitive AI</h3>
             </div>
           </div>
@@ -668,10 +668,10 @@ export default function LandingPage() {
 
             <div style={{ ...s.roiCardResult, borderLeft: '1px solid rgba(212,175,55,0.15)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.5rem' }}>
-                <DollarSign size={24} color="#2E7BFF" />
+                <DollarSign size={24} color="#FF6A00" />
                 <span style={{ fontWeight: 800, fontSize: '0.9rem', letterSpacing: '0.05em', color: '#A0A0A0' }}>ECONOMIA ESTIMADA</span>
               </div>
-              <span style={{ ...s.roiOutputVal, color: '#2E7BFF' }}>R$ {estimatedSavings}</span>
+              <span style={{ ...s.roiOutputVal, color: '#FF6A00' }}>R$ {estimatedSavings}</span>
               <p style={{ fontSize: '0.85rem', color: '#A0A0A0', marginTop: '0.5rem' }}>Redução de custos com base em eficiência operacional.</p>
             </div>
 
@@ -1034,7 +1034,7 @@ const s = {
     left: '70%',
     width: '600px',
     height: '600px',
-    background: 'radial-gradient(circle, rgba(46, 123, 255, 0.08) 0%, rgba(0,0,0,0) 70%)',
+    background: 'radial-gradient(circle, rgba(255, 106, 0, 0.08) 0%, rgba(0,0,0,0) 70%)',
     borderRadius: '50%',
     pointerEvents: 'none',
     zIndex: 0
@@ -1057,13 +1057,13 @@ const s = {
   badge: {
     display: 'inline-flex',
     alignItems: 'center',
-    background: 'rgba(46, 123, 255, 0.12)',
-    border: '1px solid rgba(46, 123, 255, 0.25)',
+    background: 'rgba(255, 106, 0, 0.12)',
+    border: '1px solid rgba(255, 106, 0, 0.25)',
     borderRadius: '999px',
     padding: '6px 16px',
     fontSize: '0.75rem',
     fontWeight: 800,
-    color: '#2E7BFF',
+    color: '#FF6A00',
     width: 'fit-content',
     marginBottom: '2rem',
     letterSpacing: '0.06em'
@@ -1097,7 +1097,7 @@ const s = {
     flexWrap: 'wrap'
   },
   heroPrimaryBtn: {
-    background: 'linear-gradient(135deg, #2E7BFF, #0B3C95)',
+    background: 'linear-gradient(135deg, #FF6A00, #A63D00)',
     color: '#FFF',
     border: 'none',
     padding: '1.1rem 2.2rem',
@@ -1190,9 +1190,9 @@ const s = {
   },
   crmHeaderBadge: {
     fontSize: '0.7rem',
-    background: 'rgba(46, 123, 255, 0.15)',
-    border: '1px solid rgba(46, 123, 255, 0.3)',
-    color: '#2E7BFF',
+    background: 'rgba(255, 106, 0, 0.15)',
+    border: '1px solid rgba(255, 106, 0, 0.3)',
+    color: '#FF6A00',
     padding: '4px 10px',
     borderRadius: '6px',
     fontWeight: 700
@@ -1290,13 +1290,13 @@ const s = {
   },
   msgAi: {
     background: '#0A1B2F',
-    border: '1px solid rgba(46, 123, 255, 0.35)',
+    border: '1px solid rgba(255, 106, 0, 0.35)',
     color: '#FFF',
     padding: '12px 14px',
     borderRadius: '14px',
     fontSize: '0.8rem',
     lineHeight: 1.45,
-    boxShadow: '0 0 15px rgba(46, 123, 255, 0.1)'
+    boxShadow: '0 0 15px rgba(255, 106, 0, 0.1)'
   },
   msgContainerRight: {
     alignSelf: 'flex-end',
@@ -1397,7 +1397,7 @@ const s = {
   sectionDivider: {
     width: '60px',
     height: '3px',
-    background: 'linear-gradient(to right, #D4AF37, #2E7BFF)',
+    background: 'linear-gradient(to right, #D4AF37, #FF6A00)',
     margin: '1.5rem 0'
   },
   sectionSubtitle: {
@@ -1475,13 +1475,13 @@ const s = {
     left: '20%',
     width: '400px',
     height: '400px',
-    background: 'radial-gradient(circle, rgba(46, 123, 255, 0.15) 0%, rgba(0,0,0,0) 75%)',
+    background: 'radial-gradient(circle, rgba(255, 106, 0, 0.15) 0%, rgba(0,0,0,0) 75%)',
     pointerEvents: 'none',
     zIndex: 0
   },
   aiVisualBlock: {
     background: 'rgba(13, 27, 42, 0.4)',
-    border: '1px solid rgba(46, 123, 255, 0.25)',
+    border: '1px solid rgba(255, 106, 0, 0.25)',
     borderRadius: '30px',
     padding: '4rem 3rem',
     display: 'flex',
@@ -1529,9 +1529,9 @@ const s = {
     width: '10px',
     height: '10px',
     borderRadius: '50%',
-    background: '#2E7BFF',
+    background: '#FF6A00',
     marginTop: '6px',
-    boxShadow: '0 0 8px #2E7BFF'
+    boxShadow: '0 0 8px #FF6A00'
   },
   aiFeatureName: {
     fontSize: '1.1rem',
@@ -1700,7 +1700,7 @@ const s = {
     gap: '10px'
   },
   planCheck: {
-    color: '#2E7BFF',
+    color: '#FF6A00',
     fontWeight: 900
   },
   planBtn: {

@@ -1,5 +1,6 @@
 param(
-  [int]$Port = 3002
+  [int]$Port = 3002,
+  [int]$FrontendPort = 5174
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,7 @@ $databaseUrl = $databaseUrl -replace 'localhost', '127.0.0.1'
 $env:DATABASE_URL = $databaseUrl
 $env:JWT_SECRET = 'local-demo-only-secret-change-me'
 $env:PORT = [string]$Port
-$env:FRONTEND_URL = 'http://localhost:5174'
+$env:FRONTEND_URL = "http://localhost:$FrontendPort"
 $env:PUBLIC_URL = "http://localhost:$Port"
 $env:DEFAULT_EVOLUTION_URL = ''
 $env:DEFAULT_EVOLUTION_KEY = ''
