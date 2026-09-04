@@ -5,9 +5,10 @@ const upload = require('../middlewares/upload');
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
 const auditEvent = require('../middlewares/auditEvent');
+const { firebirdPendingRateLimit } = require('../middlewares/firebirdPendingRateLimit');
 
 router.post('/push', pushBatch);
-router.get('/pending-commands', getPendingCommands);
+router.get('/pending-commands', firebirdPendingRateLimit, getPendingCommands);
 router.post('/pending-commands/:id/callback', commandCallback);
 router.post('/ping', require('../controllers/firebirdSyncController').agentPing);
 

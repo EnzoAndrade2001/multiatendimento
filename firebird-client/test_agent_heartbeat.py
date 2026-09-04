@@ -17,6 +17,7 @@ from main import (
     AppConfig,
     CRMClient,
     StateStore,
+    ensure_agent_install_id,
     normalize_crm_base_url,
 )
 
@@ -29,9 +30,20 @@ class RecordingSession:
         self.calls.append((url, kwargs))
 
 
+class AuthFailureSession:
+    def get(self, url, **kwargs):
+        response = type(
+            "Response",
+            (),
+            {"status_code": 401, "headers": {"Retry-After": "17"}, "text": "token inválido"},
+        )()
+        error = agent_main.requests.HTTPError("401 Client Error", response=response)
+        raise error
+
+
 class AgentHeartbeatTest(unittest.TestCase):
     def test_default_version_matches_current_release(self):
-        self.assertEqual(DEFAULT_AGENT_VERSION, "1.1.2")
+        self.assertEqual(DEFAULT_AGENT_VERSION, "1.1.3")
 
     def test_crm_base_url_is_normalized_for_old_env_files(self):
         with patch.dict(
@@ -88,6 +100,35 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertIn(payload["health"]["runtime"], {"python", "executable"})
         self.assertTrue(payload["health"]["reportedAt"])
 
+    def test_client_identifies_installation_in_request_headers(self):
+        config = AppConfig(
+            agent_version="1.1.3",
+            agent_protocol_version="1",
+            agent_install_id="install-123",
+            crm_base_url="https://crm.example.test",
+            crm_sync_token="sync-token",
+        )
+        client = CRMClient(config)
+
+        self.assertEqual(client.session.headers["x-ilux-agent-version"], "1.1.3")
+        self.assertEqual(client.session.headers["x-ilux-agent-protocol"], "1")
+        self.assertEqual(client.session.headers["x-ilux-agent-id"], "install-123")
+
+    def test_pending_commands_returns_auth_failure_for_listener_backoff(self):
+        config = AppConfig(
+            crm_base_url="https://crm.example.test",
+            crm_sync_token="sync-token",
+        )
+        client = CRMClient(config)
+        client.session = AuthFailureSession()
+
+        result = client.process_pending_commands(None, None, wait_seconds=25)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["auth_error"])
+        self.assertEqual(result["status_code"], 401)
+        self.assertEqual(result["retry_after"], 17)
+
 
 class StateStoreAtomicSaveTest(unittest.TestCase):
     def test_save_replaces_file_and_leaves_no_temporary_file(self):
@@ -114,6 +155,19 @@ class StateStoreAtomicSaveTest(unittest.TestCase):
 
             self.assertEqual(StateStore(state_path).get_cursor("contacts"), 9)
             self.assertEqual(list(state_path.parent.glob(".state.json.*.tmp")), [])
+
+    def test_install_id_is_stable_and_persisted(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            state_path = Path(temporary_directory) / "state.json"
+            config = AppConfig()
+            first = StateStore(state_path)
+            install_id = ensure_agent_install_id(config, first)
+
+            second = StateStore(state_path)
+            second_id = ensure_agent_install_id(AppConfig(), second)
+
+            self.assertEqual(len(install_id), 32)
+            self.assertEqual(install_id, second_id)
 
 
 if __name__ == "__main__":

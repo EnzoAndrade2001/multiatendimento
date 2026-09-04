@@ -12,6 +12,7 @@ from decimal import Decimal
 import sys
 import time
 import threading
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -45,7 +46,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.2"
+DEFAULT_AGENT_VERSION = "1.1.3"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -62,6 +63,14 @@ AGENT_CAPABILITIES = (
     "commands.fetch-billing-document",
     "commands.fetch-company-profile",
 )
+
+# A command listener normally waits up to 25 seconds for work. Authentication
+# failures return immediately, though, so an old agent could spin thousands of
+# requests per minute. These bounds keep the client useful after a transient
+# outage while making a stale token self-throttling.
+AUTH_FAILURE_STATUS_CODES = frozenset({400, 401, 403, 409, 422})
+COMMAND_RETRY_BACKOFF_SECONDS = (5, 15, 30, 60, 300)
+COMMAND_AUTH_PAUSE_SECONDS = 300
 
 # A abertura imediata e a sincronizacao incremental usam threads diferentes.
 # Sem uma trava compartilhada, a sincronizacao pode importar a O.S. recem-criada
@@ -242,6 +251,9 @@ def safe_pdf_filename_part(value: Any, fallback: str = "CLIENTE") -> str:
 class AppConfig:
     agent_version: str = DEFAULT_AGENT_VERSION
     agent_protocol_version: str = DEFAULT_AGENT_PROTOCOL_VERSION
+    # Identificador persistente da instalação. Não é um segredo; serve apenas
+    # para o CRM distinguir duas cópias do agente que usam o mesmo token.
+    agent_install_id: str = ""
     firebird_host: str = "127.0.0.1"
     firebird_port: int = 3050
     firebird_database: str = ""
@@ -342,6 +354,7 @@ class AppConfig:
                 os.getenv("AGENT_PROTOCOL_VERSION", DEFAULT_AGENT_PROTOCOL_VERSION).strip()
                 or DEFAULT_AGENT_PROTOCOL_VERSION
             ),
+            agent_install_id=os.getenv("AGENT_INSTALL_ID", "").strip(),
             firebird_host=os.getenv("FIREBIRD_HOST", "127.0.0.1"),
             firebird_port=env_int("FIREBIRD_PORT", 3050),
             firebird_database=os.getenv("FIREBIRD_DATABASE", ""),
@@ -432,6 +445,17 @@ class StateStore:
 
     def set_last_sync_at(self, value: str | None) -> None:
         self.data["last_sync_at"] = value
+
+
+def ensure_agent_install_id(config: AppConfig, state: StateStore) -> str:
+    """Return a stable, non-secret identifier for this agent installation."""
+    existing = str(state.data.get("agent_install_id") or "").strip()
+    install_id = existing or config.agent_install_id or uuid.uuid4().hex
+    if existing != install_id:
+        state.data["agent_install_id"] = install_id
+        state.save()
+    config.agent_install_id = install_id
+    return install_id
 
 
 class CommandResultStore:
@@ -586,8 +610,12 @@ class CRMClient:
             {
                 "Content-Type": "application/json",
                 "x-firebird-token": config.crm_sync_token,
+                "x-ilux-agent-version": config.agent_version,
+                "x-ilux-agent-protocol": config.agent_protocol_version,
             }
         )
+        if config.agent_install_id:
+            self.session.headers.update({"x-ilux-agent-id": config.agent_install_id})
 
     @staticmethod
     def _raise_for_status(response: requests.Response) -> None:
@@ -624,7 +652,7 @@ class CRMClient:
         result_store: CommandResultStore,
         wait_seconds: int = 0,
         billing_trigger_event: threading.Event | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         url = f"{self.config.crm_base_url}/api/integrations/firebird/pending-commands"
         try:
             response = self.session.get(
@@ -638,7 +666,7 @@ class CRMClient:
             self._raise_for_status(response)
             commands = response.json()
             if not commands:
-                return
+                return {"ok": True, "commands": 0}
 
             logging.info("Recebidos %s comandos pendentes do CRM", len(commands))
             for cmd in commands:
@@ -719,8 +747,27 @@ class CRMClient:
                 except Exception as e:
                     logging.exception("Erro ao processar comando %s:", cmd_id)
                     self.report_command_result(cmd_id, success=False, error=str(e))
+            return {"ok": True, "commands": len(commands)}
         except Exception as e:
-            logging.error("Falha ao buscar ou processar comandos do CRM: %s", e)
+            response = getattr(e, "response", None)
+            status_code = getattr(response, "status_code", None)
+            retry_after = None
+            try:
+                retry_after = int(response.headers.get("Retry-After")) if response is not None else None
+            except (TypeError, ValueError, AttributeError):
+                retry_after = None
+            auth_error = status_code in AUTH_FAILURE_STATUS_CODES
+            logging.error(
+                "Falha ao buscar ou processar comandos do CRM: %s%s",
+                e,
+                " (credencial rejeitada; listener em pausa)" if auth_error else "",
+            )
+            return {
+                "ok": False,
+                "status_code": status_code,
+                "auth_error": auth_error,
+                "retry_after": retry_after,
+            }
 
     def report_command_result(self, command_id: str, success: bool, result: dict | None = None, error: str | None = None) -> None:
         url = f"{self.config.crm_base_url}/api/integrations/firebird/pending-commands/{command_id}/callback"
@@ -765,6 +812,7 @@ class CRMClient:
                         "reportedAt": datetime.now().isoformat(timespec="seconds"),
                         "processId": os.getpid(),
                         "runtime": "executable" if getattr(sys, "frozen", False) else "python",
+                        "installId": self.config.agent_install_id or None,
                     },
                 },
                 timeout=10
@@ -3066,18 +3114,62 @@ def run_command_listener(
     crm = CRMClient(config)
     result_store = CommandResultStore(ROOT / "command-results.json")
     logging.info("Listener imediato de comandos iniciado.")
+    failure_streak = 0
+    auth_failure_streak = 0
 
     while stop_event is None or not stop_event.is_set():
         try:
-            crm.process_pending_commands(
+            result = crm.process_pending_commands(
                 repo,
                 result_store,
                 wait_seconds=25,
                 billing_trigger_event=billing_trigger_event,
             )
+            if result.get("ok", True):
+                failure_streak = 0
+                auth_failure_streak = 0
+                continue
+
+            failure_streak += 1
+            if result.get("auth_error"):
+                auth_failure_streak += 1
+                delay = result.get("retry_after") or min(
+                    COMMAND_AUTH_PAUSE_SECONDS,
+                    max(30, 30 * (2 ** min(auth_failure_streak - 1, 3))),
+                )
+                if auth_failure_streak >= 3:
+                    logging.error(
+                        "Listener de comandos pausado por %ss: token do CRM rejeitado. "
+                        "Gere um novo token, salve as configurações e reinicie o agente.",
+                        delay,
+                    )
+                else:
+                    logging.warning(
+                        "Token do CRM rejeitado; nova tentativa em %ss. "
+                        "Confira CRM_SYNC_TOKEN/CRM_TENANT_SLUG.",
+                        delay,
+                    )
+            else:
+                delay = result.get("retry_after") or COMMAND_RETRY_BACKOFF_SECONDS[
+                    min(failure_streak - 1, len(COMMAND_RETRY_BACKOFF_SECONDS) - 1)
+                ]
+                logging.warning(
+                    "Listener de comandos aguardando %ss antes de tentar novamente.",
+                    delay,
+                )
+
+            for _ in range(int(max(1, delay))):
+                if stop_event is not None and stop_event.is_set():
+                    return
+                time.sleep(1)
         except Exception as exc:
             logging.exception("Falha no listener de comandos: %s", exc)
-            time.sleep(2)
+            failure_streak += 1
+            delay = COMMAND_RETRY_BACKOFF_SECONDS[
+                min(failure_streak - 1, len(COMMAND_RETRY_BACKOFF_SECONDS) - 1)
+            ]
+            logging.warning("Listener de comandos aguardando %ss antes de tentar novamente.", delay)
+            time.sleep(delay)
 
 
 def _resolve_billing_auto_send_since(config: AppConfig) -> str:
@@ -3384,6 +3476,7 @@ def main() -> None:
     validate_config(config)
 
     state = StateStore(config.state_file)
+    ensure_agent_install_id(config, state)
 
     if args.once:
         run_cycle(config, state, full=args.full)

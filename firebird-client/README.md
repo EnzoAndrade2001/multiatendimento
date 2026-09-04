@@ -45,13 +45,16 @@ Depois preencha o arquivo `.env` com:
 
 O agente também informa sua identificação em cada heartbeat enviado ao CRM:
 
-- `AGENT_VERSION`: versão do executável instalado (release atual: `1.1.2`)
+- `AGENT_VERSION`: versão do executável instalado (release atual: `1.1.3`)
 - `AGENT_PROTOCOL_VERSION`: versão do contrato de comunicação com o backend
+- `AGENT_INSTALL_ID`: identificador persistente da instalação (gerado
+  automaticamente quando vazio, usado apenas para diagnóstico)
 
 Além do `tenantSlug` usado pelas versões atuais do backend, o heartbeat inclui
-versão, protocolo, capacidades suportadas e saúde básica do processo. Os campos
-são adicionais e mantêm compatibilidade com backends que ainda leem somente o
-`tenantSlug`. Atualize `AGENT_VERSION` junto com a publicação de um novo EXE;
+versão, protocolo, identificador da instalação, capacidades suportadas e saúde
+básica do processo. Os campos são adicionais e mantêm compatibilidade com
+backends que ainda leem somente o `tenantSlug`. Atualize `AGENT_VERSION` junto
+com a publicação de um novo EXE;
 altere `AGENT_PROTOCOL_VERSION` apenas quando houver mudança de compatibilidade.
 
 As pastas financeiras podem ser escolhidas diretamente na aba **Documentos financeiros** da interface. Use caminhos UNC (`\\servidor\pasta`) para compartilhamentos de rede. A primeira indexação lê todos os PDFs em segundo plano; as seguintes processam somente arquivos novos ou alterados.

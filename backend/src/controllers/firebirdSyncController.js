@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../lib/prisma');
+const { requestIdentity } = require('../middlewares/firebirdPendingRateLimit');
 const evolutionService = require('../services/evolutionService');
 const { sendServiceOrderManagerCopy } = require('../services/serviceOrderManagerCopyService');
 const { mapEquipmentType } = require('../utils/equipmentMapper');
@@ -18,6 +19,46 @@ const normalizeDate = parseFirebirdDate;
 const RECEIVABLE_SNAPSHOT_ENTITY = 'receivablesSnapshot';
 const EQUIPMENT_SNAPSHOT_ENTITY = 'equipmentsSnapshot';
 const SERVICE_ORDER_OPEN_SNAPSHOT_ENTITY = 'serviceOrdersOpenSnapshot';
+
+// Authentication failures are actionable, but logging every retry from a
+// broken agent can consume more CPU/IO than the request itself. Keep one
+// diagnostic per key/message per minute and include enough metadata to find
+// the offending installation without ever logging the raw credential.
+const pendingCommandErrorLog = new Map();
+const PENDING_COMMAND_ERROR_LOG_WINDOW_MS = 60 * 1000;
+
+function logPendingCommandError(req, err) {
+  const identity = requestIdentity(req);
+  const message = String(err?.message || err || 'erro desconhecido');
+  const key = `${identity.key}:${message}`;
+  const now = Date.now();
+  const previous = pendingCommandErrorLog.get(key);
+
+  if (previous && now - previous.lastLoggedAt < PENDING_COMMAND_ERROR_LOG_WINDOW_MS) {
+    previous.count += 1;
+    return;
+  }
+
+  if (pendingCommandErrorLog.size > 1000) {
+    for (const [entryKey, entry] of pendingCommandErrorLog) {
+      if (now - entry.lastLoggedAt >= PENDING_COMMAND_ERROR_LOG_WINDOW_MS) {
+        pendingCommandErrorLog.delete(entryKey);
+      }
+    }
+  }
+
+  const repeated = previous?.count || 0;
+  pendingCommandErrorLog.set(key, { lastLoggedAt: now, count: 0 });
+  console.error('[pending-commands] erro', {
+    message,
+    repeatedSinceLastLog: repeated,
+    tokenFingerprint: identity.tokenFingerprint,
+    tenantSlug: identity.tenantSlug,
+    ip: identity.ip,
+    agentId: identity.agentId,
+    agentVersion: identity.agentVersion,
+  });
+}
 
 function pick(...values) {
   for (const value of values) {
@@ -1164,7 +1205,7 @@ async function getPendingCommands(req, res) {
 
     res.json(commands);
   } catch (err) {
-    console.error('[pending-commands] erro:', err.message);
+    logPendingCommandError(req, err);
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 }
