@@ -413,10 +413,85 @@ body {
   background: transparent;
 }
 
+body.light-theme .app-layout-root {
+  background:
+    radial-gradient(circle at 50% -18%, rgba(148, 163, 184, 0.13), transparent 42%),
+    var(--bg-base) !important;
+}
+
+body.light-theme .app-global-nav {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.98)) !important;
+  border-bottom-color: rgba(15, 23, 42, 0.1) !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+body.light-theme .app-global-nav .header-action-button {
+  background: rgba(15, 23, 42, 0.025) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+body.light-theme .app-global-nav .header-action-button:hover,
+body.light-theme .app-global-nav .primary-nav-link:hover,
+body.light-theme .app-global-nav .primary-nav-link:focus-visible {
+  background: rgba(15, 23, 42, 0.055) !important;
+}
+
 @media (max-width: 768px) {
   .app-global-nav {
     height: 62px !important;
     min-height: 62px !important;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1450px) {
+  .app-global-nav {
+    gap: .65rem !important;
+    padding-left: .9rem !important;
+    padding-right: .9rem !important;
+  }
+
+  .app-global-nav .app-nav-center,
+  .app-global-nav .desktop-nav-scroll {
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .app-global-nav .desktop-nav-scroll {
+    gap: .15rem !important;
+  }
+
+  .app-global-nav .primary-nav-link {
+    padding-left: .52rem !important;
+    padding-right: .52rem !important;
+    font-size: .78rem !important;
+  }
+
+  .app-global-nav .app-nav-actions {
+    gap: .4rem !important;
+  }
+
+  .app-global-nav button[aria-label="Abrir busca de ações"] > span,
+  .app-global-nav button[aria-label="Abrir busca de ações"] kbd,
+  .app-global-nav .header-chat-label {
+    display: none !important;
+  }
+
+  .app-global-nav button[aria-label="Abrir busca de ações"] {
+    width: 40px;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .app-global-nav button[title^="Usuário conectado"] {
+    max-width: 170px;
+    overflow: hidden;
+  }
+
+  .app-global-nav button[title^="Usuário conectado"] .header-user-name {
+    max-width: 105px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

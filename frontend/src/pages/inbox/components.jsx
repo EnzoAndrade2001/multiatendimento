@@ -2301,7 +2301,7 @@ export const MessageComposer = React.memo(function MessageComposer({
     const input = textInputRef.current;
     if (!input) return;
 
-    const minHeight = isMobile ? 46 : 52;
+    const minHeight = isMobile ? 46 : 44;
     const maxHeight = isMobile ? 180 : 240;
 
     input.style.height = 'auto';
@@ -2620,7 +2620,7 @@ export const MessageComposer = React.memo(function MessageComposer({
                 <span style={styles.sendingStatusHint}>Você pode continuar digitando.</span>
               </div>
             ) : null}
-            <div style={{ ...styles.composerShell, gap: isMobile ? '0.55rem' : styles.composerShell.gap, padding: isMobile ? '0.55rem' : styles.composerShell.padding }}>
+            <div className="inbox-composer-shell" style={{ ...styles.composerShell, gap: isMobile ? '0.55rem' : styles.composerShell.gap, padding: isMobile ? '0.55rem' : styles.composerShell.padding }}>
               {!isNote && (
                 <button type="button" style={{ ...styles.attachBtn, width: isMobile ? '42px' : styles.attachBtn.width, height: isMobile ? '42px' : styles.attachBtn.height }} onClick={() => fileInputRef.current?.click()} title="Adicionar anexo" aria-label="Adicionar anexo">
                   <Paperclip size={18} strokeWidth={2.4} />
@@ -2659,7 +2659,7 @@ export const MessageComposer = React.memo(function MessageComposer({
                   ref={textInputRef}
                   style={{
                     ...styles.textInput,
-                    minHeight: isMobile ? '46px' : '52px',
+                    minHeight: isMobile ? '46px' : '44px',
                     maxHeight: isMobile ? '180px' : '240px',
                     fontSize: isMobile ? '0.88rem' : '0.97rem',
                   }}

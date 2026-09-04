@@ -422,7 +422,7 @@ export default function Layout() {
         </div>
 
         {!isMobile ? (
-          <div style={styles.centerNav}>
+          <div style={styles.centerNav} className="app-nav-center">
             <div style={{ ...styles.links }} className="desktop-nav-scroll" aria-label="Navegação principal">
               {primaryDesktopLinks.map((link) => (
                 <NavLink className="primary-nav-link" key={link.to} to={link.to} end={link.to === '/dashboard'} style={({ isActive }) => ({ ...styles.primaryLink, ...(isActive ? styles.linkActive : {}) })}>
@@ -472,7 +472,7 @@ export default function Layout() {
           </div>
         ) : null}
 
-        <div style={styles.rightActions}>
+        <div style={styles.rightActions} className="app-nav-actions">
           {!isMobile ? (
             <button type="button" className="header-action-button" onClick={() => setCommandOpen(true)} style={styles.commandButton} aria-label="Abrir busca de ações">
               <Search size={17} />
@@ -506,7 +506,7 @@ export default function Layout() {
             <div ref={userMenuRef} style={styles.userMenuWrap}>
               <button type="button" className="header-action-button" style={{ ...styles.userIdentity, ...(isMobile ? styles.userIdentityMobile : {}) }} onClick={() => setUserMenuOpen((open) => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" title={`Usuário conectado: ${currentUser.name}`}>
                 <UserAvatar user={currentUser} size={30} style={styles.userAvatar} />
-                {!isMobile ? <span style={styles.userName}>{currentUser.name}</span> : null}
+                {!isMobile ? <span className="header-user-name" style={styles.userName}>{currentUser.name}</span> : null}
                 {!isMobile ? <ChevronDown size={14} /> : null}
               </button>
               {userMenuOpen ? <div style={styles.userMenu} role="menu">

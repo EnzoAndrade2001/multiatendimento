@@ -824,6 +824,12 @@ export default function Inbox() {
         .inbox-sidebar { width: clamp(282px, 19vw, 348px) !important; min-width: clamp(282px, 19vw, 348px) !important; }
         .inbox-message-lane { width: min(100%, 1240px); margin-inline: auto; }
         .inbox-contact-panel { width: clamp(330px, 22vw, 400px) !important; }
+        @media (min-width: 769px) {
+          .inbox-composer { padding: .45rem 1rem !important; gap: .4rem !important; }
+          .inbox-composer > div:first-child { margin-bottom: 0 !important; }
+          .inbox-composer-shell { padding: .4rem !important; gap: .55rem !important; }
+          .inbox-composer textarea { min-height: 44px !important; }
+        }
         .inbox-workspace[data-density="compact"] .inbox-sidebar-header { padding: .72rem .8rem .58rem !important; }
         .inbox-workspace[data-density="compact"] .inbox-sidebar-subtitle { display: none; }
         .inbox-workspace[data-density="compact"] .inbox-tabs-wrap { padding: .55rem .7rem !important; }
