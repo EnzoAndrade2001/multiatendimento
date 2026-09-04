@@ -132,6 +132,16 @@ export default function Inbox() {
   // mas não pode deixar uma janela nova sem espaço para o compositor.
   const [density, setDensity] = useState('compact');
   const [notebookListHidden, setNotebookListHidden] = useState(false);
+  // Em telas compactas, a lista pode recolher automaticamente ao abrir uma
+  // conversa. O modo fixo fica salvo por navegador para respeitar a
+  // preferência de cada atendente.
+  const [sidebarMode, setSidebarMode] = useState(() => {
+    try {
+      return localStorage.getItem('inbox-sidebar-mode') === 'fixed' ? 'fixed' : 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
   const openOsHandledRef = useRef(false);
   const isMobile = useIsMobile();
   const { instances: contextInstances } = useOutletContext() || { instances: [] };
@@ -167,8 +177,13 @@ export default function Inbox() {
   }, [density]);
 
   useEffect(() => {
-    if (viewport.width > 1199 || viewport.width <= 768) setNotebookListHidden(false);
-  }, [viewport.width]);
+    localStorage.setItem('inbox-sidebar-mode', sidebarMode);
+    if (sidebarMode === 'fixed') setNotebookListHidden(false);
+  }, [sidebarMode]);
+
+  useEffect(() => {
+    if (viewport.width > 1199 || viewport.width <= 768 || sidebarMode === 'fixed') setNotebookListHidden(false);
+  }, [viewport.width, sidebarMode]);
 
   const effectiveDensity = density === 'auto'
     ? (viewport.width < 1600 || viewport.height < 900 ? 'compact' : 'comfortable')
@@ -766,7 +781,7 @@ export default function Inbox() {
     }
     setSelectedId(id);
     if (isMobile) setView('chat');
-    if (!isMobile && viewport.width <= 1199) setNotebookListHidden(true);
+    if (!isMobile && viewport.width <= 1199 && sidebarMode === 'auto') setNotebookListHidden(true);
     
     // Zera o contador localmente para feedback imediato
     const ticket = tickets.find((item) => item.id === id);
@@ -774,7 +789,7 @@ export default function Inbox() {
     if (ticket?.isUnread) updateTicketPreferences(id, { isUnread: false }).catch(() => {});
     
     // O backend ja zera ao chamar getMessages pelo useEffect do selectedId
-  }, [selectedId, historySearch, isMobile, tickets, setTickets, viewport.width]);
+  }, [selectedId, historySearch, isMobile, tickets, setTickets, viewport.width, sidebarMode]);
 
   const handleTicketPreference = useCallback(async (ticketId, preference) => {
     const previous = tickets.find((ticket) => ticket.id === ticketId);
@@ -921,6 +936,8 @@ export default function Inbox() {
         users={users}
         density={density}
         setDensity={setDensity}
+        sidebarMode={sidebarMode}
+        setSidebarMode={setSidebarMode}
         view={view}
         lastUpdatedAt={ticketsLastUpdatedAt}
       /> : null}
@@ -1278,7 +1295,10 @@ export default function Inbox() {
 export const inboxStyles = {
   layout: { display: 'flex', height: '100%', width: '100%', background: 'var(--bg-base)', color: 'var(--text-main)', overflow: 'hidden', fontFamily: 'var(--font-main)', position: 'relative' },
   sidebar: { width: '320px', minWidth: '320px', borderRight: '1px solid var(--rail-line)', display: 'flex', flexDirection: 'column', background: 'var(--rail-bg)', color: 'var(--rail-ink)' },
-  sidebarHeader: { padding: '1.1rem 1rem 0.85rem', borderBottom: '1px solid var(--rail-line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' },
+  sidebarHeader: { padding: '1.1rem 1rem 0.85rem', borderBottom: '1px solid var(--rail-line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.65rem' },
+  sidebarHeaderActions: { display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 },
+  sidebarPinButton: { width: '34px', height: '34px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--rail-line)', color: 'var(--rail-dim)', background: 'transparent', borderRadius: 'var(--radius-sm)', cursor: 'pointer' },
+  sidebarPinButtonActive: { color: 'var(--accent)', borderColor: 'var(--accent)', background: 'var(--accent-light)' },
   sidebarEyebrow: { fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0', color: 'var(--rail-faint)', fontWeight: 500, marginTop: '0.3rem' },
   sidebarTitle: { fontSize: '1.05rem', fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--rail-ink)' },
   sidebarSubtitle: { fontSize: '0.82rem', color: 'var(--rail-dim)', marginTop: '0.25rem' },

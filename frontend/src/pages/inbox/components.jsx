@@ -1470,6 +1470,8 @@ export const TicketSidebar = React.memo(function TicketSidebar({
   lastUpdatedAt,
   density,
   setDensity,
+  sidebarMode = 'auto',
+  setSidebarMode,
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('inbox:sort') || 'recent');
@@ -1568,11 +1570,24 @@ export const TicketSidebar = React.memo(function TicketSidebar({
           <div style={styles.sidebarTitle}>Atendimentos</div>
           <div className="inbox-sidebar-eyebrow" style={styles.sidebarEyebrow}>{activeTabLabel}</div>
         </div>
-        <select style={{ ...styles.sortSelect, flex: '0 0 auto', width: 96 }} value={density} onChange={(event) => setDensity(event.target.value)} aria-label="Densidade da lista" title="Densidade visual">
+        <div style={styles.sidebarHeaderActions}>
+          <button
+            type="button"
+            className="inbox-control"
+            style={{ ...styles.sidebarPinButton, ...(sidebarMode === 'fixed' ? styles.sidebarPinButtonActive : {}) }}
+            onClick={() => setSidebarMode?.(sidebarMode === 'fixed' ? 'auto' : 'fixed')}
+            aria-pressed={sidebarMode === 'fixed'}
+            aria-label={sidebarMode === 'fixed' ? 'Desafixar lista de conversas' : 'Fixar lista de conversas'}
+            title={sidebarMode === 'fixed' ? 'Desafixar lista (voltar ao modo automático)' : 'Fixar lista nesta tela'}
+          >
+            {sidebarMode === 'fixed' ? <Pin size={14} /> : <PinOff size={14} />}
+          </button>
+          <select style={{ ...styles.sortSelect, flex: '0 0 auto', width: 96 }} value={density} onChange={(event) => setDensity(event.target.value)} aria-label="Densidade da lista" title="Densidade visual">
           <option value="auto">Auto</option>
           <option value="compact">Compacta</option>
           <option value="comfortable">Confortável</option>
-        </select>
+          </select>
+        </div>
       </div>
 
       <div className="inbox-tabs-wrap" style={styles.tabsWrap}>
