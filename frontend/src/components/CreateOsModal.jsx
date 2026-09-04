@@ -22,6 +22,12 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const [formData, setFormData] = useState({ equipmentId: '', defect: '', cdOstp: '', nmsuportet: '' });
   const [openOrders, setOpenOrders] = useState([]);
   const [checkingOpen, setCheckingOpen] = useState(false);
+  const formEditedRef = useRef(false);
+
+  function updateFormData(updater) {
+    formEditedRef.current = true;
+    setFormData(updater);
+  }
 
   const selectedEquipment = equipments.find((equipment) => equipment.id === formData.equipmentId);
 
@@ -82,6 +88,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
 
   async function loadData() {
     try {
+      formEditedRef.current = false;
       const contactId = ticket.contact?.id;
       if (!contactId) {
         toast.error('Contato não vinculado ao ticket.');
@@ -99,12 +106,6 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
       setOsTypes(resTypes.data);
       setTechnicians(resTechs.data);
       
-      // Auto-draft with AI
-      setDrafting(true);
-      const resDraft = await api.post('/os/draft', { contactId, ticketId: ticket.id });
-      
-      const { defect, equipmentId } = resDraft.data;
-      
       const foundType = resTypes.data.find(t => t.code === '01')
         || resTypes.data.find(t => t.name.toUpperCase().includes('CONTRAT'))
         || resTypes.data.find(t => t.code === '02')
@@ -113,12 +114,34 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
       const foundTech = resTechs.data.find(t => t.name.toUpperCase().includes('ROBSON'))
         || null;
 
-      setFormData({
-        defect: defect || '',
-        equipmentId: equipmentId || (resEquips.data.length === 1 ? resEquips.data[0].id : ''),
+      const defaultFormData = {
+        defect: '',
+        equipmentId: resEquips.data.length === 1 ? resEquips.data[0].id : '',
         cdOstp: foundType ? foundType.code : '',
         nmsuportet: foundTech ? foundTech.name : ''
-      });
+      };
+      setFormData(defaultFormData);
+
+      // O rascunho Ã© auxiliar: o formulÃ¡rio fica disponÃ­vel assim que os
+      // dados bÃ¡sicos chegam, sem obrigar o atendente a esperar a IA.
+      setLoading(false);
+      setDrafting(true);
+      try {
+        const resDraft = await api.post('/os/draft', { contactId, ticketId: ticket.id }, { timeout: 25_000 });
+        const { defect, equipmentId } = resDraft.data || {};
+        if (!formEditedRef.current) {
+          setFormData((current) => ({
+            ...current,
+            defect: defect || current.defect,
+            equipmentId: equipmentId || current.equipmentId,
+          }));
+        }
+      } catch (draftError) {
+        console.warn('[CreateOsModal] rascunho da IA indisponÃ­vel:', draftError?.message || draftError);
+        setError('A IA demorou para responder. O formulÃ¡rio estÃ¡ liberado para preenchimento manual.');
+      } finally {
+        setDrafting(false);
+      }
     } catch (e) {
       console.error(e);
       setError('Não foi possível carregar os dados para abrir a O.S. Feche e tente novamente.');
@@ -182,6 +205,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     saveBtn: { flex: 1, background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' },
     cancelBtn: { flex: 1, background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' },
     openWarn: { padding: '10px 12px', marginBottom: 'var(--space-4)', borderRadius: '10px', background: 'var(--warning-light, rgba(245,158,11,0.08))', border: '1px solid var(--warning-border, rgba(245,158,11,0.3))', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
+    draftNotice: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', marginBottom: 'var(--space-4)', borderRadius: '8px', background: 'var(--accent-light)', border: '1px solid var(--accent-border)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' },
     openWarnRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '5px 0', fontSize: 'var(--text-xs)', borderTop: '1px solid var(--border-color)' },
     openWarnLink: { display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 700, flexShrink: 0 }
   };
@@ -213,13 +237,19 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               <button style={s.cancelBtn} onClick={onClose}>Concluir</button>
             </div>
           </div>
-        ) : loading || drafting ? (
+        ) : loading ? (
           <div style={{ textAlign: 'center', padding: 'var(--space-10)', color: 'var(--text-muted)' }}>
             <Wand2 size={32} style={{ animation: 'ui-spin 2s linear infinite', marginBottom: 'var(--space-4)' }} />
-            <div>A IA está lendo a conversa e rascunhando a O.S...</div>
+            <div>Carregando dados para abrir a O.S...</div>
           </div>
         ) : (
           <div>
+            {drafting ? (
+              <div style={s.draftNotice} role="status">
+                <Wand2 size={14} style={{ animation: 'ui-spin 1.5s linear infinite', flexShrink: 0 }} />
+                A IA está preparando um rascunho. Você já pode revisar e preencher o formulário.
+              </div>
+            ) : null}
             <label style={s.label}>EQUIPAMENTO</label>
             <button type="button" style={s.equipmentTrigger} onClick={() => setEquipmentPickerOpen(true)}>
               <MapPin size={18} color={selectedEquipment ? 'var(--accent)' : 'var(--text-muted)'} />
@@ -243,7 +273,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               equipments={equipments}
               selectedId={formData.equipmentId}
               onClose={() => setEquipmentPickerOpen(false)}
-              onSelect={(equipment) => setFormData((current) => ({ ...current, equipmentId: equipment.id }))}
+              onSelect={(equipment) => updateFormData((current) => ({ ...current, equipmentId: equipment.id }))}
             />
 
             {openOrders.length > 0 ? (
@@ -272,7 +302,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
             <select 
               style={s.input} 
               value={formData.cdOstp} 
-              onChange={e => setFormData({...formData, cdOstp: e.target.value})}
+              onChange={e => updateFormData({...formData, cdOstp: e.target.value})}
             >
               <option value="">Selecione o tipo...</option>
               {osTypes.map(t => (
@@ -286,7 +316,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
             <select 
               style={s.input} 
               value={formData.nmsuportet} 
-              onChange={e => setFormData({...formData, nmsuportet: e.target.value})}
+              onChange={e => updateFormData({...formData, nmsuportet: e.target.value})}
             >
               <option value="">Nenhum / Aberto</option>
               {technicians.map(t => (
@@ -299,7 +329,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               style={{...s.input, minHeight: '100px', resize: 'vertical'}}
               placeholder="Descreva o defeito relatado pelo cliente..."
               value={formData.defect}
-              onChange={e => setFormData({...formData, defect: e.target.value})}
+              onChange={e => updateFormData({...formData, defect: e.target.value})}
             />
 
             {error ? (

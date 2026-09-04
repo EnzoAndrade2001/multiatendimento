@@ -20,6 +20,13 @@ const DEFAULT_MULTIMODAL_MODELS = [
   'gemini-2.5-flash',
 ];
 
+// Rascunho de O.S. Ã© uma tarefa curta e estruturada. Um limite prÃ³prio evita
+// que uma indisponibilidade do provedor deixe o modal preso por minutos.
+const DRAFT_TIMEOUT_MS = Math.max(
+  5_000,
+  Math.min(Number.parseInt(process.env.GEMINI_DRAFT_TIMEOUT_MS, 10) || 15_000, 60_000),
+);
+
 function getModels(envVarName, fallbackModels) {
   const envModels = process.env[envVarName]
     ?.split(',')
@@ -53,12 +60,16 @@ function getThinkingConfig(modelName, profile = 'chat') {
   return undefined;
 }
 
-function generationConfig(modelName, { profile = 'chat', maxOutputTokens = 1000, json = false } = {}) {
+function generationConfig(modelName, { profile = 'chat', maxOutputTokens = 1000, json = false, timeoutMs = null } = {}) {
   const config = {
     maxOutputTokens,
     thinkingConfig: getThinkingConfig(modelName, profile),
     ...(json ? { responseMimeType: 'application/json' } : {}),
   };
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    config.httpOptions = { timeout: timeoutMs };
+  }
 
   // Gemini 3.6/3.7 rejeitam os parâmetros antigos de amostragem.
   if (!modelName.startsWith('gemini-3.')) {
@@ -393,12 +404,19 @@ async function draftServiceOrder(apiKey, history, equipments) {
   const equipList = equipments.map((e) => `[ID: ${e.id}] ${e.model}`).join('\n');
   const prompt = `Gere um JSON rascunho de Ordem de Servico: {"defect": "string", "equipmentId": "id ou null"}.\n\nEquipamentos:\n${equipList}\n\nConversa:\n${historyText}`;
 
-  for (const modelName of getModels('GEMINI_CHAT_MODELS', DEFAULT_CHAT_MODELS)) {
+  // A tarefa sÃ³ extrai dois campos; usar o perfil leve reduz latÃªncia e custo
+  // sem alterar o modelo escolhido para o atendimento conversacional.
+  for (const modelName of getModels('GEMINI_LIGHT_MODELS', DEFAULT_LIGHT_MODELS)) {
     try {
       const result = await ai.models.generateContent({
         model: modelName,
         contents: prompt,
-        config: generationConfig(modelName, { profile: 'chat', maxOutputTokens: 500, json: true }),
+        config: generationConfig(modelName, {
+          profile: 'light',
+          maxOutputTokens: 250,
+          json: true,
+          timeoutMs: DRAFT_TIMEOUT_MS,
+        }),
       });
       let text = responseText(result);
       if (text.startsWith('```json')) text = text.replace(/```json/g, '').replace(/```/g, '').trim();

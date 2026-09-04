@@ -14,6 +14,10 @@ const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
   Number.parseInt(process.env.OS_CONFIRMATION_TIMEOUT_MS, 10) || 30_000
 );
+const OS_DRAFT_TIMEOUT_MS = Math.max(
+  5_000,
+  Math.min(Number.parseInt(process.env.OS_DRAFT_TIMEOUT_MS, 10) || 20_000, 60_000)
+);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1721,17 +1725,29 @@ async function draftOS(req, res) {
     const contact = await prisma.contact.findUnique({ where: { id: contactId } });
     if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
 
-    // Sincroniza os equipamentos do CRM para o contato
-    const { syncCrmEquipmentsToEquipment } = require('../services/crmSyncService');
-    await syncCrmEquipmentsToEquipment(tenantId, contactId);
-
-    const equipments = await prisma.equipment.findMany({ 
+    // O modal jÃ¡ carrega /api/os/equipments antes de pedir o rascunho, e essa
+    // rota sincroniza o CRM uma vez. Evitamos repetir dezenas (ou centenas)
+    // de upserts para clientes com muitos equipamentos. A chamada direta da
+    // rota continua funcionando quando ainda nÃ£o existe equipamento local.
+    let equipments = await prisma.equipment.findMany({
       where: { 
         tenantId, 
         isActive: true,
         contactId
       } 
     });
+
+    if (equipments.length === 0) {
+      const { syncCrmEquipmentsToEquipment } = require('../services/crmSyncService');
+      await syncCrmEquipmentsToEquipment(tenantId, contactId);
+      equipments = await prisma.equipment.findMany({
+        where: {
+          tenantId,
+          isActive: true,
+          contactId,
+        },
+      });
+    }
 
     const messages = await prisma.message.findMany({
       where: { 
@@ -1745,7 +1761,27 @@ async function draftOS(req, res) {
     // As mensagens vêm desc, o history espera asc (antigas primeiro)
     const history = messages.reverse();
 
-    const draft = await draftServiceOrder(settings, history, equipments);
+    let draft = { defect: null, equipmentId: null };
+    let timedOut = false;
+    let timeoutHandle;
+    try {
+      draft = await Promise.race([
+        draftServiceOrder(settings, history, equipments),
+        new Promise((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            resolve({ defect: null, equipmentId: null });
+          }, OS_DRAFT_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (draftError) {
+      console.warn('[draftOS] provedor de IA indisponivel; liberando preenchimento manual:', draftError.message);
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+    if (timedOut) {
+      console.warn(`[draftOS] rascunho excedeu ${OS_DRAFT_TIMEOUT_MS}ms; formulario liberado sem preenchimento da IA.`);
+    }
     res.json(draft);
   } catch (err) {
     console.error('[draftOS]', err);

@@ -1905,18 +1905,6 @@ export const ChatHeader = React.memo(function ChatHeader({
           </button>
         ) : null}
 
-        <button
-          type="button"
-          className="inbox-control"
-          style={styles.headerGhostIconBtn}
-          onClick={() => setShowInfo(!showInfo)}
-          title={showInfo ? 'Fechar ficha do cliente' : 'Abrir ficha do cliente'}
-          aria-label={showInfo ? 'Fechar ficha do cliente' : 'Abrir ficha do cliente'}
-          aria-pressed={showInfo}
-        >
-          {showInfo ? <PanelRightClose size={16} strokeWidth={2.2} /> : <PanelRightOpen size={16} strokeWidth={2.2} />}
-        </button>
-
         <div style={styles.messageMenuRoot} data-header-menu-root="true">
           <button
             type="button"
@@ -1954,6 +1942,18 @@ export const ChatHeader = React.memo(function ChatHeader({
             </div>
           ) : null}
         </div>
+
+        <button
+          type="button"
+          className="inbox-control"
+          style={styles.headerGhostIconBtn}
+          onClick={() => setShowInfo(!showInfo)}
+          title={showInfo ? 'Fechar ficha do cliente' : 'Abrir ficha do cliente'}
+          aria-label={showInfo ? 'Fechar ficha do cliente' : 'Abrir ficha do cliente'}
+          aria-pressed={showInfo}
+        >
+          {showInfo ? <PanelRightClose size={16} strokeWidth={2.2} /> : <PanelRightOpen size={16} strokeWidth={2.2} />}
+        </button>
       </div>
     </header>
   );

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { ThinkingLevel } = require('@google/genai');
-const { chat, __testing } = require('../src/services/geminiService');
+const { chat, draftServiceOrder, __testing } = require('../src/services/geminiService');
 
 test('chat usa Gemini 3.7 e mantém fallbacks estáveis', () => {
   const previous = process.env.GEMINI_CHAT_MODELS;
@@ -74,4 +74,34 @@ test('SDK novo envia chat ao 3.7 com configuração compatível', async (context
   assert.match(captured.url, /gemini-3\.7-flash/);
   assert.equal(captured.body.generationConfig.thinkingConfig.thinkingLevel, ThinkingLevel.LOW);
   assert.equal(captured.body.generationConfig.temperature, undefined);
+});
+
+test('rascunho de O.S. usa perfil leve e resposta curta', async (context) => {
+  const originalFetch = global.fetch;
+  const previousModels = process.env.GEMINI_LIGHT_MODELS;
+  context.after(() => {
+    global.fetch = originalFetch;
+    if (previousModels === undefined) delete process.env.GEMINI_LIGHT_MODELS;
+    else process.env.GEMINI_LIGHT_MODELS = previousModels;
+  });
+  process.env.GEMINI_LIGHT_MODELS = 'gemini-3.5-flash-lite';
+
+  let captured;
+  global.fetch = async (url, options) => {
+    captured = { url: String(url), body: JSON.parse(options.body) };
+    return new Response(JSON.stringify({
+      candidates: [{ content: { role: 'model', parts: [{ text: '{"defect":"papel preso","equipmentId":"eq-1"}' }] }, finishReason: 'STOP' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const result = await draftServiceOrder(
+    'fake-key',
+    [{ fromMe: false, body: 'A impressora estÃ¡ com papel preso.' }],
+    [{ id: 'eq-1', model: 'Canon G6010' }],
+  );
+
+  assert.deepEqual(result, { defect: 'papel preso', equipmentId: 'eq-1' });
+  assert.match(captured.url, /gemini-3\.5-flash-lite/);
+  assert.equal(captured.body.generationConfig.maxOutputTokens, 250);
+  assert.equal(captured.body.generationConfig.responseMimeType, 'application/json');
 });
