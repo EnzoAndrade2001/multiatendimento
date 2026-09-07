@@ -1,5 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const prisma = require('../lib/prisma');
+const { isOutdated } = require('../utils/agentVersion');
+
+// Um agente e considerado offline se o ultimo ping passou disto (2x o
+// SYNC_INTERVAL padrao de 5 min). Mesma regra que a tela ja usava sobre
+// firebirdLastSyncAt; agora aplicada por instalacao.
+const AGENT_STALE_AFTER_MS = 10 * 60 * 1000;
 
 const DEFAULT_AGENT_DOWNLOAD_URL = 'https://github.com/connectbrazilads/multiatendimento/raw/main/firebird-client/FirebirdCRMClient.exe';
 const DEFAULT_AGENT_RELEASE_DIR = '/data/agent-releases';
@@ -73,4 +80,51 @@ function downloadAgent(req, res) {
   });
 }
 
-module.exports = { getAgentInfo, downloadAgent, readReleaseManifest };
+// Inventario das instalacoes do agente Firebird DESTE tenant (uma linha por
+// installId, alimentada pelos pings). Cruza a versao que cada uma roda com o
+// release.json publicado para marcar "desatualizado" sem depender de o agente
+// ler a resposta do ping.
+async function getAgentStatus(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  const manifest = readReleaseManifest();
+  const latestVersion = manifest?.version || process.env.FIREBIRD_AGENT_VERSION || null;
+
+  let agents = [];
+  try {
+    agents = await prisma.firebirdAgent.findMany({
+      where: { tenantId: req.user.tenantId },
+      orderBy: { lastSeenAt: 'desc' },
+    });
+  } catch (error) {
+    console.error('[agent-status] falha ao consultar instalacoes do agente:', error.message);
+  }
+
+  const now = Date.now();
+  const items = agents.map((agent) => {
+    const lastSeenMs = agent.lastSeenAt ? now - new Date(agent.lastSeenAt).getTime() : null;
+    return {
+      installId: agent.installId,
+      hostname: agent.hostname || null,
+      version: agent.version || null,
+      protocolVersion: agent.protocolVersion || null,
+      runtime: agent.runtime || null,
+      capabilities: Array.isArray(agent.capabilities) ? agent.capabilities : null,
+      firstSeenAt: agent.firstSeenAt,
+      lastSeenAt: agent.lastSeenAt,
+      online: lastSeenMs != null && lastSeenMs < AGENT_STALE_AFTER_MS,
+      updateAvailable: latestVersion ? isOutdated(agent.version, latestVersion) : false,
+    };
+  });
+
+  res.json({
+    latestVersion,
+    releasedAt: manifest?.releasedAt || null,
+    staleAfterMs: AGENT_STALE_AFTER_MS,
+    agentCount: items.length,
+    onlineCount: items.filter((item) => item.online).length,
+    outdatedCount: items.filter((item) => item.updateAvailable).length,
+    agents: items,
+  });
+}
+
+module.exports = { getAgentInfo, downloadAgent, getAgentStatus, readReleaseManifest };

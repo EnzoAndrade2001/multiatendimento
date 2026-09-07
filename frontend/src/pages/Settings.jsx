@@ -25,6 +25,7 @@ import {
   testFirebirdConnection,
   syncFirebirdContacts,
   getAgentInfo,
+  getAgentStatus,
   downloadAgent,
   getSystemPromptPreview,
   syncCompanyFromFirebird,
@@ -150,6 +151,7 @@ export default function Settings() {
     billingInstanceId: '',
   });
   const [agentInfo, setAgentInfo] = useState(null);
+  const [agentStatus, setAgentStatus] = useState(null);
   const [agentInfoLoading, setAgentInfoLoading] = useState(false);
   const [tenant, setTenant] = useState(null);
   const [hours, setHours] = useState([]);
@@ -222,7 +224,7 @@ export default function Settings() {
     // o tempo total era a SOMA de todas -- por isso a tela demorava ~15s. Elas
     // não dependem uma da outra, então rodam em paralelo agora: o tempo total
     // passa a ser o da mais lenta, não a soma de todas.
-    const [settingsResult, meResult, instancesResult, quickResponsesResult, tagsResult, hoursResult, agentInfoResult, technicalContactsResult] = await Promise.allSettled([
+    const [settingsResult, meResult, instancesResult, quickResponsesResult, tagsResult, hoursResult, agentInfoResult, agentStatusResult, technicalContactsResult] = await Promise.allSettled([
       getSettings(),
       getMe(),
       getInstances(),
@@ -230,6 +232,7 @@ export default function Settings() {
       getTags(),
       getBusinessHours(),
       can('settings.agent.manage') ? getAgentInfo() : Promise.resolve({ data: null }),
+      can('settings.agent.manage') ? getAgentStatus() : Promise.resolve({ data: null }),
       can('settings.bot.manage') ? getTechnicalContacts() : Promise.resolve({ data: [] }),
     ]);
 
@@ -264,6 +267,9 @@ export default function Settings() {
 
     if (agentInfoResult.status === 'fulfilled') {
       setAgentInfo(agentInfoResult.value.data);
+    }
+    if (agentStatusResult.status === 'fulfilled') {
+      setAgentStatus(agentStatusResult.value.data);
     }
     if (technicalContactsResult.status === 'fulfilled') {
       setTechnicalContacts(Array.isArray(technicalContactsResult.value.data) ? technicalContactsResult.value.data : []);
@@ -671,8 +677,12 @@ export default function Settings() {
   async function handleRefreshAgentInfo() {
     setAgentInfoLoading(true);
     try {
-      const { data } = await getAgentInfo();
-      setAgentInfo(data);
+      const [infoResult, statusResult] = await Promise.allSettled([getAgentInfo(), getAgentStatus()]);
+      if (infoResult.status === 'fulfilled') setAgentInfo(infoResult.value.data);
+      if (statusResult.status === 'fulfilled') setAgentStatus(statusResult.value.data);
+      if (infoResult.status === 'rejected' && statusResult.status === 'rejected') {
+        throw infoResult.reason;
+      }
       toast.success('Informações do agente atualizadas.');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Não foi possível carregar as informações do agente.');
@@ -727,6 +737,9 @@ export default function Settings() {
   const AGENT_STALE_AFTER_MS = 10 * 60 * 1000; // 2x o intervalo padrão de sync (5 min)
   const agentLastSeenMs = form.firebirdLastSyncAt ? Date.now() - new Date(form.firebirdLastSyncAt).getTime() : null;
   const agentIsOnline = form.firebirdLastSyncStatus === 'online' && agentLastSeenMs != null && agentLastSeenMs < AGENT_STALE_AFTER_MS;
+  const agentInstalls = Array.isArray(agentStatus?.agents) ? agentStatus.agents : [];
+  const agentPublishedVersion = agentStatus?.latestVersion || agentInfo?.version || null;
+  const agentOutdatedCount = agentStatus?.outdatedCount || 0;
   const firebirdTokenIsMasked = isMaskedSecret(form.firebirdClientToken);
   const firebirdCompany = form.firebirdCompany && typeof form.firebirdCompany === 'object' ? form.firebirdCompany : null;
   const companySyncStatus = form.firebirdCompanySyncStatus || 'not_synced';
@@ -1722,11 +1735,20 @@ export default function Settings() {
               <div style={s.card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
                   <h2 style={s.cardTitle}>Agente Local (Integração Firebird & Boletos)</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} title={form.firebirdLastSyncAt ? `Último sinal do agente: ${new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR')}` : 'O agente nunca se conectou'}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }} title={form.firebirdLastSyncAt ? `Último sinal do agente: ${new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR')}` : 'O agente nunca se conectou'}>
                     <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: agentIsOnline ? 'var(--success)' : 'var(--danger)' }} />
                     <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
                       {agentIsOnline ? 'Conectado' : 'Desconectado'}
                     </span>
+                    {agentOutdatedCount > 0 && (
+                      <span style={{
+                        fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap',
+                        padding: '0.2rem 0.5rem', borderRadius: '999px',
+                        color: 'var(--danger)', border: '1px solid var(--danger)',
+                      }}>
+                        ⚠ {agentOutdatedCount} desatualizada(s)
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1864,6 +1886,61 @@ export default function Settings() {
                 <code>{agentInfo.sha256}</code>
               </div>
             )}
+
+            <div style={{ marginTop: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <span style={s.integrationMetaLabel}>Instalações ativas</span>
+                {agentStatus && (
+                  <span style={{ fontSize: 'var(--text-sm)', color: agentOutdatedCount > 0 ? 'var(--danger)' : 'var(--text-dim)' }}>
+                    {agentStatus.agentCount} instalada(s) · {agentStatus.onlineCount} online
+                    {agentOutdatedCount > 0 ? ` · ${agentOutdatedCount} desatualizada(s)` : ''}
+                  </span>
+                )}
+              </div>
+
+              {!agentStatus || agentInstalls.length === 0 ? (
+                <p style={{ ...s.hint, margin: '0.5rem 0 0' }}>
+                  Nenhuma instalação registrou ping ainda. Assim que o agente rodar e se comunicar, cada servidor aparece aqui com a versão que está executando.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.6rem' }}>
+                  {agentInstalls.map((install) => (
+                    <div
+                      key={install.installId}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+                        padding: '0.6rem 0.75rem', borderRadius: '10px',
+                        border: '1px solid var(--border-color)', background: 'var(--bg-main)',
+                      }}
+                    >
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, backgroundColor: install.online ? 'var(--success)' : 'var(--danger)' }} />
+                      <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+                        <strong style={{ fontSize: 'var(--text-sm)', color: 'var(--text-main)', wordBreak: 'break-word' }}>
+                          {install.hostname || `Instalação ${install.installId.slice(0, 8)}`}
+                        </strong>
+                        <p style={{ ...s.hint, margin: '0.15rem 0 0' }}>
+                          Rodando {install.version || 'versão desconhecida'}
+                          {agentPublishedVersion ? ` · publicado ${agentPublishedVersion}` : ''}
+                          {install.runtime === 'python' ? ' · (execução via Python)' : ''}
+                        </p>
+                        <p style={{ ...s.hint, margin: '0.1rem 0 0' }}>
+                          Último ping: {install.lastSeenAt ? new Date(install.lastSeenAt).toLocaleString('pt-BR') : 'nunca'}
+                        </p>
+                      </div>
+                      {install.updateAvailable && (
+                        <span style={{
+                          fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap',
+                          padding: '0.2rem 0.5rem', borderRadius: '999px',
+                          color: 'var(--danger)', border: '1px solid var(--danger)',
+                        }}>
+                          ⚠ desatualizado
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div style={{ ...s.form, marginTop: '1.25rem' }}>
               <div style={s.integrationGuide}>

@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Building2, Copy, KeyRound, MessageSquare, Pencil, Plus, Power, RotateCw, Upload, Users, Wifi } from 'lucide-react';
+import { Activity, Building2, Copy, KeyRound, MessageSquare, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   getTenants, createTenant, updateTenant, uploadFile, getMediaUrl,
-  getTenantUsers, createTenantUser, updateTenantUser,
+  getTenantUsers, createTenantUser, updateTenantUser, getFirebirdAgents,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -30,6 +30,7 @@ export default function SuperAdmin() {
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState(null);
   const [usersModal, setUsersModal] = useState(null);
+  const [fbAgents, setFbAgents] = useState(null);
 
   useEffect(() => {
     load();
@@ -38,8 +39,14 @@ export default function SuperAdmin() {
   async function load() {
     setLoading(true);
     try {
-      const { data } = await getTenants();
-      setTenants(data);
+      const [tenantsResult, agentsResult] = await Promise.allSettled([getTenants(), getFirebirdAgents()]);
+      if (tenantsResult.status === 'fulfilled') {
+        setTenants(tenantsResult.value.data);
+      } else {
+        throw tenantsResult.reason;
+      }
+      // O inventário do agente é secundário: uma falha aqui não derruba a tela.
+      if (agentsResult.status === 'fulfilled') setFbAgents(agentsResult.value.data);
     } catch (e) {
       toast.error(e.response?.data?.error || 'Não foi possível carregar as empresas. Verifique sua conexão ou permissão de acesso.');
     } finally {
@@ -350,6 +357,89 @@ export default function SuperAdmin() {
         )}
       </SurfaceCard>
 
+      <SurfaceCard style={{ ...s.tableCard, marginTop: 'var(--space-5, 20px)' }}>
+        <div style={s.agentFleetHeader}>
+          <div>
+            <div style={s.agentFleetTitle}>
+              <Server size={16} />
+              Agentes Firebird
+            </div>
+            {fbAgents ? (
+              <div style={s.agentFleetMeta}>
+                {fbAgents.agentCount} instalação(ões) em {fbAgents.tenantCount} empresa(s) · {fbAgents.onlineCount} online
+                {fbAgents.outdatedCount > 0 ? ` · ${fbAgents.outdatedCount} desatualizada(s)` : ''}
+                {fbAgents.latestVersion ? ` · publicado ${fbAgents.latestVersion}` : ''}
+              </div>
+            ) : (
+              <div style={s.agentFleetMeta}>Inventário indisponível no momento.</div>
+            )}
+          </div>
+          <button onClick={load} style={s.inlineIconBtn} title="Atualizar inventário de agentes" disabled={loading}>
+            <RotateCw size={14} />
+          </button>
+        </div>
+
+        {!fbAgents || fbAgents.agents.length === 0 ? (
+          <div style={s.empty}>
+            {fbAgents
+              ? 'Nenhuma instalação registrou ping ainda. Cada servidor aparece aqui assim que o agente se comunicar.'
+              : 'Não foi possível carregar o inventário dos agentes.'}
+          </div>
+        ) : (
+          <table style={s.table}>
+            <thead>
+              <tr style={s.thead}>
+                <th style={s.th}>Empresa</th>
+                <th style={s.th}>Servidor</th>
+                <th style={s.th}>Versão</th>
+                <th style={s.th}>Último ping</th>
+                <th style={s.th}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fbAgents.agents.map((agent) => (
+                <tr key={agent.id} style={s.tr}>
+                  <td style={s.td}>
+                    <div style={s.companyName} title={agent.tenantName || ''}>{agent.tenantName || '—'}</div>
+                    <div style={s.companyMeta}>{agent.tenantSlug ? `/${agent.tenantSlug}` : ''}</div>
+                  </td>
+                  <td style={s.td}>
+                    <div style={s.companyName} title={agent.installId}>
+                      {agent.hostname || `Instalação ${agent.installId.slice(0, 8)}`}
+                    </div>
+                    {agent.runtime === 'python' && <div style={s.companyMeta}>execução via Python</div>}
+                  </td>
+                  <td style={s.td}>
+                    <code style={s.code}>{agent.version || 'desconhecida'}</code>
+                  </td>
+                  <td style={s.td}>
+                    <span title={agent.lastSeenAt ? new Date(agent.lastSeenAt).toLocaleString('pt-BR') : ''}>
+                      {timeAgo(agent.lastSeenAt)}
+                    </span>
+                  </td>
+                  <td style={s.td}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{
+                        ...s.badge,
+                        color: agent.online ? 'var(--success)' : 'var(--text-dim)',
+                        borderColor: agent.online ? 'var(--success)' : 'var(--border-color)',
+                      }}>
+                        {agent.online ? 'Online' : 'Offline'}
+                      </span>
+                      {agent.updateAvailable && (
+                        <span style={{ ...s.badge, color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                          ⚠ desatualizado
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </SurfaceCard>
+
       {modal ? (
         <ModalShell
           kicker={modal === 'new' ? 'Nova empresa' : 'Editar empresa'}
@@ -568,6 +658,15 @@ const s = {
   statVal: { fontSize: 'var(--text-2xl)', fontWeight: 900, color: 'var(--text-main)' },
   statLabel: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 },
   tableCard: { padding: 0, overflow: 'hidden' },
+  agentFleetHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-4)',
+    padding: 'var(--space-4) var(--space-5)', borderBottom: '1px solid var(--border-color)',
+  },
+  agentFleetTitle: {
+    display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+    fontSize: 'var(--text-sm)', fontWeight: 800, color: 'var(--text-main)',
+  },
+  agentFleetMeta: { fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginTop: 'var(--space-1)' },
   table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
   thead: { background: 'var(--bg-panel)', borderBottom: '1px solid var(--border-color)' },
   th: { padding: 'var(--space-4) var(--space-5)', fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em' },

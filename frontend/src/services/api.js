@@ -102,6 +102,10 @@ export const getAgentInfo = () => api.get('/settings/agent-info', {
   params: { _ts: Date.now() },
   headers: { 'Cache-Control': 'no-cache' },
 });
+export const getAgentStatus = () => api.get('/settings/agent-status', {
+  params: { _ts: Date.now() },
+  headers: { 'Cache-Control': 'no-cache' },
+});
 export const downloadAgent = () => api.get('/settings/agent-download', { responseType: 'blob', timeout: 120000 });
 export const saveSettings = (data) => api.post('/settings', data);
 export const testAiProvider = (data) => api.post('/settings/ai/test', data);
@@ -230,6 +234,7 @@ export const getStats = () => api.get('/dashboard/stats');
 
 // SuperAdmin
 export const getTenants = () => api.get('/superadmin/tenants');
+export const getFirebirdAgents = () => api.get('/superadmin/firebird-agents');
 export const createTenant = (data) => api.post('/superadmin/tenants', data);
 export const updateTenant = (id, data) => api.patch(`/superadmin/tenants/${id}`, data);
 export const getTenantUsers = (id) => api.get(`/superadmin/tenants/${id}/users`);

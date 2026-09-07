@@ -1,5 +1,11 @@
 const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
+const { readReleaseManifest } = require('./agentController');
+const { isOutdated } = require('../utils/agentVersion');
+
+// Mesma regra de "offline" usada na tela do tenant: sem ping ha mais que 2x o
+// SYNC_INTERVAL padrao (5 min).
+const AGENT_STALE_AFTER_MS = 10 * 60 * 1000;
 
 function denySuperadmin(req, res) {
   if (req.user.role !== 'superadmin') {
@@ -221,7 +227,62 @@ async function updateTenantUser(req, res) {
   res.json(user);
 }
 
+// Inventario cross-tenant das instalacoes do agente Firebird: quantas rodam,
+// em quais empresas, em qual versao e ha quanto tempo pingaram. Alimentado
+// pelos pings (modelo FirebirdAgent). Best-effort: erro de banco vira lista
+// vazia, nunca 500.
+async function listFirebirdAgents(req, res) {
+  if (denySuperadmin(req, res)) return;
+
+  const manifest = readReleaseManifest();
+  const latestVersion = manifest?.version || process.env.FIREBIRD_AGENT_VERSION || null;
+
+  let rows = [];
+  try {
+    rows = await prisma.firebirdAgent.findMany({
+      include: { tenant: { select: { slug: true, name: true } } },
+      orderBy: [{ lastSeenAt: 'desc' }],
+    });
+  } catch (error) {
+    console.error('[superadminController] falha ao listar agentes Firebird:', error.message);
+  }
+
+  const now = Date.now();
+  const agents = rows.map((row) => {
+    const lastSeenMs = row.lastSeenAt ? now - new Date(row.lastSeenAt).getTime() : null;
+    return {
+      id: row.id,
+      tenantSlug: row.tenant?.slug || null,
+      tenantName: row.tenant?.name || null,
+      installId: row.installId,
+      hostname: row.hostname || null,
+      version: row.version || null,
+      protocolVersion: row.protocolVersion || null,
+      runtime: row.runtime || null,
+      firstSeenAt: row.firstSeenAt,
+      lastSeenAt: row.lastSeenAt,
+      lastPingIp: row.lastPingIp || null,
+      online: lastSeenMs != null && lastSeenMs < AGENT_STALE_AFTER_MS,
+      updateAvailable: latestVersion ? isOutdated(row.version, latestVersion) : false,
+    };
+  });
+
+  const tenantSlugs = new Set(agents.map((agent) => agent.tenantSlug).filter(Boolean));
+
+  res.json({
+    latestVersion,
+    releasedAt: manifest?.releasedAt || null,
+    staleAfterMs: AGENT_STALE_AFTER_MS,
+    agentCount: agents.length,
+    tenantCount: tenantSlugs.size,
+    onlineCount: agents.filter((agent) => agent.online).length,
+    outdatedCount: agents.filter((agent) => agent.updateAvailable).length,
+    agents,
+  });
+}
+
 module.exports = {
   listTenants, createTenant, updateTenant,
   listTenantUsers, createTenantUser, updateTenantUser,
+  listFirebirdAgents,
 };

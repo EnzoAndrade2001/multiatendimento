@@ -64,6 +64,7 @@ model Tenant {
   printGuardTelemetryEvents  PrintGuardTelemetryEvent[]
   crmContracts               CrmContract[]
   crmMeterReadings           CrmMeterReading[]
+  firebirdAgents             FirebirdAgent[]
 }
 
 model TenantSettings {
@@ -135,6 +136,34 @@ model TenantSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
+}
+
+// Inventário de instalações do agente Firebird (FirebirdCRMClient.exe). Uma
+// linha por (tenant, installId), atualizada a cada ping. O agente já envia
+// installId, version, protocolVersion, capabilities e health em POST /ping;
+// aqui isso deixa de ser descartado. Alimenta a visão de frota e o alerta de
+// "agente desatualizado" comparando `version` com o release.json publicado.
+model FirebirdAgent {
+  id              String   @id @default(cuid())
+  tenantId        String
+  installId       String
+  hostname        String?
+  version         String?
+  protocolVersion String?
+  capabilities    Json?
+  runtime         String? // "executable" | "python"
+  processId       Int?
+  healthStatus    String? // health.status reportado pelo agente (ex.: "online")
+  lastPingIp      String?
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, installId])
+  @@index([tenantId, lastSeenAt])
 }
 
 model User {
@@ -214,26 +243,26 @@ model TeamMember {
 }
 
 model WaInstance {
-  id                 String              @id @default(cuid())
-  tenantId           String
-  instanceName       String
-  phone              String?
-  status             String              @default("disconnected")
-  healthStatus       String              @default("unknown")
+  id                  String              @id @default(cuid())
+  tenantId            String
+  instanceName        String
+  phone               String?
+  status              String              @default("disconnected")
+  healthStatus        String              @default("unknown")
   lastConnectionState String?
-  lastConnectionAt   DateTime?
-  lastWebhookAt      DateTime?
-  lastHealthCheckAt  DateTime?
-  lastHealthError    String?
-  qrCode             String?
-  provider           String              @default("evolution_qr")
-  officialPhoneId    String?
-  officialBusinessId String?
-  contacts           Contact[]
-  tickets            Ticket[]
-  campaigns          Campaign[]
-  campaignRecipients CampaignRecipient[]
-  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  lastConnectionAt    DateTime?
+  lastWebhookAt       DateTime?
+  lastHealthCheckAt   DateTime?
+  lastHealthError     String?
+  qrCode              String?
+  provider            String              @default("evolution_qr")
+  officialPhoneId     String?
+  officialBusinessId  String?
+  contacts            Contact[]
+  tickets             Ticket[]
+  campaigns           Campaign[]
+  campaignRecipients  CampaignRecipient[]
+  tenant              Tenant              @relation(fields: [tenantId], references: [id])
 }
 
 model MetaInstance {
@@ -1161,24 +1190,24 @@ model CampaignTemplate {
 // Integração opcional com o PrintGuard. Segredos são armazenados apenas como
 // ciphertext AES-GCM (o valor em claro nunca é devolvido à API/UI).
 model PrintGuardConnection {
-  id                String   @id @default(cuid())
-  tenantId          String
-  name              String
-  baseUrl            String
-  externalId         String?  @unique
-  organization       Json?
-  accessTokenCipher  String?  @db.Text
-  webhookSecretCipher String? @db.Text
-  status             String   @default("INACTIVE") // INACTIVE, PENDING, CONNECTED, ERROR
-  lastTestAt         DateTime?
-  lastConnectedAt    DateTime?
-  lastCursor         String?
-  lastMeterCursor    String?
-  lastError          String?  @db.Text
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  tenantId            String
+  name                String
+  baseUrl             String
+  externalId          String?   @unique
+  organization        Json?
+  accessTokenCipher   String?   @db.Text
+  webhookSecretCipher String?   @db.Text
+  status              String    @default("INACTIVE") // INACTIVE, PENDING, CONNECTED, ERROR
+  lastTestAt          DateTime?
+  lastConnectedAt     DateTime?
+  lastCursor          String?
+  lastMeterCursor     String?
+  lastError           String?   @db.Text
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  tenant   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   bindings PrintGuardBinding[]
   events   PrintGuardTelemetryEvent[]
 
@@ -1190,22 +1219,22 @@ model PrintGuardConnection {
 // só é considerado válido quando o resolvedor encontra uma correspondência
 // inequívoca no CRM; nunca fazemos associação por nome parcial.
 model PrintGuardBinding {
-  id           String   @id @default(cuid())
-  tenantId     String
-  connectionId String
-  customerCode String?
-  serialNumber String?
-  customerId   String?
-  equipmentId  String?
-  state        String   @default("UNMATCHED") // MATCHED, UNMATCHED, AMBIGUOUS
-  source       String   @default("AUTO") // AUTO, MANUAL
-  confirmedAt  DateTime?
+  id            String    @id @default(cuid())
+  tenantId      String
+  connectionId  String
+  customerCode  String?
+  serialNumber  String?
+  customerId    String?
+  equipmentId   String?
+  state         String    @default("UNMATCHED") // MATCHED, UNMATCHED, AMBIGUOUS
+  source        String    @default("AUTO") // AUTO, MANUAL
+  confirmedAt   DateTime?
   confirmedById String?
-  lastSeenAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  lastSeenAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   connection PrintGuardConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, customerCode])
@@ -1214,39 +1243,39 @@ model PrintGuardBinding {
 }
 
 model PrintGuardTelemetryEvent {
-  id              String   @id @default(cuid())
-  tenantId        String
-  connectionId    String
-  externalEventId String
-  eventType       String
-  severity        String   @default("INFO")
-  occurredAt      DateTime?
-  customerCode    String?
-  serialNumber    String?
-  payload         Json?
-  state           String   @default("RECEIVED") // RECEIVED, MONITORING, IGNORED, APPROVED, ERROR
-  bindingId       String?
-  ticketId        String?
-  serviceOrderId  String?
-  errorCode       String?
-  errorMessage    String?  @db.Text
+  id                  String    @id @default(cuid())
+  tenantId            String
+  connectionId        String
+  externalEventId     String
+  eventType           String
+  severity            String    @default("INFO")
+  occurredAt          DateTime?
+  customerCode        String?
+  serialNumber        String?
+  payload             Json?
+  state               String    @default("RECEIVED") // RECEIVED, MONITORING, IGNORED, APPROVED, ERROR
+  bindingId           String?
+  ticketId            String?
+  serviceOrderId      String?
+  errorCode           String?
+  errorMessage        String?   @db.Text
   // Workflow gerencial. Todos os campos sao opcionais/default para manter a
   // migracao compativel com eventos historicos ja gravados.
-  priorityLevel   String?  // P1, P2, P3, P4
-  priorityScore   Int?
-  recommendation Json?
-  assignedToId   String?
-  decisionDueAt  DateTime?
-  monitoringUntil DateTime?
-  monitoringCondition String? @db.Text
-  nextStep        String?  @db.Text
-  ignoredReason   String?  @db.Text
-  decisionAt      DateTime?
-  decisionById    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  priorityLevel       String? // P1, P2, P3, P4
+  priorityScore       Int?
+  recommendation      Json?
+  assignedToId        String?
+  decisionDueAt       DateTime?
+  monitoringUntil     DateTime?
+  monitoringCondition String?   @db.Text
+  nextStep            String?   @db.Text
+  ignoredReason       String?   @db.Text
+  decisionAt          DateTime?
+  decisionById        String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   connection PrintGuardConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([connectionId, externalEventId])
@@ -1293,7 +1322,7 @@ model CrmContract {
 // Historico append-only de leitura de contador. Uma linha por
 // (equipamento, medidor, dia). Base para paginas/dia, rendimento e projecao.
 model CrmMeterReading {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   tenantId            String
   equipmentExternalId String // CDEQUIPAMENTO
   serialNumber        String?
@@ -1304,8 +1333,8 @@ model CrmMeterReading {
   previousReading     Int?
   readAt              DateTime // DTLEITURA (truncado ao dia, UTC)
   previousReadAt      DateTime?
-  source              String   @default("firebird") // firebird | printguard | os
-  createdAt           DateTime @default(now())
+  source              String    @default("firebird") // firebird | printguard | os
+  createdAt           DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 

@@ -11,6 +11,8 @@ const billingDocumentService = require('../services/billingDocumentService');
 const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
 const { normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
+const agentController = require('./agentController');
+const { isOutdated } = require('../utils/agentVersion');
 
 // Mantem o nome usado pelos normalizadores legados, mas com a semantica
 // correta para datas Firebird sem fuso (horario local de Sao Paulo).
@@ -1508,6 +1510,62 @@ async function commandCallback(req, res) {
   }
 }
 
+// Normaliza a identidade que o agente Firebird ja envia em cada ping (corpo +
+// headers x-ilux-agent-*). O corpo tem precedencia sobre o header; campos
+// ausentes viram null para nao sobrescrever dados bons num payload parcial.
+function agentIdentityFromPing(req) {
+  const body = req.body || {};
+  const health = body.health && typeof body.health === 'object' ? body.health : {};
+  const header = (name) => (typeof req.header === 'function' ? req.header(name) : undefined);
+
+  const installId = pick(health.installId, header('x-ilux-agent-id'));
+  const capabilities = Array.isArray(body.capabilities)
+    ? body.capabilities.map((item) => String(item).trim()).filter(Boolean).slice(0, 50)
+    : null;
+  const processIdNumber = Number.parseInt(health.processId, 10);
+
+  return {
+    installId: installId ? installId.slice(0, 200) : null,
+    version: pick(body.version, header('x-ilux-agent-version')),
+    protocolVersion: pick(body.protocolVersion, header('x-ilux-agent-protocol')),
+    capabilities: capabilities && capabilities.length ? capabilities : null,
+    runtime: pick(health.runtime),
+    processId: Number.isInteger(processIdNumber) ? processIdNumber : null,
+    healthStatus: pick(health.status),
+    hostname: pick(health.hostname, body.hostname),
+    ip: String(req.ip || req.socket?.remoteAddress || '').trim() || null,
+  };
+}
+
+// Registro de inventario da instalacao. E telemetria de melhor esforco: uma
+// falha aqui nunca pode derrubar o ping (que e o sinal de saude do agente).
+async function recordAgentInventory(tenantId, identity) {
+  if (!identity.installId) return;
+  const data = {
+    version: identity.version,
+    protocolVersion: identity.protocolVersion,
+    capabilities: identity.capabilities ?? undefined,
+    runtime: identity.runtime,
+    processId: identity.processId,
+    healthStatus: identity.healthStatus,
+    hostname: identity.hostname,
+    lastPingIp: identity.ip,
+    lastSeenAt: new Date(),
+  };
+  const patch = Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== null && value !== undefined),
+  );
+  try {
+    await prisma.firebirdAgent.upsert({
+      where: { tenantId_installId: { tenantId, installId: identity.installId } },
+      create: { tenantId, installId: identity.installId, ...data },
+      update: patch,
+    });
+  } catch (err) {
+    console.error('[agent-ping] falha ao registrar inventario do agente:', err.message);
+  }
+}
+
 async function agentPing(req, res) {
   try {
     const { tenantSlug } = req.body || {};
@@ -1522,7 +1580,25 @@ async function agentPing(req, res) {
       }
     });
 
-    res.json({ ok: true });
+    const identity = agentIdentityFromPing(req);
+    await recordAgentInventory(tenant.id, identity);
+
+    // Sinal de "agente desatualizado" na propria resposta do ping: o agente ja
+    // manda a versao que roda; aqui comparamos com o release.json publicado no
+    // volume. Best-effort - sem manifesto, so devolve { ok: true }.
+    const response = { ok: true };
+    let latestVersion = null;
+    try {
+      latestVersion = agentController.readReleaseManifest()?.version || null;
+    } catch (err) {
+      console.error('[agent-ping] falha ao ler o manifesto de release:', err.message);
+    }
+    if (latestVersion) {
+      response.latestVersion = latestVersion;
+      response.updateAvailable = isOutdated(identity.version, latestVersion);
+    }
+
+    res.json(response);
   } catch (err) {
     console.error('[agent-ping] erro:', err.message);
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -1536,6 +1612,8 @@ module.exports = {
   getPendingCommands,
   commandCallback,
   agentPing,
+  agentIdentityFromPing,
+  recordAgentInventory,
   resolveTenantContext,
   firebirdTokenFromRequest,
   isImportedServiceOrderMirror,
