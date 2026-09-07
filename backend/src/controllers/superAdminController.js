@@ -255,6 +255,7 @@ async function listFirebirdAgents(req, res) {
       tenantSlug: row.tenant?.slug || null,
       tenantName: row.tenant?.name || null,
       installId: row.installId,
+      identified: !String(row.installId || '').startsWith('legacy:'),
       hostname: row.hostname || null,
       version: row.version || null,
       protocolVersion: row.protocolVersion || null,

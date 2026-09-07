@@ -4,6 +4,7 @@ const prisma = require('../src/lib/prisma');
 const agentController = require('../src/controllers/agentController');
 const {
   agentIdentityFromPing,
+  agentInventoryKey,
   agentPing,
 } = require('../src/controllers/firebirdSyncController');
 
@@ -78,6 +79,13 @@ test('agentIdentityFromPing sem installId retorna null (nao da pra deduplicar)',
   assert.equal(identity.installId, null);
   assert.equal(identity.capabilities, null);
   assert.equal(identity.processId, null);
+});
+
+test('agentInventoryKey usa o installId real ou cai para legacy:<host|ip>', () => {
+  assert.equal(agentInventoryKey({ installId: 'abc' }), 'abc');
+  assert.equal(agentInventoryKey({ installId: null, hostname: 'SRV-ILUX', ip: '1.2.3.4' }), 'legacy:SRV-ILUX');
+  assert.equal(agentInventoryKey({ installId: null, hostname: null, ip: '1.2.3.4' }), 'legacy:1.2.3.4');
+  assert.equal(agentInventoryKey({ installId: null, hostname: null, ip: null }), 'legacy:desconhecido');
 });
 
 // Substitui as dependencias que o agentPing toca (resolucao de tenant, escrita
@@ -200,7 +208,7 @@ test('agentPing responde ok mesmo se o registro de inventario falhar', async (co
   assert.deepEqual(res.body, { ok: true });
 });
 
-test('agentPing sem installId nao chama firebirdAgent.upsert', async (context) => {
+test('agentPing sem installId ainda registra a instalacao com chave legacy', async (context) => {
   const calls = patchAgentPingDeps(context);
 
   const res = makeRes();
@@ -208,10 +216,13 @@ test('agentPing sem installId nao chama firebirdAgent.upsert', async (context) =
     makeReq({
       body: { tenantSlug: TENANT.slug, version: '1.1.2' },
       headers: { 'x-firebird-token': TOKEN },
+      ip: '198.51.100.7',
     }),
     res,
   );
 
   assert.equal(res.statusCode, 200);
-  assert.equal(calls.upsertCalled, false);
+  assert.ok(calls.upsertArgs, 'deve registrar mesmo sem installId');
+  assert.equal(calls.upsertArgs.where.tenantId_installId.installId, 'legacy:198.51.100.7');
+  assert.equal(calls.upsertArgs.create.version, '1.1.2');
 });

@@ -1537,10 +1537,21 @@ function agentIdentityFromPing(req) {
   };
 }
 
+// Chave da instalacao no inventario. Idealmente o installId que o agente
+// persiste (x-ilux-agent-id / health.installId). Mas hoje ensure_agent_install_id
+// so roda no entrypoint CLI: quem abre o agente pela GUI (caso normal) nao
+// manda installId. Nesse caso usamos uma chave sintetica "legacy:<host|ip>"
+// para a instalacao ainda aparecer com versao e drift - o que a Fase 1 quer.
+// Quando o agente passar a mandar installId, cada instalacao ganha sua linha.
+function agentInventoryKey(identity) {
+  if (identity.installId) return identity.installId;
+  return `legacy:${identity.hostname || identity.ip || 'desconhecido'}`;
+}
+
 // Registro de inventario da instalacao. E telemetria de melhor esforco: uma
 // falha aqui nunca pode derrubar o ping (que e o sinal de saude do agente).
 async function recordAgentInventory(tenantId, identity) {
-  if (!identity.installId) return;
+  const installId = agentInventoryKey(identity);
   const data = {
     version: identity.version,
     protocolVersion: identity.protocolVersion,
@@ -1557,8 +1568,8 @@ async function recordAgentInventory(tenantId, identity) {
   );
   try {
     await prisma.firebirdAgent.upsert({
-      where: { tenantId_installId: { tenantId, installId: identity.installId } },
-      create: { tenantId, installId: identity.installId, ...data },
+      where: { tenantId_installId: { tenantId, installId } },
+      create: { tenantId, installId, ...data },
       update: patch,
     });
   } catch (err) {
@@ -1613,6 +1624,7 @@ module.exports = {
   commandCallback,
   agentPing,
   agentIdentityFromPing,
+  agentInventoryKey,
   recordAgentInventory,
   resolveTenantContext,
   firebirdTokenFromRequest,

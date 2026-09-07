@@ -1916,7 +1916,9 @@ export default function Settings() {
                       <div style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, backgroundColor: install.online ? 'var(--success)' : 'var(--danger)' }} />
                       <div style={{ minWidth: 0, flex: '1 1 180px' }}>
                         <strong style={{ fontSize: 'var(--text-sm)', color: 'var(--text-main)', wordBreak: 'break-word' }}>
-                          {install.hostname || `Instalação ${install.installId.slice(0, 8)}`}
+                          {install.identified
+                            ? (install.hostname || `Instalação ${install.installId.slice(0, 8)}`)
+                            : 'Agente sem identificador'}
                         </strong>
                         <p style={{ ...s.hint, margin: '0.15rem 0 0' }}>
                           Rodando {install.version || 'versão desconhecida'}
@@ -1926,6 +1928,11 @@ export default function Settings() {
                         <p style={{ ...s.hint, margin: '0.1rem 0 0' }}>
                           Último ping: {install.lastSeenAt ? new Date(install.lastSeenAt).toLocaleString('pt-BR') : 'nunca'}
                         </p>
+                        {!install.identified && (
+                          <p style={{ ...s.hint, margin: '0.1rem 0 0', color: 'var(--text-dim)' }}>
+                            Atualize o agente para separar cada servidor individualmente.
+                          </p>
+                        )}
                       </div>
                       {install.updateAvailable && (
                         <span style={{

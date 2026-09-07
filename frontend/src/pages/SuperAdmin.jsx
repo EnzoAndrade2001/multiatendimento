@@ -405,9 +405,12 @@ export default function SuperAdmin() {
                   </td>
                   <td style={s.td}>
                     <div style={s.companyName} title={agent.installId}>
-                      {agent.hostname || `Instalação ${agent.installId.slice(0, 8)}`}
+                      {agent.identified
+                        ? (agent.hostname || `Instalação ${agent.installId.slice(0, 8)}`)
+                        : 'Sem identificador'}
                     </div>
-                    {agent.runtime === 'python' && <div style={s.companyMeta}>execução via Python</div>}
+                    {!agent.identified && <div style={s.companyMeta}>agente antigo · atualizar p/ individualizar</div>}
+                    {agent.identified && agent.runtime === 'python' && <div style={s.companyMeta}>execução via Python</div>}
                   </td>
                   <td style={s.td}>
                     <code style={s.code}>{agent.version || 'desconhecida'}</code>

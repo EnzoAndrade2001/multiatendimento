@@ -56,7 +56,7 @@ test('getAgentStatus cruza a versao de cada instalacao com o release publicado',
   const old = new Date(Date.now() - 60 * 60 * 1000);
   patchFindMany(context, async () => [
     { installId: 'a1', hostname: 'SRV-ILUX', version: '1.1.2', runtime: 'executable', capabilities: ['sync.contacts'], firstSeenAt: old, lastSeenAt: recent },
-    { installId: 'a2', hostname: null, version: '1.2.0', runtime: 'python', capabilities: null, firstSeenAt: old, lastSeenAt: old },
+    { installId: 'legacy:200.0.0.1', hostname: null, version: '1.2.0', runtime: 'python', capabilities: null, firstSeenAt: old, lastSeenAt: old },
   ]);
 
   const res = makeRes();
@@ -69,8 +69,10 @@ test('getAgentStatus cruza a versao de cada instalacao com o release publicado',
 
   const [a1, a2] = res.body.agents;
   assert.equal(a1.installId, 'a1');
+  assert.equal(a1.identified, true);
   assert.equal(a1.online, true);
   assert.equal(a1.updateAvailable, true);
+  assert.equal(a2.identified, false); // chave legacy:
   assert.equal(a2.online, false);
   assert.equal(a2.updateAvailable, false);
   assert.match(res.headers['Cache-Control'], /no-store/);

@@ -718,6 +718,10 @@ class AgentGUI(ctk.CTk):
         logger.addHandler(handler)
         try:
             state = agent_main.StateStore(config.state_file)
+            # Sem isto o identificador da instalacao so era gerado no entrypoint
+            # CLI (main()); quem abre pela GUI mandava installId vazio em todo
+            # ping, e o CRM nao conseguia separar/contar as instalacoes.
+            agent_main.ensure_agent_install_id(config, state)
             self.command_stop_event = threading.Event()
             threading.Thread(
                 target=agent_main.run_command_listener,

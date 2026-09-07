@@ -104,6 +104,8 @@ async function getAgentStatus(req, res) {
     const lastSeenMs = agent.lastSeenAt ? now - new Date(agent.lastSeenAt).getTime() : null;
     return {
       installId: agent.installId,
+      // Instalacoes sem installId real recebem uma chave "legacy:..." no ping.
+      identified: !String(agent.installId || '').startsWith('legacy:'),
       hostname: agent.hostname || null,
       version: agent.version || null,
       protocolVersion: agent.protocolVersion || null,
