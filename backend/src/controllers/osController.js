@@ -386,11 +386,31 @@ async function createOS(req, res) {
     if (!contact.externalId && !contact.crmCustomer?.externalId) {
       return res.status(400).json({ error: 'Vincule a conversa a um cliente do iLux antes de abrir a O.S.' });
     }
-    if (!equipment || equipment.contactId !== contactId) {
-      return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
-    }
+    if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
     if (equipment.externalSource !== 'firebird' || !equipment.externalId) {
       return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o iLux.' });
+    }
+    // O vínculo confiável é a identidade do cliente no iLux, não Equipment.contactId:
+    // Equipment é uma linha por máquina (única por externalId) e esse contactId é
+    // reescrito toda vez que QUALQUER contato do mesmo cliente abre este modal
+    // (syncCrmEquipmentsToEquipment). Comparar por contactId fazia dois atendentes
+    // ou dois contatos da mesma empresa colidirem em "não pertence ao cliente".
+    let equipmentBelongsToCustomer = equipment.contactId === contactId;
+    if (!equipmentBelongsToCustomer) {
+      const crmEquip = await prisma.crmEquipment.findFirst({
+        where: { tenantId, externalSource: 'firebird', externalId: equipment.externalId },
+        select: { customerId: true, customer: { select: { externalId: true } } },
+      });
+      const contactCustomerId = contact.crmCustomerId || null;
+      const contactCustomerExternalId = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
+      equipmentBelongsToCustomer = Boolean(
+        (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
+        || (crmEquip?.customer?.externalId && contactCustomerExternalId
+          && String(crmEquip.customer.externalId).trim() === contactCustomerExternalId),
+      );
+    }
+    if (!equipmentBelongsToCustomer) {
+      return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
     }
     if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do iLux.' });
 
