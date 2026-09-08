@@ -127,6 +127,7 @@ export default function Settings() {
     companyPhone: '',
     companyCity: '',
     companyState: '',
+    osAccentColor: '#D62828',
     serpApiKey: '',
     firebirdClientToken: '',
     firebirdApiUrl: '',
@@ -1425,6 +1426,44 @@ export default function Settings() {
                     onChange={(e) => setForm({ ...form, companyState: e.target.value })}
                     placeholder="Ex: RS"
                   />
+                </div>
+              </div>
+
+              <div style={s.field}>
+                <label style={s.label}>Cor de destaque da O.S.</label>
+                <p style={s.hint}>
+                  O corpo da O.S. continua preto. Só o cabeçalho e as faixas de seção usam esta cor
+                  (padrão vermelho). Use a cor da sua marca.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="color"
+                    value={/^#[0-9a-fA-F]{6}$/.test(form.osAccentColor || '') ? form.osAccentColor : '#D62828'}
+                    onChange={(e) => setForm({ ...form, osAccentColor: e.target.value.toUpperCase() })}
+                    style={{ width: 52, height: 40, padding: 2, border: '1px solid var(--border-color)', borderRadius: 8, background: 'var(--bg-surface)', cursor: 'pointer' }}
+                    aria-label="Selecionar cor de destaque da O.S."
+                  />
+                  <input
+                    style={{ ...s.input, flex: '0 1 140px', textTransform: 'uppercase' }}
+                    value={form.osAccentColor || ''}
+                    onChange={(e) => setForm({ ...form, osAccentColor: e.target.value })}
+                    placeholder="#D62828"
+                    maxLength={7}
+                  />
+                  {['#D62828', '#1D4ED8', '#047857', '#7C3AED', '#B45309', '#111827'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setForm({ ...form, osAccentColor: preset })}
+                      title={preset}
+                      style={{
+                        width: 28, height: 28, borderRadius: 6, cursor: 'pointer', padding: 0,
+                        background: preset,
+                        border: (form.osAccentColor || '').toUpperCase() === preset ? '2px solid var(--text-main)' : '1px solid var(--border-color)',
+                      }}
+                      aria-label={`Usar cor ${preset}`}
+                    />
+                  ))}
                 </div>
               </div>
 

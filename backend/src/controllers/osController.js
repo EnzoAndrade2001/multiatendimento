@@ -793,6 +793,18 @@ async function generatePdf(req, res) {
 
     const settings = os.tenant.settings;
     const primaryColor = '#000000'; // Cor padrão preto
+    // Cor de destaque configurável por empresa (cabeçalho da marca + bandas de
+    // seção). O corpo do documento continua preto; só o acento vermelho vira
+    // a cor da empresa. Valor inválido/ausente => vermelho padrão.
+    const accentColor = /^#[0-9a-fA-F]{6}$/.test(String(settings?.osAccentColor || ''))
+      ? String(settings.osAccentColor).toUpperCase()
+      : '#D62828';
+    // Texto legível sobre o acento (luminância relativa simplificada).
+    const accentTextColor = (() => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(accentColor.slice(i, i + 2), 16) / 255);
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return lum > 0.6 ? '#000000' : '#FFFFFF';
+    })();
     const firebirdOrder = osPrintData?.serviceOrder || {};
     const firebirdClient = osPrintData?.client || {};
     const firebirdEquipment = osPrintData?.equipment || {};
@@ -1036,6 +1048,8 @@ async function generatePdf(req, res) {
     }
 
     const officialHtml = renderOfficialOsTemplate({
+      accentColor,
+      accentTextColor,
       number: os.externalId || os.id.slice(-6).toUpperCase(),
       date: currentOsDate,
       time: currentOsTime,
@@ -1117,7 +1131,9 @@ async function generatePdf(req, res) {
       return res.send(officialHtml);
     }
 
-    let companyLogoContent = { text: 'LCD', bold: true, fontSize: 23, color: '#D71920', alignment: 'center', width: 58 };
+    const logoInitials = String(company.brand || company.name || 'OS')
+      .trim().split(/\s+/).map((word) => word[0]).filter(Boolean).slice(0, 3).join('').toUpperCase() || 'OS';
+    let companyLogoContent = { text: logoInitials, bold: true, fontSize: 23, color: accentColor, alignment: 'center', width: 58 };
     try {
       if (os.tenant.logoUrl) {
         const { uploadsPath } = require('../utils/uploads');
@@ -1224,7 +1240,7 @@ async function generatePdf(req, res) {
         },
       },
       {
-        table: { widths: ['*'], body: [[{ text: 'Descrição/Visita', bold: true, color: '#FFF', fillColor: '#D62828', fontSize: 7 }]] },
+        table: { widths: ['*'], body: [[{ text: 'Descrição/Visita', bold: true, color: accentTextColor, fillColor: accentColor, fontSize: 7 }]] },
         layout: 'noBorders',
       },
       {
@@ -1246,7 +1262,7 @@ async function generatePdf(req, res) {
           hLineWidth: () => 1,
           vLineWidth: () => 2,
           hLineColor: () => '#222',
-          vLineColor: () => '#D62828',
+          vLineColor: () => accentColor,
           paddingLeft: () => 3,
           paddingRight: () => 3,
           paddingTop: () => 3,
@@ -1254,7 +1270,7 @@ async function generatePdf(req, res) {
         },
       },
       {
-        table: { widths: ['*'], body: [[{ text: 'Follow-up/Ação', bold: true, color: '#FFF', fillColor: '#D62828', fontSize: 7 }]] },
+        table: { widths: ['*'], body: [[{ text: 'Follow-up/Ação', bold: true, color: accentTextColor, fillColor: accentColor, fontSize: 7 }]] },
         layout: 'noBorders',
       },
       {
@@ -1263,7 +1279,7 @@ async function generatePdf(req, res) {
           hLineWidth: () => 1,
           vLineWidth: () => 2,
           hLineColor: () => '#222',
-          vLineColor: () => '#D62828',
+          vLineColor: () => accentColor,
           paddingLeft: () => 3,
           paddingRight: () => 3,
           paddingTop: () => 3,

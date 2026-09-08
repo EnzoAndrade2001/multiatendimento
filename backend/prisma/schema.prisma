@@ -110,6 +110,9 @@ model TenantSettings {
   companyPhone   String?
   companyCity    String?
   companyState   String?
+  // Cor de destaque do cabecalho/bandas da O.S. (o texto continua preto).
+  // Hex #RRGGBB; null = vermelho padrao.
+  osAccentColor  String? @default("#D62828")
 
   // SerpAPI para Prospecção de Leads
   serpApiKey String?

@@ -91,7 +91,7 @@ async function saveSettings(req, res) {
     ratingEnabled, ratingMessage, notificationPhone,
     serviceOrderManagerCopyEnabled, serviceOrderManagerPhone, serviceOrderManagerInstanceId,
     companyName, companyCnpj, companyIE, companyAddress, companyBairro, companyCep, companyPhone,
-    companyCity, companyState,
+    companyCity, companyState, osAccentColor,
     serpApiKey,
     firebirdClientToken,
     firebirdApiUrl,
@@ -130,6 +130,16 @@ async function saveSettings(req, res) {
   const managerInstanceId = serviceOrderManagerInstanceId === undefined
     ? undefined
     : (serviceOrderManagerInstanceId || null);
+
+  // Cor de destaque da O.S.: aceita apenas #RRGGBB; vazio limpa (volta ao
+  // vermelho padrao no gerador); valor invalido e ignorado.
+  const parsedOsAccentColor = osAccentColor === undefined
+    ? undefined
+    : (String(osAccentColor).trim() === ''
+      ? null
+      : (/^#[0-9a-fA-F]{6}$/.test(String(osAccentColor).trim())
+        ? String(osAccentColor).trim().toUpperCase()
+        : undefined));
 
   if (managerCopyEnabled) {
     if (!managerPhone || managerPhone.length < 12) {
@@ -179,6 +189,7 @@ async function saveSettings(req, res) {
       companyPhone,
       companyCity,
       companyState,
+      osAccentColor: parsedOsAccentColor,
       serpApiKey,
       firebirdClientToken,
       firebirdApiUrl,
@@ -228,6 +239,7 @@ async function saveSettings(req, res) {
       companyPhone,
       companyCity,
       companyState,
+      osAccentColor: parsedOsAccentColor,
       serpApiKey,
       firebirdClientToken,
       firebirdApiUrl,

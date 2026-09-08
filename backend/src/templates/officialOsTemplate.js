@@ -44,9 +44,24 @@ function renderHistory(history) {
 }
 
 function renderOfficialOsTemplate(model) {
+  // Cor de destaque por empresa (cabeçalho da marca + bandas "Descrição/Visita"
+  // e "Follow-up/Ação"). O corpo do documento segue preto. Valor inválido volta
+  // ao vermelho padrão.
+  const accent = /^#[0-9a-fA-F]{6}$/.test(String(model.accentColor || ''))
+    ? String(model.accentColor).toUpperCase()
+    : '#C62828';
+  const accentText = /^#[0-9a-fA-F]{6}$/.test(String(model.accentTextColor || ''))
+    ? String(model.accentTextColor).toUpperCase()
+    : '#FFFFFF';
+  const brandName = (model.company && (model.company.brand || model.company.name)) || '';
+  const logoInitials = text(
+    String(brandName).trim().split(/\s+/).map((word) => word[0]).filter(Boolean).slice(0, 3).join('').toUpperCase() || 'OS',
+    'OS',
+  );
+
   const logo = model.logoDataUri
-    ? `<img class="logo-lcd" src="${model.logoDataUri}" alt="LCD">`
-    : '<span class="logo-fallback">LCD</span>';
+    ? `<img class="logo-lcd" src="${model.logoDataUri}" alt="${logoInitials}">`
+    : `<span class="logo-fallback">${logoInitials}</span>`;
 
   const html = `<!doctype html>
 <html lang="pt-BR">
@@ -69,12 +84,12 @@ function renderOfficialOsTemplate(model) {
     .company-brand { display: block; font-size: 16px; font-weight: 700; line-height: 1.05; }
     .company-legal { display: block; margin-top: 1px; font-size: 10px; font-weight: 700; line-height: 1.1; }
     .logo-lcd { width: 15mm; height: 13mm; object-fit: contain; flex: 0 0 auto; }
-    .logo-fallback { width: 15mm; color: #d71920; font-size: 23px; font-weight: 700; line-height: 1; }
+    .logo-fallback { width: 15mm; color: ${accent}; font-size: 23px; font-weight: 700; line-height: 1; }
     .title { width: 22%; text-align: center; font-size: 12px; vertical-align: middle; }
     .meta { width: 25%; padding: 2px 4px; font-size: 12px; line-height: 1.16; }
     .meta-top { display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; font-size: 11px; }
     .section-title { background: #cfcfcf; font-weight: 700; font-size: 12px; line-height: 1.1; padding: 1.5px 4px; border: 1px solid #111; }
-    .section-title-red { background: #c62828; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .section-title-red { background: ${accent}; color: ${accentText}; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .label { display: inline-block; margin-right: 2px; font-weight: 700; }
     .check { display: inline-block; margin: 1px 6px 0 0; font-size: 12px; white-space: nowrap; }
     .check::before { content: ""; display: inline-flex; width: 12px; height: 12px; margin-right: 3px; align-items: center; justify-content: center; border: 1.5px solid #111; font-size: 10px; font-weight: 700; line-height: 1; vertical-align: -1px; }
@@ -85,8 +100,8 @@ function renderOfficialOsTemplate(model) {
     .localizacao-equipamento { color: #000; font-size: calc(1em + 6px); font-weight: 700; line-height: 1.2; }
     .localizacao-equipamento .label { color: #000; font-weight: 700; }
     .spaced-cell { padding: 3px 4px; line-height: 1.2; }
-    .description, .followup { border-left: 3px solid #c62828; border-right: 3px solid #c62828; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .description td, .followup td { border-left-color: #c62828; border-right-color: #c62828; }
+    .description, .followup { border-left: 3px solid ${accent}; border-right: 3px solid ${accent}; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .description td, .followup td { border-left-color: ${accent}; border-right-color: ${accent}; }
     .description { min-height: 29mm; }
     .technical-notes { margin-top: 5px; }
     .technical-note { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: 8px; min-height: 24px; }
