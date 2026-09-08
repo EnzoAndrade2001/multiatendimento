@@ -824,19 +824,31 @@ async function generatePdf(req, res) {
       return ddd && !String(phone).startsWith('(') ? `(${ddd}) ${phone}` : String(phone);
     };
 
-    // Fallback inteligente para dados da empresa
+    // Dados da empresa emissora. Prioridade: snapshot do IEMPRESA anexado a
+    // O.S. -> cadastro oficial sincronizado -> campos de fallback salvos na
+    // tela. NUNCA cair num CNPJ/nome fixo no codigo: isso ja imprimiu a
+    // identidade de outra empresa em O.S. de tenants sem cadastro sincronizado.
+    // Sem dado, os campos ficam vazios; so nome/marca usam o nome do tenant.
+    const tenantName = firstValue(settings?.companyName, os.tenant?.name);
     const company = {
-      brand: firstValue(firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, settings?.companyName, 'Empresa'),
-      name: firstValue(firebirdCompany.nmempresa, firebirdCompany.name, settings?.companyName, 'CLAUDIA CARDINALI DOS SANTOS FONTOURA LTDA'),
-      cnpj: firstValue(firebirdCompany.cnpj, settings?.companyCnpj, '35.692.721/0001-94'),
-      ie: firstValue(firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE, '0963799100'),
-      address: firstValue(joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress, 'RUA VINTE E QUATRO DE AGOSTO, 103'),
-      bairro: firstValue(firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro, 'JARDIM SABARA'),
-      cep: firstValue(firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep, '91.215-280'),
-      city: firstValue(firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity, 'PORTO ALEGRE'),
-      state: firstValue(firebirdCompany.uf, firebirdCompany.state, settings?.companyState, 'RS'),
-      phone: firstValue(joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone, '(051) 3028-3222')
+      brand: firstValue(firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
+      name: firstValue(firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
+      cnpj: firstValue(firebirdCompany.cnpj, settings?.companyCnpj),
+      ie: firstValue(firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
+      address: firstValue(joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
+      bairro: firstValue(firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
+      cep: firstValue(firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
+      city: firstValue(firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
+      state: firstValue(firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
+      phone: firstValue(joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
     };
+    // firstValue devolve undefined quando nada preenche; normaliza para string
+    // vazia para nao imprimir "undefined" no cabecalho.
+    for (const key of Object.keys(company)) {
+      if (company[key] === undefined || company[key] === null) company[key] = '';
+    }
+    // Sem UF nao imprime "()" solto no cabecalho.
+    company.cityLine = [company.city, company.state && `(${company.state})`].filter(Boolean).join(' ');
 
     // Identificação do atendente com fallback para o usuário atual que está gerando o documento
     let attendantName = firstValue(firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
@@ -1134,7 +1146,7 @@ async function generatePdf(req, res) {
                     { text: company.name, bold: true, fontSize: 8, alignment: 'center', margin: [0, 1, 0, 2] },
                     { text: `CNPJ: ${company.cnpj}   Insc.Estadual: ${company.ie}`, fontSize: 6.5, alignment: 'center' },
                     { text: `Endereço: ${company.address}`, fontSize: 6.5, alignment: 'center' },
-                    { text: `Cidade: ${company.city} (${company.state})   Bairro: ${company.bairro}`, fontSize: 6.5, alignment: 'center' },
+                    { text: `Cidade: ${company.cityLine}   Bairro: ${company.bairro}`, fontSize: 6.5, alignment: 'center' },
                     { text: `Fone: ${company.phone}   CEP: ${company.cep}`, fontSize: 6.5, alignment: 'center' },
                   ],
                 },
@@ -1361,7 +1373,7 @@ async function generatePdf(req, res) {
                     { text: company.name, bold: true, fontSize: 10, margin: [0, 2, 0, 2], color: primaryColor, alignment: 'center' },
                     { text: `CNPJ: ${company.cnpj}   |   Insc.Estadual: ${company.ie}`, fontSize: 7.5, margin: [0, 0, 0, 1], color: '#333', alignment: 'center' },
                     { text: `Endereço: ${company.address}`, fontSize: 7.5, margin: [0, 0, 0, 1], color: '#333', alignment: 'center' },
-                    { text: `Cidade: ${company.city} (${company.state})   |   Bairro: ${company.bairro}`, fontSize: 7.5, margin: [0, 0, 0, 1], color: '#333', alignment: 'center' },
+                    { text: `Cidade: ${company.cityLine}   |   Bairro: ${company.bairro}`, fontSize: 7.5, margin: [0, 0, 0, 1], color: '#333', alignment: 'center' },
                     { text: `Fone: ${company.phone}   |   CEP: ${company.cep}`, fontSize: 7.5, color: '#333', alignment: 'center' }
                   ],
                   border: [false, true, true, true],

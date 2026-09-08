@@ -730,13 +730,17 @@ export default function Settings() {
     });
   }
 
-  // O backend nunca reverte firebirdLastSyncStatus para "offline" sozinho -
-  // ele só grava "online" a cada ping do agente. Sem checar a idade do
-  // último ping, um agente desligado há dias continuava aparecendo
-  // "Conectado" pra sempre (o status ficava congelado no último valor).
+  // O que prova que o agente está vivo é a idade do último contato, não o
+  // texto do status: o /ping grava "online", mas cada /push grava "ok"/"partial"
+  // e é a última coisa que roda se o ciclo morre antes do ping. Então: contato
+  // recente + status que não seja erro explícito = conectado. (Antes exigia
+  // status === "online" e um agente sincronizando aparecia "Desconectado".)
   const AGENT_STALE_AFTER_MS = 10 * 60 * 1000; // 2x o intervalo padrão de sync (5 min)
   const agentLastSeenMs = form.firebirdLastSyncAt ? Date.now() - new Date(form.firebirdLastSyncAt).getTime() : null;
-  const agentIsOnline = form.firebirdLastSyncStatus === 'online' && agentLastSeenMs != null && agentLastSeenMs < AGENT_STALE_AFTER_MS;
+  const agentSyncState = String(form.firebirdLastSyncStatus || '').toLowerCase();
+  const agentIsOnline = agentLastSeenMs != null
+    && agentLastSeenMs < AGENT_STALE_AFTER_MS
+    && !['error', 'offline'].includes(agentSyncState);
   const agentInstalls = Array.isArray(agentStatus?.agents) ? agentStatus.agents : [];
   const agentPublishedVersion = agentStatus?.latestVersion || agentInfo?.version || null;
   const agentOutdatedCount = agentStatus?.outdatedCount || 0;

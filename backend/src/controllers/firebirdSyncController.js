@@ -919,6 +919,12 @@ async function pushBatch(req, res) {
       },
     });
 
+    // O /ping (que popula o inventario) e a ultima coisa do ciclo do agente;
+    // se o ciclo morre antes dele, o push ainda passou por aqui. Registrar a
+    // instalacao tambem no push garante que ela apareca no inventario mesmo
+    // sem o ping final.
+    await recordAgentInventory(tenant.id, agentIdentityFromPing(req));
+
     res.json({
       ok: true,
       tenant: tenant.slug,
