@@ -89,7 +89,11 @@ export default function Login() {
   const year = new Date().getFullYear();
 
   const brandMark = tenantInfo?.logoUrl ? (
-    <img src={getMediaUrl(tenantInfo.logoUrl)} alt={`Logo ${tenantInfo.name}`} style={s.brandLogoImg} />
+    // Logos de cliente costumam ser feitos para fundo claro -- numa placa
+    // clara qualquer logo (escuro, claro ou colorido) fica legivel.
+    <span style={s.brandLogoPlaque}>
+      <img src={getMediaUrl(tenantInfo.logoUrl)} alt={`Logo ${tenantInfo.name}`} style={s.brandLogoImg} />
+    </span>
   ) : (
     <span style={{ ...s.monogram, borderColor: `${primaryColor}59` }} aria-hidden="true">
       <span style={{ ...s.monogramAccent, background: primaryColor }} />
@@ -111,15 +115,18 @@ export default function Login() {
         .login-panel-anim { animation: login-in .4s cubic-bezier(.16,1,.3,1) both; }
         .login-input:focus-visible {
           border-color: var(--login-accent) !important;
-          outline: none !important;
-          box-shadow: 0 0 0 4px color-mix(in srgb, var(--login-accent) 22%, transparent) !important;
+          outline: 2px solid color-mix(in srgb, var(--login-accent) 55%, transparent) !important;
+          outline-offset: 1px;
         }
         .login-input::placeholder { color: #5C6879; }
+        /* Autofill do Chrome pinta o fundo de branco -- forca o fundo escuro.
+           Usa so box-shadow (o foco usa outline) para nao haver conflito. */
         .login-input:-webkit-autofill,
         .login-input:-webkit-autofill:hover,
-        .login-input:-webkit-autofill:focus {
-          -webkit-text-fill-color: #F4F6FA;
-          -webkit-box-shadow: 0 0 0 1000px #161B24 inset;
+        .login-input:-webkit-autofill:focus,
+        .login-input:-webkit-autofill:focus-visible {
+          -webkit-text-fill-color: #F4F6FA !important;
+          -webkit-box-shadow: 0 0 0 1000px #161B24 inset !important;
           caret-color: #F4F6FA;
           border-color: #2A3546;
           transition: background-color 9999s ease-out 0s;
@@ -322,7 +329,17 @@ const s = {
     letterSpacing: '-0.01em',
     color: '#E7ECF4',
   },
-  brandLogoImg: { height: '44px', maxWidth: '168px', objectFit: 'contain' },
+  brandLogoPlaque: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '9px 14px',
+    background: '#F4F6FA',
+    borderRadius: '12px',
+    border: '1px solid rgba(255,255,255,0.12)',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
+  },
+  brandLogoImg: { height: '30px', maxWidth: '150px', objectFit: 'contain', display: 'block' },
   brandBody: { position: 'relative', maxWidth: '30rem' },
   brandEyebrow: {
     margin: '0 0 1rem',
