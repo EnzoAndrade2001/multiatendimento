@@ -46,7 +46,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.3"
+DEFAULT_AGENT_VERSION = "1.1.4"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -933,25 +933,23 @@ class FirebirdRepository:
         """
         if not document_types:
             return []
-        # boleto sai do PlugBoleto (backend), sem passar pelo indice de pasta.
-        folder_types = [t for t in document_types if t != "boleto"]
+        # boleto preferencialmente vem do PlugBoleto (backend), pela chave no
+        # Firebird; se nao houver boleto imprimivel, cai para o indice de pasta.
+        non_boleto_types = [t for t in document_types if t != "boleto"]
         wants_boleto = "boleto" in document_types
         index = self.financial_document_index()
-        if folder_types and not index.entries:
-            return []
 
         packages: list[dict[str, Any]] = []
         checked = 0
         already_sent = 0
         skipped_period = 0
-        skipped_boleto = 0
         # Por tipo de documento: quantos titulos pararam ali por falta de match
         # (nao ambiguo - simplesmente nenhum PDF indexado bateu). O aviso de
         # "ambiguo" ja e logado individualmente; sem isso aqui, um "0 prontos"
         # ficava mudo sobre qual dos 3 tipos (nota/demonstrativo/boleto) e o
         # gargalo real, e reproduzir localmente nao ajuda - o indice depende
         # das pastas de rede da maquina do agente.
-        missing_by_type = {t: 0 for t in folder_types}
+        missing_by_type = {t: 0 for t in document_types}
         current_month = datetime.now().strftime("%Y-%m")
         for row in self.fetch_open_receivables_for_billing():
             checked += 1
@@ -959,9 +957,20 @@ class FirebirdRepository:
 
             # D4: envio automatico so do periodo atual. "Atual" = titulo emitido
             # neste mes-calendario (DTEMISSAOREC). Meses anteriores nao vencidos
-            # ou em atraso so saem por envio manual.
-            issued = parse_firebird_timestamp(row.get("dtemissaorec"))
-            if not issued or issued.strftime("%Y-%m") != current_month:
+            # ou em atraso so saem por envio manual. O firebirdsql devolve a
+            # data como date/datetime; nos testes vem como string ISO ou BR.
+            issued_raw = row.get("dtemissaorec")
+            if hasattr(issued_raw, "strftime"):
+                issued_ym = issued_raw.strftime("%Y-%m")
+            elif issued_raw:
+                text = str(issued_raw)
+                iso = re.match(r"(\d{4})-(\d{2})", text)
+                br = None if iso else re.match(r"(\d{2})[/.](\d{2})[/.](\d{4})", text)
+                issued_ym = (f"{iso.group(1)}-{iso.group(2)}" if iso
+                             else f"{br.group(3)}-{br.group(2)}" if br else None)
+            else:
+                issued_ym = None
+            if issued_ym != current_month:
                 skipped_period += 1
                 continue
 
@@ -981,16 +990,14 @@ class FirebirdRepository:
             documents: list[dict[str, Any]] = []
             hash_parts: list[str] = []
             ok = True
+            folder_types = list(non_boleto_types)
 
             if wants_boleto:
                 situacao = str(row.get("boleto_situacao") or "").strip().upper()
                 chave = str(row.get("chave_integracao") or "").strip()
-                if situacao not in {"EMITIDO", "REGISTRADO", "LIQUIDADO"} or not chave:
-                    skipped_boleto += 1
-                    ok = False
-                else:
+                if situacao in {"EMITIDO", "REGISTRADO", "LIQUIDADO"} and chave:
                     nosso = str(row.get("nosso_numero") or "").strip()
-                    period = str(row.get("billing_period") or issued.strftime("%Y/%m")).strip()
+                    period = str(row.get("billing_period") or issued_ym.replace("-", "/")).strip()
                     documents.append({
                         "documentType": "boleto",
                         "fileName": friendly_filename("boleto", context),
@@ -1003,6 +1010,9 @@ class FirebirdRepository:
                         },
                     })
                     hash_parts.append(f"boleto:{receivable_id}:{nosso}:{period}")
+                else:
+                    # Sem boleto imprimivel no Firebird -> tenta a pasta monitorada.
+                    folder_types.append("boleto")
 
             for document_type in folder_types if ok else []:
                 try:
@@ -1044,8 +1054,8 @@ class FirebirdRepository:
             })
         logging.info(
             "Envio automatico: %s titulo(s) verificado(s), %s pronto(s), %s ja enviado(s), "
-            "%s fora do periodo atual, %s sem boleto imprimivel. Sem match por tipo: %s",
-            checked, len(packages), already_sent, skipped_period, skipped_boleto, missing_by_type,
+            "%s fora do periodo atual. Sem match/boleto por tipo: %s",
+            checked, len(packages), already_sent, skipped_period, missing_by_type,
         )
         return packages
 

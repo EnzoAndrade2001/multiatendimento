@@ -20,6 +20,15 @@ from main import (
 
 CUSTOMER_CNPJ = "07.275.799/0001-78"
 
+# D4: o envio automatico so considera titulos emitidos no mes atual, entao as
+# fixtures usam datas do mes corrente em vez de datas fixas de 2026-07.
+_EMISSAO = datetime.now().replace(day=3, hour=0, minute=0, second=0, microsecond=0)
+_VENC = _EMISSAO + timedelta(days=20)
+_EMISSAO_BR = _EMISSAO.strftime("%d/%m/%Y")
+_VENC_BR = _VENC.strftime("%d/%m/%Y")
+_EMISSAO_ISO = _EMISSAO.strftime("%Y-%m-%d")
+_VENC_ISO = _VENC.strftime("%Y-%m-%d")
+
 
 def make_pdf(path: Path, lines: list[str]):
     document = canvas.Canvas(str(path))
@@ -91,8 +100,8 @@ class FindReadyBillingPackagesTest(unittest.TestCase):
             "Fatura de Locacao de Bens Moveis",
             f"Cliente J. C. MUNIZ - CNPJ {CUSTOMER_CNPJ}",
             "Fatura 14328",
-            "Data Emissao 28/07/2026",
-            "Data de Vencimento 10/08/2026",
+            f"Data Emissao {_EMISSAO_BR}",
+            f"Data de Vencimento {_VENC_BR}",
             "VALOR LIQUIDO R$ 141,30",
         ])
         make_pdf(self.root / "b.pdf", [
@@ -105,7 +114,7 @@ class FindReadyBillingPackagesTest(unittest.TestCase):
             "RECIBO DO PAGADOR - FICHA DE COMPENSACAO",
             f"Pagador J. C. MUNIZ - CNPJ {CUSTOMER_CNPJ}",
             "Numero do Documento 14328/1",
-            "Vencimento 10/08/2026",
+            f"Vencimento {_VENC_BR}",
             "Valor do Documento 141,30",
             "Nosso Numero 00013216.76",
         ])
@@ -123,8 +132,8 @@ class FindReadyBillingPackagesTest(unittest.TestCase):
             "invoice_number": "14328",
             "seqdemonstrativo": 14365,
             "dtemissaonfs": None,
-            "dtemissaorec": "2026-07-28",
-            "dtvectorec": "2026-08-10",
+            "dtemissaorec": _EMISSAO_ISO,
+            "dtvectorec": _VENC_ISO,
             "valreceita": 141.30,
         }
 
@@ -181,8 +190,8 @@ class RunBillingAutomationTest(unittest.TestCase):
             "Fatura de Locacao de Bens Moveis",
             f"Cliente J. C. MUNIZ - CNPJ {CUSTOMER_CNPJ}",
             "Fatura 14328",
-            "Data Emissao 28/07/2026",
-            "Data de Vencimento 10/08/2026",
+            f"Data Emissao {_EMISSAO_BR}",
+            f"Data de Vencimento {_VENC_BR}",
             "VALOR LIQUIDO R$ 141,30",
         ])
         self.config = AppConfig(
@@ -209,8 +218,8 @@ class RunBillingAutomationTest(unittest.TestCase):
             "invoice_number": "14328",
             "seqdemonstrativo": None,
             "dtemissaonfs": None,
-            "dtemissaorec": "2026-07-28",
-            "dtvectorec": "2026-08-10",
+            "dtemissaorec": _EMISSAO_ISO,
+            "dtvectorec": _VENC_ISO,
             "valreceita": 141.30,
         }
 
@@ -367,7 +376,9 @@ class RunBillingAutomationTest(unittest.TestCase):
         self.config.billing_auto_send_weekdays_only = False
         ledger = BillingSendLedger(self.root / "ledger.json")
         crm = CRMClient(self.config)
-        fake_now = datetime(2026, 8, 28, 3, 0, 0)
+        # Hora 3 (fora da janela 8-19), mas no mes atual para o filtro D4
+        # (titulo emitido neste mes) nao barrar o envio antes do teste da janela.
+        fake_now = datetime.now().replace(hour=3, minute=0, second=0, microsecond=0)
         with patch("main.datetime") as fake_datetime, \
              patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]), \
              patch.object(crm, "send_billing_package", return_value={"success": True}) as send:
