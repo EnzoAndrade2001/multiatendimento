@@ -62,7 +62,7 @@ AGENT_CAPABILITIES = (
     "commands.process-billing",
     "commands.fetch-billing-document",
     "commands.fetch-company-profile",
-    "commands.fetch-plugboleto-config",
+    "sync.plugboleto-config",
 )
 
 # A command listener normally waits up to 25 seconds for work. Authentication
@@ -743,11 +743,6 @@ class CRMClient:
                             "Cadastro da empresa sincronizado: %s.",
                             company.get("name") or company.get("companyCode") or "sem nome",
                         )
-                    elif cmd_type == "FETCH_PLUGBOLETO_CONFIG":
-                        logging.info("Consultando credencial do PlugBoleto no iLux (CE_CEDENTE / CE_PARAM_CONFIG)...")
-                        plug_config = repo.fetch_plugboleto_config()
-                        self.report_command_result(cmd_id, success=True, result={"plugBoleto": plug_config})
-                        logging.info("Credencial do PlugBoleto sincronizada com o CRM.")
                     else:
                         logging.warning("Tipo de comando desconhecido: %s", cmd_type)
                 except Exception as e:
@@ -2701,6 +2696,21 @@ def sync_company_profile(repo: FirebirdRepository, crm: CRMClient, config: AppCo
         logging.warning("Não foi possível sincronizar IEMPRESA: %s", exc)
 
 
+def sync_plugboleto_config(repo: FirebirdRepository, crm: CRMClient) -> None:
+    """Empurra a credencial do PlugBoleto (CE_CEDENTE / CE_PARAM_CONFIG) para o
+    CRM a cada ciclo, do mesmo jeito que sync_company_profile faz com a empresa.
+
+    O CRM guarda o token cifrado e passa a chamar o PlugBoleto direto, sem a
+    pasta monitorada e sem round-trip com o agente. Leitura pequena e idempotente.
+    """
+    try:
+        cfg = repo.fetch_plugboleto_config()
+        crm.push("plugBoletoConfig", [cfg])
+        logging.info("Credencial do PlugBoleto sincronizada com o CRM.")
+    except Exception as exc:
+        logging.warning("Não foi possível sincronizar a credencial do PlugBoleto: %s", exc)
+
+
 def sync_entity(
     repo: FirebirdRepository,
     crm: CRMClient,
@@ -3111,6 +3121,7 @@ def run_cycle(
     # Sync static support metadata
     sync_static_entities(repo, crm)
     sync_company_profile(repo, crm, config)
+    sync_plugboleto_config(repo, crm)
 
     entities = ["contacts", "equipments", "contracts"]
     if full:

@@ -134,11 +134,12 @@ model TenantSettings {
   // PlugBoleto (TecnoSpeed) - o CRM busca o PDF do boleto direto na API do
   // banco, sem depender da pasta monitorada. Credenciais por cedente vindas
   // do iLux (CE_CEDENTE / CE_PARAM_CONFIG). O token fica cifrado.
-  plugBoletoEnabled     Boolean @default(false)
-  plugBoletoBaseUrl     String? @default("https://plugboleto.com.br/api/v1")
-  plugBoletoPrintPath   String? @default("/boletos/impressao/lote")
-  plugBoletoCedenteCnpj String?
-  plugBoletoTokenCipher String? @db.Text
+  plugBoletoEnabled        Boolean   @default(false)
+  plugBoletoBaseUrl        String?   @default("https://plugboleto.com.br/api/v1")
+  plugBoletoPrintPath      String?   @default("/boletos/impressao/lote")
+  plugBoletoCedenteCnpj    String?
+  plugBoletoTokenCipher    String?   @db.Text
+  plugBoletoConfigSyncedAt DateTime? // último push da credencial pelo agente
 
   // Configurações de KPI do RevGuard AI
   kpiContractValue       Float? @default(1200.0)

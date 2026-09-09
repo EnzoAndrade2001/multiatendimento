@@ -3,27 +3,16 @@ const { normalizePhoneNumber } = require('../services/evolutionService');
 const botPromptService = require('../services/botPromptService');
 const { filterSettingsOutput } = require('../auth/settingsAccess');
 const { getLatestCompanyProfile, getPendingCompanyRequest, getLatestCompanyRequest, requestCompanySync } = require('../services/companyProfileService');
-const { requestPlugBoletoConfigSync, getLatestPlugBoletoConfigRequest } = require('../services/plugBoletoConfigService');
 const aiService = require('../services/aiService');
 const { encryptSecret } = require('../services/printGuardCrypto');
 
 async function getSettings(req, res) {
-  const [settings, firebirdCompany, pendingCompanyRequest, latestCompanyRequest, latestPlugBoletoRequest] = await Promise.all([
+  const [settings, firebirdCompany, pendingCompanyRequest, latestCompanyRequest] = await Promise.all([
     prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } }),
     getLatestCompanyProfile(req.user.tenantId),
     getPendingCompanyRequest(req.user.tenantId),
     getLatestCompanyRequest(req.user.tenantId),
-    getLatestPlugBoletoConfigRequest(req.user.tenantId),
   ]);
-
-  const plugBoletoRequestStatus = latestPlugBoletoRequest?.payload?.status || null;
-  const plugBoletoConfigSync = {
-    plugBoletoConfigSyncStatus: ['pending', 'processing'].includes(plugBoletoRequestStatus)
-      ? 'pending'
-      : (plugBoletoRequestStatus === 'success' ? 'ok' : (plugBoletoRequestStatus === 'failed' ? 'failed' : 'never')),
-    plugBoletoConfigSyncedAt: latestPlugBoletoRequest?.payload?.completedAt || null,
-    plugBoletoConfigSyncError: latestPlugBoletoRequest?.payload?.error || null,
-  };
 
   const requestStatus = latestCompanyRequest?.payload?.status;
   const requestFailed = requestStatus === 'failed' && (
@@ -45,7 +34,6 @@ async function getSettings(req, res) {
     evolutionUrl: process.env.DEFAULT_EVOLUTION_URL || '',
     evolutionKey: process.env.DEFAULT_EVOLUTION_KEY || '',
     ...companySync,
-    ...plugBoletoConfigSync,
   }));
 
   // Injeta os padrões do servidor se o tenant não tiver configurado
@@ -56,16 +44,11 @@ async function getSettings(req, res) {
     systemPrompt: settings.botSystemPrompt,
     transferKeyword: settings.botTransferWord,
     outOfOfficeMessage: settings.outOfOfficeMessage,
-    // O token do PlugBoleto nunca sai; a UI só precisa saber se está configurado.
+    // O token do PlugBoleto nunca sai; a UI só precisa saber se está configurado
+    // e quando o agente sincronizou pela última vez.
     plugBoletoTokenSet: Boolean(settings.plugBoletoTokenCipher),
     ...companySync,
-    ...plugBoletoConfigSync,
   }));
-}
-
-async function syncPlugBoletoConfig(req, res) {
-  const result = await requestPlugBoletoConfigSync(req.user.tenantId, req.user.userId || req.user.id || null);
-  res.status(result.alreadyQueued ? 200 : 202).json({ ok: true, ...result });
 }
 
 async function syncCompanyFromFirebird(req, res) {
@@ -371,4 +354,4 @@ async function uploadLogo(req, res) {
   res.json({ url });
 }
 
-module.exports = { getSettings, saveSettings, testAiProvider, syncCompanyFromFirebird, syncPlugBoletoConfig, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };
+module.exports = { getSettings, saveSettings, testAiProvider, syncCompanyFromFirebird, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };

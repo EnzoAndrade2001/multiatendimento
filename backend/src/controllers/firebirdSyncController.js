@@ -9,7 +9,6 @@ const { mapEquipmentType } = require('../utils/equipmentMapper');
 const { mediaPath } = require('../utils/uploads');
 const billingDocumentService = require('../services/billingDocumentService');
 const { COMPANY_ENTITY, COMPANY_REQUEST_ENTITY, normalizeCompanyProfile } = require('../services/companyProfileService');
-const { PLUGBOLETO_REQUEST_ENTITY } = require('../services/plugBoletoConfigService');
 const { encryptSecret } = require('../services/printGuardCrypto');
 const { normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
@@ -862,6 +861,30 @@ async function pushBatch(req, res) {
           stats.stored += 1;
           continue;
         }
+        if (entity === 'plugBoletoConfig') {
+          // Credencial do PlugBoleto (CE_CEDENTE / CE_PARAM_CONFIG) empurrada
+          // pelo agente a cada ciclo. Guarda o token cifrado direto em
+          // TenantSettings; nao vira registro bruto.
+          const token = String(record.token || '').trim();
+          const cnpj = String(record.cedenteCnpj || record.cnpj || '').replace(/\D/g, '');
+          if (token && cnpj) {
+            await prisma.tenantSettings.update({
+              where: { tenantId: tenant.id },
+              data: {
+                plugBoletoEnabled: true,
+                plugBoletoCedenteCnpj: cnpj,
+                plugBoletoBaseUrl: String(record.baseUrl || '').trim() || undefined,
+                plugBoletoPrintPath: String(record.printPath || '').trim() || undefined,
+                plugBoletoTokenCipher: encryptSecret(token),
+                plugBoletoConfigSyncedAt: new Date(),
+              },
+            });
+            stats.stored += 1;
+          } else {
+            stats.skipped += 1;
+          }
+          continue;
+        }
         const payloadToStore = entity === COMPANY_ENTITY
           ? normalizeCompanyProfile(record)
           : record;
@@ -1014,7 +1037,6 @@ async function getPendingCommands(req, res) {
     let pendingBillingPdf = null;
     let pendingBillingDocument = null;
     let pendingCompanyProfile = null;
-    let pendingPlugBoletoConfig = null;
 
     do {
       const leaseExpiredAt = new Date(Date.now() - 45_000);
@@ -1130,31 +1152,7 @@ async function getPendingCommands(req, res) {
         });
       }
 
-      const plugBoletoCandidate = await prisma.externalSyncRecord.findFirst({
-        where: {
-          tenantId: tenant.id,
-          source: 'crm',
-          entity: PLUGBOLETO_REQUEST_ENTITY,
-          payload: { path: ['status'], equals: 'pending' },
-        },
-        orderBy: { receivedAt: 'asc' },
-        select: { id: true, payload: true },
-      });
-      if (plugBoletoCandidate) {
-        pendingPlugBoletoConfig = await prisma.externalSyncRecord.update({
-          where: { id: plugBoletoCandidate.id },
-          data: {
-            payload: {
-              ...plugBoletoCandidate.payload,
-              status: 'processing',
-              processingAt: new Date().toISOString(),
-            },
-          },
-          select: { id: true, payload: true },
-        });
-      }
-
-      if (pendingOS.length > 0 || pendingBillingPdf || pendingBillingDocument || pendingCompanyProfile || pendingPlugBoletoConfig || tenant.settings?.firebirdQueueBillingProcess || Date.now() >= deadline) break;
+      if (pendingOS.length > 0 || pendingBillingPdf || pendingBillingDocument || pendingCompanyProfile || tenant.settings?.firebirdQueueBillingProcess || Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, 350));
     } while (true);
 
@@ -1235,14 +1233,6 @@ async function getPendingCommands(req, res) {
         id: pendingCompanyProfile.id,
         type: 'FETCH_COMPANY_PROFILE',
         payload: pendingCompanyProfile.payload,
-      });
-    }
-
-    if (pendingPlugBoletoConfig) {
-      commands.push({
-        id: pendingPlugBoletoConfig.id,
-        type: 'FETCH_PLUGBOLETO_CONFIG',
-        payload: pendingPlugBoletoConfig.payload,
       });
     }
 
@@ -1328,47 +1318,6 @@ async function commandCallback(req, res) {
               status: 'failed',
               completedAt: new Date().toISOString(),
               error: String(error || 'Nao foi possivel consultar os dados da empresa no Firebird.'),
-            },
-          },
-        });
-      }
-      return res.json({ ok: true });
-    }
-
-    const plugBoletoRequest = await prisma.externalSyncRecord.findFirst({
-      where: { id, tenantId: tenant.id, source: 'crm', entity: PLUGBOLETO_REQUEST_ENTITY },
-      select: { id: true, payload: true },
-    });
-    if (plugBoletoRequest) {
-      const config = success && result?.plugBoleto && typeof result.plugBoleto === 'object'
-        ? result.plugBoleto
-        : null;
-      const token = config ? String(config.token || '').trim() : '';
-      const cnpj = config ? String(config.cedenteCnpj || config.cnpj || '').replace(/\D/g, '') : '';
-      if (config && token && cnpj) {
-        await prisma.tenantSettings.update({
-          where: { tenantId: tenant.id },
-          data: {
-            plugBoletoEnabled: true,
-            plugBoletoCedenteCnpj: cnpj,
-            plugBoletoBaseUrl: String(config.baseUrl || '').trim() || undefined,
-            plugBoletoPrintPath: String(config.printPath || '').trim() || undefined,
-            plugBoletoTokenCipher: encryptSecret(token),
-          },
-        });
-        await prisma.externalSyncRecord.update({
-          where: { id: plugBoletoRequest.id },
-          data: { payload: { ...plugBoletoRequest.payload, status: 'success', completedAt: new Date().toISOString() } },
-        });
-      } else {
-        await prisma.externalSyncRecord.update({
-          where: { id: plugBoletoRequest.id },
-          data: {
-            payload: {
-              ...plugBoletoRequest.payload,
-              status: 'failed',
-              completedAt: new Date().toISOString(),
-              error: String(error || 'Credencial do PlugBoleto nao encontrada no iLux (CE_CEDENTE / CE_PARAM_CONFIG).'),
             },
           },
         });
