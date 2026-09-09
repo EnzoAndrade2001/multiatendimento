@@ -20,6 +20,41 @@ test('nao anuncia boleto ausente como disponivel', () => {
   assert.equal(_private.documentAvailability({ invoiceNumber: '100', hasBoleto: false }, 'boleto'), false);
 });
 
+test('sourceLabel traduz a origem do documento', () => {
+  assert.equal(service.sourceLabel('crm-rerender'), 'gerado pelo CRM');
+  assert.equal(service.sourceLabel('ilux-export-folder'), 'arquivo da pasta');
+  assert.equal(service.sourceLabel('plugboleto'), 'API do banco');
+  assert.equal(service.sourceLabel('outra-coisa'), null);
+  assert.equal(service.sourceLabel(null), null);
+});
+
+test('completeDocumentRequest grava a origem (source) no registro do documento', async (context) => {
+  const fs = require('fs');
+  const ogWrite = fs.promises.writeFile;
+  const ogUpdate = prisma.externalSyncRecord.update;
+  context.after(() => { fs.promises.writeFile = ogWrite; prisma.externalSyncRecord.update = ogUpdate; });
+
+  fs.promises.writeFile = async () => {};
+  let saved = null;
+  prisma.externalSyncRecord.update = async (args) => { saved = args.data.payload; return {}; };
+
+  await service.completeDocumentRequest({
+    request: { id: 'req-1', payload: { documentType: 'statement', fileName: 'd.pdf' } },
+    success: true,
+    result: {
+      documentType: 'statement',
+      pdfBase64: Buffer.from('%PDF-1.4 teste').toString('base64'),
+      fileName: 'DEMONSTRATIVO.pdf',
+      mimeType: 'application/pdf',
+      source: 'crm-rerender',
+    },
+  });
+
+  assert.equal(saved.status, 'success');
+  assert.equal(saved.source, 'crm-rerender');
+  assert.match(saved.mediaUrl, /^\/uploads\/media\//);
+});
+
 test('gera chaves independentes por titulo e tipo de documento', () => {
   assert.equal(_private.requestExternalId('18741', 'invoice'), 'official-v1:18741:invoice');
   assert.equal(_private.requestExternalId('18741', 'statement'), 'official-v1:18741:statement');

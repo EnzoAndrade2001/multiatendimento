@@ -107,8 +107,19 @@ function documentState(type, receivable, request, customerName) {
     status,
     mediaUrl: ready ? payload.mediaUrl : null,
     fileName: ready ? payload.fileName : defaultFileName(type, receivable, customerName),
+    source: ready ? (payload.source || null) : null,
     error: status === 'failed' ? cleanText(payload.error) : null,
   };
+}
+
+// Rotulo curto de origem para a UI.
+const SOURCE_LABELS = Object.freeze({
+  'crm-rerender': 'gerado pelo CRM',
+  'ilux-export-folder': 'arquivo da pasta',
+  plugboleto: 'API do banco',
+});
+function sourceLabel(source) {
+  return SOURCE_LABELS[source] || null;
 }
 
 async function listDocumentStates({ tenantId, receivable, customerName }) {
@@ -265,6 +276,8 @@ async function getOrRequestDocument(params) {
     mediaUrl: payload.mediaUrl,
     fileName: payload.fileName || defaultFileName(params.documentType, params.receivable, params.customerName),
     mimeType: payload.mimeType || 'application/pdf',
+    source: payload.source || null,
+    sourceLabel: sourceLabel(payload.source),
   };
 }
 
@@ -306,6 +319,11 @@ async function completeDocumentRequest({ request, success, result, error }) {
         mediaUrl: `/uploads/media/${filename}`,
         fileName: displayName,
         mimeType: result.mimeType || 'application/pdf',
+        // De onde saiu o PDF: 'ilux-export-folder' (pasta monitorada do agente),
+        // 'crm-rerender' (demonstrativo gerado pelo CRM), 'plugboleto' (boleto
+        // direto pela API). Fica visível no modal de documentos da cobranca.
+        source: result.source || request.payload.source || null,
+        sha256: result.sha256 || null,
       },
     },
   });
@@ -546,6 +564,7 @@ module.exports = {
   retryFailedDocumentRequests,
   resolveDelivery,
   sendDocuments,
+  sourceLabel,
   _private: {
     assertDocumentType,
     documentAvailability,

@@ -1154,6 +1154,9 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
                             <strong>{document.label}</strong>
                             <small style={{ ...s.documentStatusBadge, ...billingDocumentStatusStyle(document) }}>{billingDocumentStatus(document)}</small>
                             {document.fileName ? <span title={document.fileName}>{document.fileName}</span> : null}
+                            {document.status === 'ready' && billingDocumentSourceLabel(document.source)
+                              ? <small style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>origem: {billingDocumentSourceLabel(document.source)}</small>
+                              : null}
                           </span>
                         </label>
                         <div className="crm-document-actions" style={s.documentActions}>
@@ -1753,6 +1756,13 @@ function billingDocumentIcon(type) {
   if (type === 'boleto') return <CreditCard size={17} />;
   if (type === 'statement') return <ClipboardList size={17} />;
   return <FileText size={17} />;
+}
+
+function billingDocumentSourceLabel(source) {
+  if (source === 'crm-rerender') return 'gerado pelo CRM';
+  if (source === 'ilux-export-folder') return 'arquivo da pasta';
+  if (source === 'plugboleto') return 'API do banco';
+  return null;
 }
 
 const crmResponsiveCss = `
