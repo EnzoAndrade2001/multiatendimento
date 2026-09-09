@@ -35,9 +35,10 @@ test('limita a janela de recuperação para evitar carga acidental', () => {
   assert.deepEqual(syncTesting.normalizeOptions({ hours: 999, limitPerChat: 999, maxChats: 999 }), { hours: 168, limitPerChat: 100, maxChats: 500 });
 });
 
-function patchHealth(context, { state, hasTraffic = true } = {}) {
+function patchHealth(context, { state, hasTraffic = true, ownerJid } = {}) {
   const og = {
     getState: evolution.getConnectionState,
+    fetchInfo: evolution.fetchInstanceInfo,
     update: prisma.waInstance.update,
     eventCreate: prisma.waInstanceHealthEvent.create,
     eventFind: prisma.waInstanceHealthEvent.findFirst,
@@ -45,12 +46,14 @@ function patchHealth(context, { state, hasTraffic = true } = {}) {
   };
   context.after(() => {
     evolution.getConnectionState = og.getState;
+    evolution.fetchInstanceInfo = og.fetchInfo;
     prisma.waInstance.update = og.update;
     prisma.waInstanceHealthEvent.create = og.eventCreate;
     prisma.waInstanceHealthEvent.findFirst = og.eventFind;
     prisma.message.findFirst = og.msgFind;
   });
   evolution.getConnectionState = async () => ({ instance: { state } });
+  evolution.fetchInstanceInfo = async () => (ownerJid ? { ownerJid } : null);
   let saved = null;
   prisma.waInstance.update = async ({ data }) => { saved = data; return { ...INSTANCE(), ...data }; };
   const events = [];
@@ -90,6 +93,34 @@ test('D: instância PARADA (sem tráfego 48h) NÃO vira "silent" mesmo sem webho
 
   assert.equal(spy.saved.healthStatus, 'healthy', 'instância de teste/parada não é incidente');
   assert.equal(spy.events.length, 0);
+});
+
+test('número errado: sessão "open" logada em número diferente do cadastrado vira "wrong_number"', async (context) => {
+  const spy = patchHealth(context, { state: 'open', ownerJid: '555194412679@s.whatsapp.net' });
+  await instanceHealth.checkInstance(INSTANCE({
+    id: `wa-wrongnum-${Date.now()}`,
+    instanceName: `lcd-financeiro-${Date.now()}`,
+    phone: '555193896363',
+    lastWebhookAt: new Date(),
+  }));
+
+  assert.equal(spy.saved.healthStatus, 'wrong_number');
+  assert.equal(spy.saved.status, 'degraded');
+  assert.match(spy.saved.lastHealthError, /cadastrada para \+555193896363/);
+  assert.equal(spy.events[0].healthStatus, 'wrong_number');
+});
+
+test('número errado: mesmo número em formato diferente (com/sem 9º dígito) NÃO alarma', async (context) => {
+  const spy = patchHealth(context, { state: 'open', ownerJid: '554899998888@s.whatsapp.net' });
+  await instanceHealth.checkInstance(INSTANCE({
+    id: `wa-ok9-${Date.now()}`,
+    instanceName: `lcd-ok9-${Date.now()}`,
+    phone: '5548999998888', // com o 9 extra
+    lastWebhookAt: new Date(),
+  }));
+
+  assert.equal(spy.saved.healthStatus, 'healthy');
+  assert.equal(spy.saved.status, 'connected');
 });
 
 test('E: uma queda de conexão (open -> close) grava um evento de histórico', async (context) => {

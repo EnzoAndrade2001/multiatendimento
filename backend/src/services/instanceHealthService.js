@@ -119,6 +119,24 @@ async function hasRecentTraffic(instanceId) {
   return value;
 }
 
+// Numero realmente logado na sessao (ownerJid da Evolution). Cache de 5 min por
+// instancia -- so consultamos para instancias 'open' e a resposta muda raro.
+const connectedNumberCache = new Map();
+async function fetchConnectedNumber(instance, url, key) {
+  const cached = connectedNumberCache.get(instance.instanceName);
+  if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.value;
+  let value = null;
+  try {
+    const info = await evolution.fetchInstanceInfo(url, key, instance.instanceName);
+    const owner = info?.ownerJid || info?.owner || info?.number;
+    if (owner) value = String(owner).split('@')[0].replace(/\D/g, '') || null;
+  } catch (err) {
+    console.warn('[instance-health] falha ao consultar numero conectado:', err.message);
+  }
+  connectedNumberCache.set(instance.instanceName, { at: Date.now(), value });
+  return value;
+}
+
 async function pruneHealthEvents() {
   if (Date.now() - lastPruneAt < 6 * 60 * 60 * 1000) return;
   lastPruneAt = Date.now();
@@ -177,6 +195,22 @@ async function checkInstance(instance) {
       if (silenceMs > SILENCE_ALERT_MS && await hasRecentTraffic(instance.id)) {
         health = { status: 'degraded', healthStatus: 'silent' };
         healthError = `Instância conectada, mas sem receber eventos da Evolution há ${Math.round(silenceMs / 60000)} min. Mensagens podem estar sendo perdidas.`;
+      }
+    }
+
+    // Divergencia de numero: 'open', mas logada num numero diferente do
+    // cadastrado -- alguem leu o QR com o aparelho errado. Foi assim que a
+    // LCD-FINANCEIRO ficou dias sem receber sem nenhum alarme. O webhook
+    // connection.update ja pega quando traz o owner; aqui e a rede de
+    // seguranca para quando o evento nao traz.
+    if (state === 'open' && instance.phone && health.healthStatus === 'healthy') {
+      const connectedNumber = await fetchConnectedNumber(instance, evolutionUrl, evolutionKey);
+      if (connectedNumber && !evolution.samePhoneNumber(connectedNumber, instance.phone)) {
+        health = { status: 'degraded', healthStatus: 'wrong_number' };
+        healthError = `Sessão conectada no número +${connectedNumber}, mas esta conexão está cadastrada para +${instance.phone}. Releia o QR com o aparelho certo.`;
+        // re-verifica no proximo ciclo (nao segura o cache) para sair rapido
+        // do alarme assim que alguem religar no numero certo.
+        connectedNumberCache.delete(instance.instanceName);
       }
     }
 

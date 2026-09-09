@@ -12,6 +12,29 @@ async function getSettings(tenantId) {
   return { ...s, evolutionUrl, evolutionKey };
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A Evolution (2.4.0-rc2) precisa de um respiro entre apagar e recriar uma
+// instancia com o MESMO nome -- sem isso o create sai 404 e o "Recriar sessao"
+// deixava a conexao sem instancia nenhuma. Recria com espera + tentativas e
+// confirma que ela existe antes de seguir.
+async function recreateEvolutionInstance(evolutionUrl, evolutionKey, instanceName, diagnostics) {
+  await sleep(2500);
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      await evolution.createInstance(evolutionUrl, evolutionKey, instanceName);
+    } catch (err) {
+      if (evolution.isInstanceAlreadyInUse(err)) return true;
+      diagnostics.push(`createInstance#${attempt}: ${err.response?.data?.message || err.message}`);
+      console.warn(`[instanceController] createInstance ${instanceName} tentativa ${attempt} falhou:`, err.response?.data || err.message);
+    }
+    const info = await evolution.fetchInstanceInfo(evolutionUrl, evolutionKey, instanceName);
+    if (info) return true;
+    if (attempt < 4) await sleep(2000);
+  }
+  return false;
+}
+
 async function list(req, res) {
   try {
     const instances = await prisma.waInstance.findMany({ 
@@ -208,13 +231,18 @@ async function getQrCode(req, res) {
 
     const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);
     const data = await evolution.getQrCode(evolutionUrl, evolutionKey, inst.instanceName);
-    
-    res.json({ 
-      qrcode: data?.base64 || data?.qrcode?.base64 || null, 
-      pairingCode: data?.pairingCode || null 
+
+    res.json({
+      qrcode: data?.base64 || data?.qrcode?.base64 || null,
+      pairingCode: data?.pairingCode || null
     });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    // 404 da Evolution = a sessao nao existe mais la (foi apagada). Mensagem
+    // clara em vez do "Request failed with status code 404" cru.
+    if (err.response?.status === 404) {
+      return res.status(409).json({ error: 'A sessão não existe mais na Evolution. Use "Recriar sessão" para gerar um novo QR.' });
+    }
+    res.status(400).json({ error: err.response?.data?.message || err.message });
   }
 }
 
@@ -248,13 +276,16 @@ async function repair(req, res) {
       console.warn('[instanceController] Falha ao remover instancia remota antes do reparo:', err.response?.data || err.message);
     }
 
-    try {
-      await evolution.createInstance(evolutionUrl, evolutionKey, inst.instanceName);
-    } catch (err) {
-      if (!evolution.isInstanceAlreadyInUse(err)) {
-        diagnostics.push(`createInstance: ${err.response?.data?.message || err.message}`);
-        console.warn('[instanceController] Falha ao recriar instancia remota:', err.response?.data || err.message);
-      }
+    const recreated = await recreateEvolutionInstance(evolutionUrl, evolutionKey, inst.instanceName, diagnostics);
+    if (!recreated) {
+      await prisma.waInstance.update({
+        where: { id },
+        data: { status: 'degraded', healthStatus: 'degraded', lastConnectionState: 'unknown', lastHealthError: 'Não foi possível recriar a sessão na Evolution.' },
+      }).catch(() => {});
+      return res.status(502).json({
+        error: 'Não consegui recriar a sessão na Evolution agora. Aguarde cerca de 1 minuto e tente novamente.',
+        diagnostics,
+      });
     }
 
     const webhookUrl = evolution.getWebhookCallbackUrl();

@@ -901,33 +901,59 @@ async function handleWebhook(req, res) {
         // Atualiza status e telefone se disponível no evento de conexão
         const isConnected = ev === 'connection.update' && state === 'open';
         const shouldConfirmDisconnect = ev === 'connection.update' && (state === 'close' || state === 'connecting');
-        let phone = waInstance.phone;
         const owner = data?.owner || data?.ownerJid;
-        if (owner && typeof owner === 'string') {
-          phone = owner.split('@')[0];
+        const connectedNumber = owner && typeof owner === 'string' ? owner.split('@')[0] : null;
+
+        // O numero cadastrado (waInstance.phone) e a referencia: e "first-write-wins".
+        // Se a sessao conectou num numero DIFERENTE do cadastrado, alguem leu o QR
+        // com o aparelho errado -- NAO sobrescreve o cadastro e marca divergencia
+        // (antes o webhook regravava phone com o numero errado e ninguem percebia).
+        const wrongNumber = Boolean(
+          isConnected && connectedNumber && waInstance.phone
+          && !evolutionService.samePhoneNumber(connectedNumber, waInstance.phone),
+        );
+        // Evolution manda connection.update sem "owner" boa parte do tempo. Se ja
+        // estava marcada como numero errado e este evento nao traz o owner,
+        // mantem a marca -- so um connect com o numero certo limpa (evita flap).
+        const stillWrongNumber = Boolean(
+          isConnected && !connectedNumber && waInstance.healthStatus === 'wrong_number',
+        );
+        const flagWrong = wrongNumber || stillWrongNumber;
+        let phone = waInstance.phone;
+        if (connectedNumber && !waInstance.phone) {
+          phone = connectedNumber; // primeira conexao: fixa a referencia
+        }
+        if (wrongNumber) {
+          console.warn(`[webhook] ${instance} conectou no numero +${connectedNumber}, mas o cadastro e +${waInstance.phone}. Marcando divergencia.`);
         }
 
-        if (isConnected) {
+        if (isConnected && !flagWrong) {
           clearPendingConnectionCheck(instance);
         } else if (shouldConfirmDisconnect) {
           scheduleDisconnectConfirmation(instance, waInstance.id);
         }
 
+        const wrongNumberError = wrongNumber
+          ? `Sessao conectada no numero +${connectedNumber}, mas esta conexao esta cadastrada para +${waInstance.phone}. Releia o QR com o aparelho certo.`
+          : stillWrongNumber
+            ? (waInstance.lastHealthError || `Sessao conectada num numero diferente do cadastrado (+${waInstance.phone}). Releia o QR com o aparelho certo.`)
+            : null;
+
         const updatedInstance = await prisma.waInstance.update({
           where: { id: waInstance.id },
-          data: { 
+          data: {
             ...(health ? {
               // Mostra a instabilidade imediatamente; a confirmação de 45s
               // continua evitando falso positivo de desconexão definitiva.
-              status: isConnected ? 'connected' : state === 'connecting' || state === 'close' ? 'connecting' : 'degraded',
-              healthStatus: isConnected ? 'healthy' : state === 'connecting' || state === 'close' ? 'unstable' : 'degraded',
+              status: flagWrong ? 'degraded' : isConnected ? 'connected' : state === 'connecting' || state === 'close' ? 'connecting' : 'degraded',
+              healthStatus: flagWrong ? 'wrong_number' : isConnected ? 'healthy' : state === 'connecting' || state === 'close' ? 'unstable' : 'degraded',
               lastConnectionState: state,
               ...(waInstance.lastConnectionState !== state ? { lastConnectionAt: receivedAt } : {}),
-              lastHealthError: null,
+              lastHealthError: wrongNumberError,
             } : {}),
             lastWebhookAt: receivedAt,
             lastHealthCheckAt: receivedAt,
-            ...(phone && { phone })
+            ...(phone && !flagWrong && { phone })
           }
         });
         
@@ -943,7 +969,7 @@ async function handleWebhook(req, res) {
           },
         });
 
-        if (isConnected && wasNotHealthy && waInstance.provider !== 'evolution_official') {
+        if (isConnected && !flagWrong && wasNotHealthy && waInstance.provider !== 'evolution_official') {
           const { syncMissedMessages } = require('../services/syncMissedMessagesService');
           syncMissedMessages(instance, { hours: 24, limitPerChat: 20, maxChats: 50 }).catch(e => console.error('[webhook] Falha no sync automático:', e.message));
         }

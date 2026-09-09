@@ -15,6 +15,10 @@ function getConnectionView(instance) {
   if (health === 'silent') {
     return { key: 'silent', label: 'Conectada, mas sem receber mensagens', pill: 'Sem eventos', color: 'var(--danger)', icon: <AlertTriangle size={20} /> };
   }
+  // Sessão ativa, porém no número errado (QR lido com o aparelho errado).
+  if (health === 'wrong_number') {
+    return { key: 'wrong_number', label: 'Conectada no número errado', pill: 'Número divergente', color: 'var(--danger)', icon: <AlertTriangle size={20} /> };
+  }
   if (instance?.status === 'connected' && (state === 'open' || health === 'healthy')) {
     return { key: 'connected', label: 'Conectado', pill: 'Sessão ativa', color: 'var(--success)', icon: <Wifi size={20} /> };
   }
@@ -232,14 +236,24 @@ export default function Connections() {
                       <Smartphone size={16} />
                       Pronto para uso
                     </div>
-                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' ? (
-                    <div style={{ ...s.healthBox, borderColor: connectionView.key === 'unstable' ? 'var(--warning-border)' : 'var(--danger-border)', color: connectionView.color }}>
-                      <AlertTriangle size={16} />
-                      {inst.lastHealthError || (
-                        connectionView.key === 'unstable' ? 'A Evolution está reconectando. Aguarde alguns segundos.'
-                          : connectionView.key === 'silent' ? 'A sessão está conectada, mas o CRM parou de receber eventos da Evolution. Mensagens podem estar sendo perdidas — verifique a Evolution / o webhook.'
-                            : 'A Evolution não respondeu à última verificação.')}
-                    </div>
+                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' || connectionView.key === 'wrong_number' ? (
+                    <>
+                      <div style={{ ...s.healthBox, borderColor: connectionView.key === 'unstable' ? 'var(--warning-border)' : 'var(--danger-border)', color: connectionView.color }}>
+                        <AlertTriangle size={16} />
+                        {inst.lastHealthError || (
+                          connectionView.key === 'unstable' ? 'A Evolution está reconectando. Aguarde alguns segundos.'
+                            : connectionView.key === 'silent' ? 'A sessão está conectada, mas o CRM parou de receber eventos da Evolution. Mensagens podem estar sendo perdidas — verifique a Evolution / o webhook.'
+                              : connectionView.key === 'wrong_number' ? 'A sessão conectou num número diferente do cadastrado. Alguém leu o QR com o aparelho errado — recrie a sessão e leia o QR com o telefone certo.'
+                                : 'A Evolution não respondeu à última verificação.')}
+                      </div>
+                      {connectionView.key === 'wrong_number' && !isOfficial ? (
+                        <div style={s.disconnectedActions}>
+                          <button style={s.repairBtn} disabled={repairingId === inst.id} onClick={() => handleRepair(inst)}>
+                            <RotateCcw size={16} /> {repairingId === inst.id ? 'Recriando...' : 'Recriar sessao'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
                   ) : isOfficial ? (
                     <div style={s.officialBox}>Credenciais oficiais registradas. Atualize para consultar o estado na Evolution.</div>
                   ) : (

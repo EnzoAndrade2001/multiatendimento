@@ -474,6 +474,27 @@ function brazilNinthDigitVariants(digits) {
   return [];
 }
 
+// Duas linhas telefonicas sao "a mesma" mesmo escritas diferente (com/sem 9o
+// digito, com/sem DDI). Usado para detectar quando uma instancia conecta num
+// numero diferente do que estava cadastrado -- o bug que deixou a LCD-FINANCEIRO
+// dias sem receber (leram o QR com o aparelho errado e ninguem avisou).
+function samePhoneNumber(a, b) {
+  const da = String(a || '').replace(/\D/g, '');
+  const db = String(b || '').replace(/\D/g, '');
+  if (!da || !db) return true; // faltando um dos lados -> nao ha divergencia a apontar
+  if (da === db) return true;
+  const na = normalizePhoneNumber(da);
+  const nb = normalizePhoneNumber(db);
+  if (na && nb && na === nb) return true;
+  const variants = new Set(
+    [na, da, ...brazilNinthDigitVariants(na), ...brazilNinthDigitVariants(da)].filter(Boolean),
+  );
+  if (variants.has(nb) || variants.has(db)) return true;
+  // ultimo recurso: 8 digitos finais (linha do assinante, sem 9/DDD/DDI)
+  if (da.length >= 8 && db.length >= 8 && da.slice(-8) === db.slice(-8)) return true;
+  return false;
+}
+
 function buildPhoneLookupCandidates(phone) {
   if (isGroupJid(String(phone || ''))) {
     return [normalizePhoneNumber(phone)];
@@ -653,7 +674,7 @@ async function findConversationJidsByMessageIds(url, key, instanceName, messageI
 module.exports = {
   sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
   getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
-  normalizePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
+  normalizePhoneNumber, samePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findMessages, findConversationJidsByMessageIds,
   getEvolutionErrorDetail,
   __testing: { buildCreateInstancePayload }
