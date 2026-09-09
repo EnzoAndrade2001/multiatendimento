@@ -835,6 +835,15 @@ class CRMClient:
         url = f"{self.config.crm_base_url}/api/integrations/firebird/auto-send-billing"
         documents = []
         for document in package["documents"]:
+            if document.get("boletoRef") and not document.get("path"):
+                # Boleto: o backend busca o PDF no PlugBoleto a partir da chave.
+                documents.append({
+                    "documentType": document["documentType"],
+                    "fileName": document["fileName"],
+                    "mimeType": "application/pdf",
+                    "boletoRef": document["boletoRef"],
+                })
+                continue
             pdf_bytes = Path(document["path"]).read_bytes()
             documents.append({
                 "documentType": document["documentType"],
@@ -927,23 +936,40 @@ class FirebirdRepository:
         Pure detection: never touches the network, never moves a file. Sending
         is the caller's job (see run_billing_automation).
         """
+        if not document_types:
+            return []
+        # boleto sai do PlugBoleto (backend), sem passar pelo indice de pasta.
+        folder_types = [t for t in document_types if t != "boleto"]
+        wants_boleto = "boleto" in document_types
         index = self.financial_document_index()
-        if not index.entries or not document_types:
+        if folder_types and not index.entries:
             return []
 
         packages: list[dict[str, Any]] = []
         checked = 0
         already_sent = 0
+        skipped_period = 0
+        skipped_boleto = 0
         # Por tipo de documento: quantos titulos pararam ali por falta de match
         # (nao ambiguo - simplesmente nenhum PDF indexado bateu). O aviso de
         # "ambiguo" ja e logado individualmente; sem isso aqui, um "0 prontos"
         # ficava mudo sobre qual dos 3 tipos (nota/demonstrativo/boleto) e o
         # gargalo real, e reproduzir localmente nao ajuda - o indice depende
         # das pastas de rede da maquina do agente.
-        missing_by_type = {t: 0 for t in document_types}
+        missing_by_type = {t: 0 for t in folder_types}
+        current_month = datetime.now().strftime("%Y-%m")
         for row in self.fetch_open_receivables_for_billing():
             checked += 1
             receivable_id = row.get("seqreceita")
+
+            # D4: envio automatico so do periodo atual. "Atual" = titulo emitido
+            # neste mes-calendario (DTEMISSAOREC). Meses anteriores nao vencidos
+            # ou em atraso so saem por envio manual.
+            issued = parse_firebird_timestamp(row.get("dtemissaorec"))
+            if not issued or issued.strftime("%Y-%m") != current_month:
+                skipped_period += 1
+                continue
+
             context = {
                 "customer_cnpj": row.get("customer_cnpj"),
                 "customer_cpf": row.get("customer_cpf"),
@@ -957,32 +983,58 @@ class FirebirdRepository:
                 "seqreceita": receivable_id,
             }
 
-            matches: dict[str, Any] = {}
-            for document_type in document_types:
+            documents: list[dict[str, Any]] = []
+            hash_parts: list[str] = []
+            ok = True
+
+            if wants_boleto:
+                situacao = str(row.get("boleto_situacao") or "").strip().upper()
+                chave = str(row.get("chave_integracao") or "").strip()
+                if situacao not in {"EMITIDO", "REGISTRADO", "LIQUIDADO"} or not chave:
+                    skipped_boleto += 1
+                    ok = False
+                else:
+                    nosso = str(row.get("nosso_numero") or "").strip()
+                    period = str(row.get("billing_period") or issued.strftime("%Y/%m")).strip()
+                    documents.append({
+                        "documentType": "boleto",
+                        "fileName": friendly_filename("boleto", context),
+                        "boletoRef": {
+                            "receivableExternalId": str(receivable_id),
+                            "chaveIntegracao": chave,
+                            "pdfProtocolo": str(row.get("pdf_protocolo") or "").strip() or None,
+                            "nossoNumero": nosso,
+                            "situacao": situacao,
+                        },
+                    })
+                    hash_parts.append(f"boleto:{receivable_id}:{nosso}:{period}")
+
+            for document_type in folder_types if ok else []:
                 try:
                     match = index.find(document_type, context, min_mtime_ns=min_mtime_ns)
                 except ValueError as exc:
-                    # Ambiguous match: exactly the case find() protects the manual
-                    # "Visualizar/Baixar" flow from too. An automatic send must be
-                    # even more conservative, so the whole package is skipped and
-                    # flagged for someone to look at (it already surfaces in the
-                    # CRM's "documentos precisam de revisao" panel).
                     logging.warning(
                         "Envio automatico: titulo %s tem %s ambiguo, pulando ate revisao manual (%s)",
                         receivable_id, document_type, exc,
                     )
-                    matches = {}
+                    ok = False
                     break
                 if match is None:
                     missing_by_type[document_type] += 1
-                    matches = {}
+                    ok = False
                     break
-                matches[document_type] = match
+                documents.append({
+                    "documentType": document_type,
+                    "path": match.path,
+                    "sha256": match.sha256,
+                    "fileName": friendly_filename(document_type, context),
+                })
+                hash_parts.append(match.sha256)
 
-            if len(matches) != len(document_types):
+            if not ok or len(documents) != len(document_types):
                 continue
 
-            combined_hash = ":".join(sorted(match.sha256 for match in matches.values()))
+            combined_hash = ":".join(sorted(hash_parts))
             if ledger.already_sent(receivable_id, combined_hash):
                 already_sent += 1
                 continue
@@ -993,20 +1045,12 @@ class FirebirdRepository:
                 "customerCnpj": row.get("customer_cnpj"),
                 "customerCpf": row.get("customer_cpf"),
                 "combinedHash": combined_hash,
-                "documents": [
-                    {
-                        "documentType": document_type,
-                        "path": match.path,
-                        "sha256": match.sha256,
-                        "fileName": friendly_filename(document_type, context),
-                    }
-                    for document_type, match in matches.items()
-                ],
+                "documents": documents,
             })
         logging.info(
-            "Envio automatico: %s titulo(s) em aberto verificado(s), %s pronto(s), %s ja enviado(s) antes. "
-            "Sem match (nao ambiguo) por tipo: %s",
-            checked, len(packages), already_sent, missing_by_type,
+            "Envio automatico: %s titulo(s) verificado(s), %s pronto(s), %s ja enviado(s), "
+            "%s fora do periodo atual, %s sem boleto imprimivel. Sem match por tipo: %s",
+            checked, len(packages), already_sent, skipped_period, skipped_boleto, missing_by_type,
         )
         return packages
 
@@ -1404,11 +1448,17 @@ class FirebirdRepository:
                 r.DTEMISSAOREC, r.DTVECTOREC, r.VALRECEITA,
                 nf.DTEMISSAONFS,
                 cli.CDCLIENTE, cli.NMCLIENTE as CUSTOMER_NAME,
-                cli.CNPJ as CUSTOMER_CNPJ, cli.CPF as CUSTOMER_CPF
+                cli.CNPJ as CUSTOMER_CNPJ, cli.CPF as CUSTOMER_CPF,
+                b.SITUACAO as BOLETO_SITUACAO, b.CHAVE_INTEGRACAO,
+                b.PDF_PROTOCOLO,
+                coalesce(b.TITULONOSSONUMEROIMPRESSAO, b.TITULONOSSONUMERO, r.NOSSONUMERO) as NOSSO_NUMERO,
+                demo.PERIODO as BILLING_PERIOD
             from IRECEITAS r
             join ICLIENTES cli on cli.CDCLIENTE = r.CDCLIENTE
             left join INFSAIDA nf on nf.SEQINCNFS = r.SEQINCNFS
             left join IRECEITAS_STATUS rs on rs.ID_RECEITA_STATUS = r.CD_RECEITA_STATUS
+            left join CE_BOLETO b on b.SEQRECEITA = r.SEQRECEITA
+            left join IXLDEMOFAT demo on demo.SEQDEMONSTRATIVO = r.SEQDEMONSTRATIVO
             where r.DTPAGTOREC is null
               and coalesce(r.VALRECEITAPAGA, 0) < coalesce(r.VALRECEITA, 0)
               and coalesce(nf.TFNFSCANCELADA, 'N') <> 'S'

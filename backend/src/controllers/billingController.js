@@ -3,7 +3,9 @@ const path = require('path');
 const prisma = require('../lib/prisma');
 const evolutionService = require('../services/evolutionService');
 const billingDocuments = require('../services/billingDocumentService');
+const plugBoletoService = require('../services/plugBoletoService');
 const whatsappComplianceService = require('../services/whatsappComplianceService');
+const { parseFirebirdDate } = require('../utils/firebirdDate');
 const { mediaPath } = require('../utils/uploads');
 
 let io = null;
@@ -495,6 +497,20 @@ async function autoSendBilling(req, res) {
       return res.status(404).json({ error: 'Título sem cliente vinculado no iLux.' });
     }
 
+    // D4: rede de seguranca. O agente ja filtra por periodo (DTEMISSAOREC no
+    // mes atual). Aqui so barramos um titulo COMPROVADAMENTE de mes anterior;
+    // sem data legivel, deixa passar e confia no filtro do agente.
+    const issuedRaw = receivableRecord.payload?.issuedAt || receivableRecord.payload?.dtemissaorec;
+    const issuedAt = issuedRaw ? parseFirebirdDate(issuedRaw) : null;
+    const now = new Date();
+    if (issuedAt && (issuedAt.getFullYear() !== now.getFullYear() || issuedAt.getMonth() !== now.getMonth())) {
+      return res.json({
+        success: true,
+        skipped: true,
+        message: 'Título de período anterior; envio automático apenas do mês atual. Use o envio manual.',
+      });
+    }
+
     const crmCustomer = await prisma.crmCustomer.findFirst({
       where: { tenantId: tenant.id, externalId: clientExternalId },
     });
@@ -589,6 +605,40 @@ async function autoSendBilling(req, res) {
     const cachedDocuments = [];
     for (const document of documents) {
       const documentType = String(document.documentType || '').toLowerCase();
+
+      // Boleto sem PDF: o agente mandou so a referencia; buscamos no PlugBoleto.
+      if (documentType === 'boleto' && !document.pdfBase64 && document.boletoRef) {
+        const ref = document.boletoRef;
+        let fetched;
+        try {
+          fetched = await plugBoletoService.fetchBoletoPdf({
+            tenantId: tenant.id,
+            receivable: {
+              externalId: ref.receivableExternalId || receivableExternalId,
+              boletoStatus: ref.situacao,
+              boletoPdfProtocol: ref.pdfProtocolo,
+              boletoIntegrationId: ref.chaveIntegracao,
+              ourNumber: ref.nossoNumero,
+              invoiceNumber: receivableRecord.payload?.invoiceNumber,
+            },
+            customerName,
+          });
+        } catch (error) {
+          if (error?.statusCode === 501) {
+            // PlugBoleto nao configurado: nao adianta o agente re-tentar todo ciclo.
+            return res.json({
+              success: true,
+              skipped: true,
+              message: 'PlugBoleto nao configurado; configure a credencial em Configuracoes > Agente Local.',
+            });
+          }
+          throw error;
+        }
+        document.pdfBase64 = fetched.pdfBase64;
+        document.fileName = document.fileName || fetched.fileName;
+        document.mimeType = 'application/pdf';
+      }
+
       const stubReceivable = {
         externalId: String(receivableExternalId),
         invoiceNumber: receivableExternalId,

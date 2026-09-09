@@ -233,3 +233,23 @@ test('nao regrava SKIPPED quando ja existe um recente para o mesmo cliente (evit
   assert.equal(mediaSent, false);
   assert.equal(textSent, false);
 });
+
+test('D4: titulo emitido em mes anterior nao dispara envio automatico', async (context) => {
+  const og = { tenant: prisma.tenant.findUnique, ff: prisma.externalSyncRecord.findFirst };
+  context.after(() => { prisma.tenant.findUnique = og.tenant; prisma.externalSyncRecord.findFirst = og.ff; });
+  prisma.tenant.findUnique = async () => TENANT;
+  prisma.externalSyncRecord.findFirst = async ({ where }) => (where.entity === 'receivables'
+    ? { payload: { clientExternalId: '326', issuedAt: '2026-07-15T00:00:00.000Z' } }
+    : null);
+
+  const res = fakeRes();
+  await autoSendBilling(fakeReq({
+    tenantSlug: 'lcd',
+    receivableExternalId: '18741',
+    documents: [{ documentType: 'boleto', boletoRef: { chaveIntegracao: 'C1', situacao: 'EMITIDO' }, fileName: 'b.pdf' }],
+  }), res);
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.skipped, true);
+  assert.match(res.body.message, /per[ií]odo anterior/i);
+});
