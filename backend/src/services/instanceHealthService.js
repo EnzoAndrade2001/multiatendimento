@@ -67,9 +67,17 @@ function emitHealth(instance, state, healthStatus, checkedAt, error = null) {
   });
 }
 
-// Historico append-only: uma linha por TRANSICAO (nao a cada checagem).
+// Historico append-only: uma linha por TRANSICAO real. Dedupe contra o ULTIMO
+// evento da instancia (nao contra a linha WaInstance, que pode oscilar se um
+// connection.update chega entre duas checagens).
 async function recordHealthEvent(instance, { status, healthStatus, connectionState, error, lastWebhookAt, source = 'health-monitor' }) {
   try {
+    const previous = await prisma.waInstanceHealthEvent.findFirst({
+      where: { instanceName: instance.instanceName },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true, healthStatus: true },
+    });
+    if (previous && previous.status === status && previous.healthStatus === healthStatus) return;
     const ageSec = lastWebhookAt ? Math.round((Date.now() - new Date(lastWebhookAt).getTime()) / 1000) : null;
     await prisma.waInstanceHealthEvent.create({
       data: {
@@ -88,6 +96,27 @@ async function recordHealthEvent(instance, { status, healthStatus, connectionSta
   } catch (err) {
     console.warn('[instance-health] falha ao gravar historico:', err.message);
   }
+}
+
+// Instancia "ativa" = teve alguma mensagem nas ultimas 48h. Cache de 10 min por
+// instancia (o alarme de silencio so consulta isto quando cruza o limiar).
+const recentTrafficCache = new Map();
+async function hasRecentTraffic(instanceId) {
+  const cached = recentTrafficCache.get(instanceId);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.value;
+  let value = false;
+  try {
+    const msg = await prisma.message.findFirst({
+      where: { ticket: { instanceId }, createdAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } },
+      select: { id: true },
+    });
+    value = Boolean(msg);
+  } catch (err) {
+    console.warn('[instance-health] falha ao checar tráfego recente:', err.message);
+    value = true; // na duvida, alarma (melhor um falso positivo que silenciar um incidente)
+  }
+  recentTrafficCache.set(instanceId, { at: Date.now(), value });
+  return value;
 }
 
 async function pruneHealthEvents() {
@@ -140,10 +169,12 @@ async function checkInstance(instance) {
     let health = healthForState(state);
     let healthError = state ? null : 'Evolution respondeu sem informar o estado da conexão.';
 
-    // D: conectada mas SEM webhook ha muito tempo -> "instancia muda".
+    // D: conectada mas SEM webhook ha muito tempo -> "instancia muda". So alarma
+    // instancia ATIVA (com mensagem nas ultimas 48h) -- uma instancia parada/de
+    // teste ficaria "silent" pra sempre sem ser incidente.
     if (state === 'open' && instance.lastWebhookAt) {
       const silenceMs = Date.now() - new Date(instance.lastWebhookAt).getTime();
-      if (silenceMs > SILENCE_ALERT_MS) {
+      if (silenceMs > SILENCE_ALERT_MS && await hasRecentTraffic(instance.id)) {
         health = { status: 'degraded', healthStatus: 'silent' };
         healthError = `Instância conectada, mas sem receber eventos da Evolution há ${Math.round(silenceMs / 60000)} min. Mensagens podem estar sendo perdidas.`;
       }

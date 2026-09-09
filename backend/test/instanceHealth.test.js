@@ -35,22 +35,28 @@ test('limita a janela de recuperação para evitar carga acidental', () => {
   assert.deepEqual(syncTesting.normalizeOptions({ hours: 999, limitPerChat: 999, maxChats: 999 }), { hours: 168, limitPerChat: 100, maxChats: 500 });
 });
 
-function patchHealth(context, { state, lastWebhookAt }) {
+function patchHealth(context, { state, hasTraffic = true } = {}) {
   const og = {
     getState: evolution.getConnectionState,
     update: prisma.waInstance.update,
     eventCreate: prisma.waInstanceHealthEvent.create,
+    eventFind: prisma.waInstanceHealthEvent.findFirst,
+    msgFind: prisma.message.findFirst,
   };
   context.after(() => {
     evolution.getConnectionState = og.getState;
     prisma.waInstance.update = og.update;
     prisma.waInstanceHealthEvent.create = og.eventCreate;
+    prisma.waInstanceHealthEvent.findFirst = og.eventFind;
+    prisma.message.findFirst = og.msgFind;
   });
   evolution.getConnectionState = async () => ({ instance: { state } });
   let saved = null;
   prisma.waInstance.update = async ({ data }) => { saved = data; return { ...INSTANCE(), ...data }; };
   const events = [];
   prisma.waInstanceHealthEvent.create = async ({ data }) => { events.push(data); return data; };
+  prisma.waInstanceHealthEvent.findFirst = async () => null;
+  prisma.message.findFirst = async () => (hasTraffic ? { id: 'm1' } : null);
   return { get saved() { return saved; }, events };
 }
 
@@ -75,6 +81,15 @@ test('D: instância "open" com webhook recente permanece "healthy" e não gera e
   assert.equal(spy.saved.healthStatus, 'healthy');
   assert.equal(spy.saved.status, 'connected');
   assert.equal(spy.events.length, 0, 'sem transição -> sem linha de histórico');
+});
+
+test('D: instância PARADA (sem tráfego 48h) NÃO vira "silent" mesmo sem webhook', async (context) => {
+  const stale = new Date(Date.now() - 60 * 60 * 1000);
+  const spy = patchHealth(context, { state: 'open', hasTraffic: false });
+  await instanceHealth.checkInstance(INSTANCE({ id: `wa-parada-${Date.now()}`, lastWebhookAt: stale }));
+
+  assert.equal(spy.saved.healthStatus, 'healthy', 'instância de teste/parada não é incidente');
+  assert.equal(spy.events.length, 0);
 });
 
 test('E: uma queda de conexão (open -> close) grava um evento de histórico', async (context) => {
