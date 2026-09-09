@@ -108,6 +108,7 @@ async function saveSettings(req, res) {
     firebirdLastSyncStatus,
     firebirdLastSyncError,
     plugBoletoEnabled, plugBoletoBaseUrl, plugBoletoPrintPath, plugBoletoCedenteCnpj, plugBoletoToken,
+    statementRerenderEnabled,
     kpiContractValue, kpiServiceValue, kpiSlaLimitHours, kpiReincidentThreshold,
     billingMessageTemplate, billingInstanceId
   } = req.body;
@@ -127,6 +128,9 @@ async function saveSettings(req, res) {
   const parsedPlugBoletoPrintPath = plugBoletoPrintPath === undefined
     ? undefined
     : (String(plugBoletoPrintPath).trim() || null);
+  const parsedStatementRerenderEnabled = statementRerenderEnabled === undefined
+    ? undefined
+    : Boolean(statementRerenderEnabled);
 
   const parsedBillingInstanceId = billingInstanceId === undefined
     ? undefined
@@ -227,6 +231,7 @@ async function saveSettings(req, res) {
       plugBoletoPrintPath: parsedPlugBoletoPrintPath,
       plugBoletoCedenteCnpj: parsedPlugBoletoCnpj,
       plugBoletoTokenCipher: parsedPlugBoletoToken,
+      statementRerenderEnabled: parsedStatementRerenderEnabled,
       kpiContractValue: parsedContractValue,
       kpiServiceValue: parsedServiceValue,
       kpiSlaLimitHours: parsedSlaLimitHours,
@@ -282,6 +287,7 @@ async function saveSettings(req, res) {
       plugBoletoPrintPath: parsedPlugBoletoPrintPath,
       plugBoletoCedenteCnpj: parsedPlugBoletoCnpj,
       plugBoletoTokenCipher: parsedPlugBoletoToken,
+      statementRerenderEnabled: parsedStatementRerenderEnabled,
       kpiContractValue: parsedContractValue,
       kpiServiceValue: parsedServiceValue,
       kpiSlaLimitHours: parsedSlaLimitHours,

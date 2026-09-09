@@ -5,6 +5,7 @@ const prisma = require('../lib/prisma');
 const whatsappComplianceService = require('./whatsappComplianceService');
 const evolutionService = require('./evolutionService');
 const plugBoletoService = require('./plugBoletoService');
+const billingStatementService = require('./billingStatementService');
 const { mediaPath } = require('../utils/uploads');
 
 const DOCUMENT_TYPES = Object.freeze(['invoice', 'statement', 'boleto']);
@@ -223,11 +224,34 @@ async function tryPlugBoletoDirect(request, params) {
   }
 }
 
+// Demonstrativo: quando o tenant tem statementRerenderEnabled e o demonstrativo
+// ja foi sincronizado (CrmBillingStatement), o CRM gera o PDF a partir desses
+// valores -- sem a pasta monitorada e sem round-trip com o agente. 501 (flag
+// off / nao sincronizado) ou qualquer falha -> deixa cair para o agente/pasta.
+async function tryStatementRerender(request, params) {
+  if (params.documentType !== 'statement') return false;
+  try {
+    const result = await billingStatementService.renderStatementPdf({
+      tenantId: params.tenantId,
+      receivable: params.receivable,
+      customerName: params.customerName,
+    });
+    await completeDocumentRequest({ request, success: true, result });
+    return true;
+  } catch (error) {
+    if (error?.statusCode !== 501) {
+      console.warn('[statement-rerender] falhou, caindo para o agente:', error.message);
+    }
+    return false;
+  }
+}
+
 async function getOrRequestDocument(params) {
   const request = await queueDocumentRequest(params);
   const alreadyDone = request.payload?.status === 'success' && publicFileExists(request.payload.mediaUrl);
   if (!alreadyDone) {
     await tryPlugBoletoDirect(request, params);
+    await tryStatementRerender(request, params);
   }
   const fresh = alreadyDone
     ? request

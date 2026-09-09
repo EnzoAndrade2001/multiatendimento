@@ -46,7 +46,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.4"
+DEFAULT_AGENT_VERSION = "1.1.5"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -63,6 +63,7 @@ AGENT_CAPABILITIES = (
     "commands.fetch-billing-document",
     "commands.fetch-company-profile",
     "sync.plugboleto-config",
+    "sync.billing-statements",
 )
 
 # A command listener normally waits up to 25 seconds for work. Authentication
@@ -1822,6 +1823,102 @@ class FirebirdRepository:
         finally:
             con.close()
 
+    # ------------------------------------------------------------------
+    # Sincronizacao de demonstrativos (Fase 2 "faturamento sem a pasta").
+    # O CRM guarda header + linhas e re-renderiza o PDF do demonstrativo sem
+    # depender da pasta monitorada. Valores vem fechados do ERP -- nada e
+    # recalculado aqui nem no CRM.
+    # ------------------------------------------------------------------
+    def max_billing_statement_seq(self) -> int:
+        con = self.connect()
+        try:
+            cur = con.cursor()
+            cur.execute("select coalesce(max(SEQDEMONSTRATIVO), 0) from IXLDEMOFAT")
+            row = cur.fetchone()
+            return int((row[0] if row else 0) or 0)
+        finally:
+            con.close()
+
+    def fetch_billing_statements(
+        self,
+        min_seq: int,
+        since_date: str | None = None,
+        limit: int = 2000,
+    ) -> Iterator[dict[str, Any]]:
+        """Headers de IXLDEMOFAT acima do cursor (SEQDEMONSTRATIVO), opcionalmente
+        somados aos recalculados dentro da janela ``since_date`` (DTDEMONSTRATIVO
+        >= data), para pegar edicoes tardias sem varrer o historico inteiro."""
+        params: list[Any] = [int(min_seq)]
+        if since_date:
+            seq_filter = "(d.SEQDEMONSTRATIVO > ? or d.DTDEMONSTRATIVO >= ?)"
+            params.append(since_date)
+        else:
+            seq_filter = "d.SEQDEMONSTRATIVO > ?"
+        sql = f"""
+            select first {max(1, int(limit))}
+                d.SEQDEMONSTRATIVO, d.PERIODO, d.DTDEMONSTRATIVO, d.DTCOBRANCA,
+                d.VALDEMONSTRATIVO, d.VALDEMONSTRATIVOF, d.VALDEMONSTRATIVOE,
+                d.VALDESCONTO, d.VALACRESCIMO, d.VL_DEMO_LIQ, d.STATUS,
+                d.CDCLIENTE, d.CDEMPRESA, d.SEQCONTRATOGRP, d.ATUALIZADO,
+                cast(d.OBSERVACAO as varchar(2000)) as OBSERVACAO,
+                cli.NMCLIENTE as CUSTOMER_NAME,
+                cli.CNPJ as CUSTOMER_CNPJ, cli.CPF as CUSTOMER_CPF,
+                (select count(*) from IXLCONTRATOSFAT f
+                   where f.SEQDEMONSTRATIVO = d.SEQDEMONSTRATIVO) as NLINHAS,
+                (select min(r.SEQRECEITA) from IRECEITAS r
+                   where r.SEQDEMONSTRATIVO = d.SEQDEMONSTRATIVO) as SEQRECEITA,
+                (select min(r.NUMNF) from IRECEITAS r
+                   where r.SEQDEMONSTRATIVO = d.SEQDEMONSTRATIVO) as NUMNF
+            from IXLDEMOFAT d
+            left join ICLIENTES cli on cli.CDCLIENTE = d.CDCLIENTE
+            where d.DTDEMONSTRATIVO is not null and {seq_filter}
+            order by d.SEQDEMONSTRATIVO
+        """
+        yield from self._rows(sql, tuple(params))
+
+    def fetch_statement_lines_bulk(self, seqs: list[int]) -> dict[int, list[dict[str, Any]]]:
+        """Linhas de IXLCONTRATOSFAT de varios demonstrativos numa consulta so."""
+        cleaned = [int(s) for s in seqs if s is not None]
+        if not cleaned:
+            return {}
+        placeholders = ",".join("?" for _ in cleaned)
+        con = self.connect()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                f"""
+                select
+                    fat.SEQDEMONSTRATIVO, fat.SEQCONTRATO, fat.SEQCONTRATOGRP,
+                    fat.CDEQUIPAMENTO, fat.CDMEDIDOR, fat.CDMEDIDORFAT,
+                    fat.MEDIDORINI, fat.MEDIDORFIN, fat.MEDIDORDESC,
+                    fat.DTPERIODOFATINI, fat.DTPERIODOFATFIN, fat.DTLEITURA,
+                    fat.NR_DIAS_PERIODO_FAT,
+                    fat.QTPRODUCAO, fat.QTFRANQUIA, fat.QTEXCEDENTE,
+                    fat.VALFRANQUIA, fat.VALEXCEDENTE,
+                    fat.VALFRANQUIACOB, fat.VALEXCEDENTECOB,
+                    fat.VALFATURA, fat.VALDESCONTO, fat.VALACRESCIMO,
+                    fat.TFFIXO, fat.TFISENTO, fat.TFRATEIO, fat.TFBONIFICACAO,
+                    coalesce(fat.DEPARTAMENTO, eq.DEPARTAMENTO) as DEPARTMENT,
+                    coalesce(fat.LOCALINSTAL, eq.LOCALINSTAL) as INSTALLATION_LOCATION,
+                    eq.SERIE, eq.MODELO, p.NMPRODUTO as EQUIPMENT_NAME
+                from IXLCONTRATOSFAT fat
+                left join IXLEQUIPAMENTO eq on eq.CDEQUIPAMENTO = fat.CDEQUIPAMENTO
+                left join IPRODUTO p on p.CDPRODUTO = eq.CDPRODUTO
+                where fat.SEQDEMONSTRATIVO in ({placeholders})
+                order by fat.SEQDEMONSTRATIVO, fat.SEQCONTRATO,
+                         fat.CDEQUIPAMENTO, fat.CDMEDIDOR
+                """,
+                tuple(cleaned),
+            )
+            columns = [desc[0].lower() for desc in cur.description]
+            grouped: dict[int, list[dict[str, Any]]] = {}
+            for row in cur.fetchall():
+                record = dict(zip(columns, row))
+                grouped.setdefault(int(record["seqdemonstrativo"]), []).append(record)
+            return grouped
+        finally:
+            con.close()
+
     @staticmethod
     def _pdf_styles() -> tuple[dict[str, ParagraphStyle], TableStyle]:
         sample = getSampleStyleSheet()
@@ -2721,6 +2818,155 @@ def sync_plugboleto_config(repo: FirebirdRepository, crm: CRMClient) -> None:
         logging.warning("Não foi possível sincronizar a credencial do PlugBoleto: %s", exc)
 
 
+def _stmt_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _stmt_bool(value: Any) -> bool:
+    return str(value or "").strip().upper() == "S"
+
+
+def normalize_billing_statement(
+    header: dict[str, Any],
+    lines: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Converte um demonstrativo (IXLDEMOFAT + IXLCONTRATOSFAT) no payload que o
+    CRM guarda em CrmBillingStatement/-Line. Os valores vao como o iLux fechou;
+    nenhuma soma e refeita aqui."""
+    seq = str(header["seqdemonstrativo"]).strip()
+    norm_lines: list[dict[str, Any]] = []
+    for index, line in enumerate(lines):
+        norm_lines.append({
+            "lineNo": index,
+            "contractExternalId": first_non_empty(line.get("seqcontrato")),
+            "contractGroupExternalId": first_non_empty(line.get("seqcontratogrp")),
+            "equipmentExternalId": first_non_empty(line.get("cdequipamento")),
+            "equipmentName": first_non_empty(line.get("equipment_name")),
+            "equipmentModel": first_non_empty(line.get("modelo")),
+            "equipmentSerial": first_non_empty(line.get("serie")),
+            "meterCode": first_non_empty(line.get("cdmedidor")),
+            "meterCodeBilling": first_non_empty(line.get("cdmedidorfat")),
+            "department": first_non_empty(line.get("department")),
+            "installLocation": first_non_empty(line.get("installation_location")),
+            "periodStart": parse_firebird_timestamp(line.get("dtperiodofatini")),
+            "periodEnd": parse_firebird_timestamp(line.get("dtperiodofatfin")),
+            "readingDate": parse_firebird_timestamp(line.get("dtleitura")),
+            "periodDays": _stmt_int(line.get("nr_dias_periodo_fat")),
+            "meterStart": _stmt_int(line.get("medidorini")),
+            "meterEnd": _stmt_int(line.get("medidorfin")),
+            "meterDiscount": _stmt_int(line.get("medidordesc")),
+            "qtyProduction": _stmt_int(line.get("qtproducao")),
+            "qtyFranchise": _stmt_int(line.get("qtfranquia")),
+            "qtyExcess": _stmt_int(line.get("qtexcedente")),
+            "franchiseValue": float(line.get("valfranquia") or 0),
+            "excessValue": float(line.get("valexcedente") or 0),
+            "franchiseCharged": float(line.get("valfranquiacob") or 0),
+            "excessCharged": float(line.get("valexcedentecob") or 0),
+            "invoiceValue": float(line.get("valfatura") or 0),
+            "discountValue": float(line.get("valdesconto") or 0),
+            "surchargeValue": float(line.get("valacrescimo") or 0),
+            "isFixed": _stmt_bool(line.get("tffixo")),
+            "isExempt": _stmt_bool(line.get("tfisento")),
+            "isProrated": _stmt_bool(line.get("tfrateio")),
+            "isBonus": _stmt_bool(line.get("tfbonificacao")),
+            "raw": {k: json_safe(v) for k, v in line.items()},
+        })
+
+    obs = header.get("observacao")
+    obs = str(obs).strip() if obs not in (None, "") else None
+    return {
+        "externalId": seq,
+        "period": first_non_empty(header.get("periodo")),
+        "statementDate": parse_firebird_timestamp(header.get("dtdemonstrativo")),
+        "dueDate": parse_firebird_timestamp(header.get("dtcobranca")),
+        "customerExternalId": first_non_empty(header.get("cdcliente")),
+        "companyExternalId": first_non_empty(header.get("cdempresa")),
+        "contractGroupExternalId": first_non_empty(header.get("seqcontratogrp")),
+        "receivableExternalId": first_non_empty(header.get("seqreceita")),
+        "invoiceNumber": first_non_empty(header.get("numnf")),
+        "customerName": first_non_empty(header.get("customer_name")),
+        "customerDocument": first_non_empty(header.get("customer_cnpj"), header.get("customer_cpf")),
+        "totalValue": float(header.get("valdemonstrativo") or 0),
+        "fixedValue": float(header.get("valdemonstrativof") or 0),
+        "excessValue": float(header.get("valdemonstrativoe") or 0),
+        "discountValue": float(header.get("valdesconto") or 0),
+        "surchargeValue": float(header.get("valacrescimo") or 0),
+        "netValue": float(header.get("vl_demo_liq") or 0),
+        "status": first_non_empty(header.get("status")),
+        "notes": obs,
+        "lineCount": _stmt_int(header.get("nlinhas")) or len(norm_lines),
+        "externalUpdatedAt": parse_firebird_timestamp(header.get("atualizado")),
+        "lines": norm_lines,
+        "raw": {k: json_safe(v) for k, v in header.items() if k != "observacao"},
+    }
+
+
+def sync_billing_statements(
+    repo: FirebirdRepository,
+    crm: CRMClient,
+    state: StateStore,
+) -> None:
+    """Sincroniza demonstrativos do iLux para o CRM (Fase 2 "sem a pasta").
+
+    Cursor por SEQDEMONSTRATIVO para o forward-scan; alem disso, no maximo a cada
+    6h, revarre a janela de 75 dias por DTDEMONSTRATIVO para pegar recalculos.
+    Numa instalacao nova o cursor comeca ~1500 demonstrativos atras (cerca de 3
+    meses), nao no inicio do historico.
+    """
+    try:
+        cursors = state.data.setdefault("cursors", {})
+        cursor = int(cursors.get("billingStatements", 0) or 0)
+        if cursor <= 0:
+            max_seq = repo.max_billing_statement_seq()
+            cursor = max(0, max_seq - 1500)
+            cursors["billingStatements"] = cursor
+            state.save()
+
+        do_refresh = True
+        last_refresh = state.data.get("billing_statement_refresh_at")
+        if last_refresh:
+            try:
+                do_refresh = (
+                    datetime.now() - datetime.fromisoformat(last_refresh)
+                ) > timedelta(hours=6)
+            except ValueError:
+                do_refresh = True
+        since_date = (
+            (datetime.now() - timedelta(days=75)).strftime("%Y-%m-%d")
+            if do_refresh
+            else None
+        )
+
+        headers = list(repo.fetch_billing_statements(cursor, since_date))
+        sent = 0
+        max_seq = cursor
+        for start in range(0, len(headers), 50):
+            chunk = headers[start:start + 50]
+            seqs = [int(h["seqdemonstrativo"]) for h in chunk]
+            lines_by_seq = repo.fetch_statement_lines_bulk(seqs)
+            payload = [
+                normalize_billing_statement(h, lines_by_seq.get(int(h["seqdemonstrativo"]), []))
+                for h in chunk
+            ]
+            crm.push("billingStatement", payload)
+            sent += len(payload)
+            max_seq = max(max_seq, *seqs)
+
+        cursors["billingStatements"] = max_seq
+        if do_refresh:
+            state.data["billing_statement_refresh_at"] = datetime.now().isoformat(timespec="seconds")
+        state.save()
+        if sent:
+            logging.info("Demonstrativos sincronizados com o CRM: %s", sent)
+    except Exception as exc:
+        logging.warning("Não foi possível sincronizar demonstrativos: %s", exc)
+
+
 def sync_entity(
     repo: FirebirdRepository,
     crm: CRMClient,
@@ -3132,6 +3378,7 @@ def run_cycle(
     sync_static_entities(repo, crm)
     sync_company_profile(repo, crm, config)
     sync_plugboleto_config(repo, crm)
+    sync_billing_statements(repo, crm, state)
 
     entities = ["contacts", "equipments", "contracts"]
     if full:

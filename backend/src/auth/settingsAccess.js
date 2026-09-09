@@ -29,6 +29,7 @@ const SETTINGS_FIELDS = Object.freeze({
     'firebirdLastSyncStatus', 'firebirdLastSyncError',
     'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath', 'plugBoletoCedenteCnpj',
     'plugBoletoToken', 'plugBoletoTokenSet', 'plugBoletoConfigSyncedAt',
+    'statementRerenderEnabled',
   ],
   'connections.manage': ['evolutionUrl', 'evolutionKey', 'webhookUrl'],
   'leads.manage': ['serpApiKey'],

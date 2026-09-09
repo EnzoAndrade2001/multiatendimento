@@ -64,6 +64,8 @@ model Tenant {
   printGuardTelemetryEvents  PrintGuardTelemetryEvent[]
   crmContracts               CrmContract[]
   crmMeterReadings           CrmMeterReading[]
+  crmBillingStatements       CrmBillingStatement[]
+  crmBillingStatementLines   CrmBillingStatementLine[]
   firebirdAgents             FirebirdAgent[]
 }
 
@@ -140,6 +142,11 @@ model TenantSettings {
   plugBoletoCedenteCnpj    String?
   plugBoletoTokenCipher    String?   @db.Text
   plugBoletoConfigSyncedAt DateTime? // último push da credencial pelo agente
+
+  // Fase 2 "faturamento sem a pasta": quando ligado, o CRM re-renderiza o
+  // demonstrativo a partir de CrmBillingStatement (dados do iLux, sem recalcular)
+  // em vez de exigir o PDF oficial na pasta monitorada. Rollout por tenant.
+  statementRerenderEnabled Boolean @default(false)
 
   // Configurações de KPI do RevGuard AI
   kpiContractValue       Float? @default(1200.0)
@@ -1354,4 +1361,95 @@ model CrmMeterReading {
   @@unique([tenantId, equipmentExternalId, meterCode, readAt])
   @@index([tenantId, equipmentExternalId, readAt])
   @@index([tenantId, serialNumber, readAt])
+}
+
+// Demonstrativo de faturamento do iLux (IXLDEMOFAT), sincronizado pelo agente
+// para o CRM poder re-renderizar o PDF sem depender da pasta monitorada (Fase 2
+// de "faturamento sem a pasta"). Header aqui, linhas em CrmBillingStatementLine.
+// Valores vêm fechados do ERP — o CRM nunca recalcula franquia/excedente.
+// Um demonstrativo pode ter vários títulos (IRECEITAS) apontando para ele.
+model CrmBillingStatement {
+  id                      String    @id @default(cuid())
+  tenantId                String
+  externalSource          String    @default("firebird")
+  externalId              String // SEQDEMONSTRATIVO
+  period                  String? // PERIODO ("YYYY/MM")
+  statementDate           DateTime? // DTDEMONSTRATIVO
+  dueDate                 DateTime? // DTCOBRANCA
+  customerExternalId      String? // CDCLIENTE
+  companyExternalId       String? // CDEMPRESA
+  contractGroupExternalId String? // SEQCONTRATOGRP
+  receivableExternalId    String? // SEQRECEITA representativo (quando único)
+  invoiceNumber           String? // NUMNF do título vinculado
+  totalValue              Float?    @default(0) // VALDEMONSTRATIVO
+  fixedValue              Float?    @default(0) // VALDEMONSTRATIVOF  == Σ franchiseCharged
+  excessValue             Float?    @default(0) // VALDEMONSTRATIVOE  == Σ excessCharged
+  discountValue           Float?    @default(0) // VALDESCONTO
+  surchargeValue          Float?    @default(0) // VALACRESCIMO
+  netValue                Float?    @default(0) // VL_DEMO_LIQ
+  status                  String? // IXLDEMOFAT.STATUS
+  notes                   String?   @db.Text // OBSERVACAO
+  lineCount               Int       @default(0)
+  raw                     Json? // snapshot do header + cliente/empresa resolvidos p/ render
+  externalUpdatedAt       DateTime? // ATUALIZADO
+  syncedAt                DateTime  @default(now())
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  tenant Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines  CrmBillingStatementLine[]
+
+  @@unique([tenantId, externalSource, externalId])
+  @@index([tenantId, period])
+  @@index([tenantId, receivableExternalId])
+  @@index([tenantId, customerExternalId])
+}
+
+// Linha do "Quadro Resumo — Produção por Contrato/Cliente" (IXLCONTRATOSFAT).
+// Imutável depois que o demonstrativo fecha; a sincronização apaga e recria
+// todas as linhas do demonstrativo a cada push.
+model CrmBillingStatementLine {
+  id                      String    @id @default(cuid())
+  tenantId                String
+  statementId             String
+  statementExternalId     String // SEQDEMONSTRATIVO (redundante, facilita debug)
+  lineNo                  Int // ordem de sincronização (estável)
+  contractExternalId      String? // SEQCONTRATO
+  contractGroupExternalId String? // SEQCONTRATOGRP
+  equipmentExternalId     String? // CDEQUIPAMENTO
+  equipmentName           String? // IPRODUTO.NMPRODUTO
+  equipmentModel          String? // IXLEQUIPAMENTO.MODELO
+  equipmentSerial         String? // IXLEQUIPAMENTO.SERIE
+  meterCode               String? // CDMEDIDOR
+  meterCodeBilling        String? // CDMEDIDORFAT
+  department              String? // DEPARTAMENTO
+  installLocation         String? // LOCALINSTAL
+  periodStart             DateTime? // DTPERIODOFATINI
+  periodEnd               DateTime? // DTPERIODOFATFIN
+  readingDate             DateTime? // DTLEITURA
+  periodDays              Int? // NR_DIAS_PERIODO_FAT
+  meterStart              Int? // MEDIDORINI
+  meterEnd                Int? // MEDIDORFIN
+  meterDiscount           Int? // MEDIDORDESC
+  qtyProduction           Int? // QTPRODUCAO
+  qtyFranchise            Int? // QTFRANQUIA
+  qtyExcess               Int? // QTEXCEDENTE
+  franchiseValue          Float?    @default(0) // VALFRANQUIA (preço de contrato)
+  excessValue             Float?    @default(0) // VALEXCEDENTE (preço de contrato)
+  franchiseCharged        Float?    @default(0) // VALFRANQUIACOB (efetivamente cobrado)
+  excessCharged           Float?    @default(0) // VALEXCEDENTECOB (efetivamente cobrado)
+  invoiceValue            Float?    @default(0) // VALFATURA
+  discountValue           Float?    @default(0) // VALDESCONTO
+  surchargeValue          Float?    @default(0) // VALACRESCIMO
+  isFixed                 Boolean   @default(false) // TFFIXO = 'S'
+  isExempt                Boolean   @default(false) // TFISENTO = 'S'
+  isProrated              Boolean   @default(false) // TFRATEIO = 'S'
+  isBonus                 Boolean   @default(false) // TFBONIFICACAO = 'S'
+  raw                     Json?
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  statement CrmBillingStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@unique([statementId, lineNo])
+  @@index([tenantId, statementExternalId])
 }

@@ -43,7 +43,7 @@ class AuthFailureSession:
 
 class AgentHeartbeatTest(unittest.TestCase):
     def test_default_version_matches_current_release(self):
-        self.assertEqual(DEFAULT_AGENT_VERSION, "1.1.4")
+        self.assertEqual(DEFAULT_AGENT_VERSION, "1.1.5")
 
     def test_crm_base_url_is_normalized_for_old_env_files(self):
         with patch.dict(
@@ -102,7 +102,7 @@ class AgentHeartbeatTest(unittest.TestCase):
 
     def test_client_identifies_installation_in_request_headers(self):
         config = AppConfig(
-            agent_version="1.1.4",
+            agent_version="1.1.5",
             agent_protocol_version="1",
             agent_install_id="install-123",
             crm_base_url="https://crm.example.test",
@@ -110,7 +110,7 @@ class AgentHeartbeatTest(unittest.TestCase):
         )
         client = CRMClient(config)
 
-        self.assertEqual(client.session.headers["x-ilux-agent-version"], "1.1.4")
+        self.assertEqual(client.session.headers["x-ilux-agent-version"], "1.1.5")
         self.assertEqual(client.session.headers["x-ilux-agent-protocol"], "1")
         self.assertEqual(client.session.headers["x-ilux-agent-id"], "install-123")
 

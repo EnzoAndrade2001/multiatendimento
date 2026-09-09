@@ -721,6 +721,112 @@ function truncToUtcDay(date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+// Diferente de parseNum(): o agente ja manda numeros JSON limpos (floats), sem
+// mascara brasileira. parseNum destroi "5017.6" (vira 50176 ao remover o ponto).
+function plainNum(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function plainInt(value) {
+  const n = plainNum(value);
+  return n === null ? null : Math.round(n);
+}
+
+// Demonstrativo do iLux (IXLDEMOFAT + IXLCONTRATOSFAT) empurrado pelo agente
+// (entity billingStatement). Header em CrmBillingStatement, linhas recriadas do
+// zero a cada push (imutaveis depois que o demonstrativo fecha). Valores como o
+// ERP fechou -- nada e recalculado.
+async function upsertCrmBillingStatement(tenant, data) {
+  const p = data || {};
+  const externalId = pick(p.externalId, p.seqdemonstrativo, p.SEQDEMONSTRATIVO);
+  if (!externalId) return false;
+
+  const lines = Array.isArray(p.lines) ? p.lines : [];
+  const header = {
+    period: pick(p.period, p.periodo) || null,
+    statementDate: normalizeDate(pick(p.statementDate, p.dtdemonstrativo)),
+    dueDate: normalizeDate(pick(p.dueDate, p.dtcobranca)),
+    customerExternalId: pick(p.customerExternalId, p.cdcliente) || null,
+    companyExternalId: pick(p.companyExternalId, p.cdempresa) || null,
+    contractGroupExternalId: pick(p.contractGroupExternalId, p.seqcontratogrp) || null,
+    receivableExternalId: pick(p.receivableExternalId, p.seqreceita) || null,
+    invoiceNumber: pick(p.invoiceNumber, p.numnf) || null,
+    totalValue: plainNum(p.totalValue) ?? 0,
+    fixedValue: plainNum(p.fixedValue) ?? 0,
+    excessValue: plainNum(p.excessValue) ?? 0,
+    discountValue: plainNum(p.discountValue) ?? 0,
+    surchargeValue: plainNum(p.surchargeValue) ?? 0,
+    netValue: plainNum(p.netValue) ?? 0,
+    status: pick(p.status) || null,
+    notes: p.notes ? String(p.notes).slice(0, 4000) : null,
+    lineCount: plainInt(p.lineCount) ?? lines.length,
+    raw: p,
+    externalUpdatedAt: normalizeDate(pick(p.externalUpdatedAt, p.atualizado)),
+    syncedAt: new Date(),
+  };
+
+  const statement = await prisma.crmBillingStatement.upsert({
+    where: {
+      tenantId_externalSource_externalId: {
+        tenantId: tenant.id, externalSource: 'firebird', externalId: String(externalId),
+      },
+    },
+    update: header,
+    create: {
+      tenantId: tenant.id, externalSource: 'firebird', externalId: String(externalId), ...header,
+    },
+    select: { id: true },
+  });
+
+  const rows = lines.map((l, index) => ({
+    tenantId: tenant.id,
+    statementId: statement.id,
+    statementExternalId: String(externalId),
+    lineNo: plainInt(l.lineNo) ?? index,
+    contractExternalId: pick(l.contractExternalId, l.seqcontrato) || null,
+    contractGroupExternalId: pick(l.contractGroupExternalId, l.seqcontratogrp) || null,
+    equipmentExternalId: pick(l.equipmentExternalId, l.cdequipamento) || null,
+    equipmentName: pick(l.equipmentName) || null,
+    equipmentModel: pick(l.equipmentModel) || null,
+    equipmentSerial: pick(l.equipmentSerial) || null,
+    meterCode: pick(l.meterCode) || null,
+    meterCodeBilling: pick(l.meterCodeBilling) || null,
+    department: pick(l.department) || null,
+    installLocation: pick(l.installLocation) || null,
+    periodStart: normalizeDate(l.periodStart),
+    periodEnd: normalizeDate(l.periodEnd),
+    readingDate: normalizeDate(l.readingDate),
+    periodDays: plainInt(l.periodDays),
+    meterStart: plainInt(l.meterStart),
+    meterEnd: plainInt(l.meterEnd),
+    meterDiscount: plainInt(l.meterDiscount),
+    qtyProduction: plainInt(l.qtyProduction),
+    qtyFranchise: plainInt(l.qtyFranchise),
+    qtyExcess: plainInt(l.qtyExcess),
+    franchiseValue: plainNum(l.franchiseValue) ?? 0,
+    excessValue: plainNum(l.excessValue) ?? 0,
+    franchiseCharged: plainNum(l.franchiseCharged) ?? 0,
+    excessCharged: plainNum(l.excessCharged) ?? 0,
+    invoiceValue: plainNum(l.invoiceValue) ?? 0,
+    discountValue: plainNum(l.discountValue) ?? 0,
+    surchargeValue: plainNum(l.surchargeValue) ?? 0,
+    isFixed: Boolean(l.isFixed),
+    isExempt: Boolean(l.isExempt),
+    isProrated: Boolean(l.isProrated),
+    isBonus: Boolean(l.isBonus),
+    raw: l,
+  }));
+
+  await prisma.$transaction([
+    prisma.crmBillingStatementLine.deleteMany({ where: { statementId: statement.id } }),
+    ...(rows.length ? [prisma.crmBillingStatementLine.createMany({ data: rows })] : []),
+  ]);
+
+  return true;
+}
+
 function normalizeMeterUsage(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const result = {};
@@ -883,6 +989,14 @@ async function pushBatch(req, res) {
           } else {
             stats.skipped += 1;
           }
+          continue;
+        }
+        if (entity === 'billingStatement') {
+          // Demonstrativo (IXLDEMOFAT + IXLCONTRATOSFAT) para o CRM re-renderizar
+          // o PDF sem a pasta monitorada. Nao vira externalSyncRecord bruto -- o
+          // header ja guarda `raw`.
+          const ok = await upsertCrmBillingStatement(tenant, record);
+          if (ok) stats.stored += 1; else stats.skipped += 1;
           continue;
         }
         const payloadToStore = entity === COMPANY_ENTITY

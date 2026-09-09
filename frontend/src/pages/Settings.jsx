@@ -146,6 +146,7 @@ export default function Settings() {
     plugBoletoToken: '',
     plugBoletoTokenSet: false,
     plugBoletoConfigSyncedAt: '',
+    statementRerenderEnabled: false,
     firebirdCompany: null,
     firebirdCompanySyncStatus: 'not_synced',
     firebirdCompanySyncRequestedAt: '',
@@ -1963,6 +1964,26 @@ export default function Settings() {
                         placeholder="/boletos/impressao/lote"
                       />
                     </div>
+                  </div>
+
+                  <div style={{ ...s.integrationGuide, marginTop: '0.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <strong style={s.integrationGuideTitle}>Demonstrativo pelo CRM (sem a pasta)</strong>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!form.statementRerenderEnabled}
+                          onChange={(e) => setForm({ ...form, statementRerenderEnabled: e.target.checked })}
+                        />
+                        Ativado
+                      </label>
+                    </div>
+                    <p style={s.hint}>
+                      Com isto ligado, o CRM gera o PDF do demonstrativo a partir dos valores fechados no iLux
+                      (IXLDEMOFAT + IXLCONTRATOSFAT sincronizados pelo agente), sem exigir o PDF oficial na pasta monitorada.
+                      Os números vêm do ERP — o CRM não recalcula franquia nem excedente. Se o demonstrativo ainda não
+                      tiver sido sincronizado, o agente/pasta continua sendo o fallback.
+                    </p>
                   </div>
 
               <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
