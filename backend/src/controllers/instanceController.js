@@ -187,8 +187,7 @@ async function create(req, res) {
     }
 
     // Setup Webhook automático
-    const backendUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3002}`;
-    const webhookUrl = `${backendUrl}/api/webhook`;
+    const webhookUrl = evolution.getWebhookCallbackUrl();
     await evolution.setWebhook(evolutionUrl, evolutionKey, instanceName, webhookUrl);
 
     res.json(warnings.length ? { ...inst, warnings } : inst);
@@ -258,8 +257,7 @@ async function repair(req, res) {
       }
     }
 
-    const backendUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3002}`;
-    const webhookUrl = `${backendUrl}/api/webhook`;
+    const webhookUrl = evolution.getWebhookCallbackUrl();
     try {
       await evolution.setWebhook(evolutionUrl, evolutionKey, inst.instanceName, webhookUrl);
     } catch (err) {
@@ -339,4 +337,24 @@ async function remove(req, res) {
   }
 }
 
-module.exports = { list, create, getQrCode, repair, recoverMessages, remove };
+// Historico de saude da instancia (transicoes de estado + episodios de
+// "instancia muda"). Para post-mortem de incidente sem depender de log.
+async function healthEvents(req, res) {
+  try {
+    const { tenantId } = req.user;
+    const { id } = req.params;
+    const instance = await prisma.waInstance.findFirst({ where: { id, tenantId }, select: { instanceName: true } });
+    if (!instance) return res.status(404).json({ error: 'Instância não encontrada.' });
+    const hours = Math.min(Math.max(Number(req.query.hours) || 72, 1), 720);
+    const events = await prisma.waInstanceHealthEvent.findMany({
+      where: { tenantId, instanceName: instance.instanceName, createdAt: { gte: new Date(Date.now() - hours * 3600 * 1000) } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+    res.json({ instanceName: instance.instanceName, events });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
+module.exports = { list, create, getQrCode, repair, recoverMessages, remove, healthEvents };

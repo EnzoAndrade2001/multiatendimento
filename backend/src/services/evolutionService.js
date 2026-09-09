@@ -320,6 +320,19 @@ async function getConnectionState(url, key, instanceName, options = {}) {
   return data;
 }
 
+// URL que a Evolution vai chamar de volta. Por padrao usa PUBLIC_URL (dominio
+// publico via Traefik). EVOLUTION_WEBHOOK_URL permite apontar para um endereco
+// interno (ex.: http://<servico>:8000) quando houver rota interna verificada --
+// tira DNS/proxy/TLS/internet do caminho, que e onde os soluços acontecem.
+function getWebhookCallbackUrl() {
+  const base = String(
+    process.env.EVOLUTION_WEBHOOK_URL
+    || process.env.PUBLIC_URL
+    || `http://localhost:${process.env.PORT || 3002}`,
+  ).replace(/\/+$/, '');
+  return `${base}/api/webhook`;
+}
+
 async function setWebhook(url, key, instanceName, webhookUrl) {
   const client = getClient(url, key);
   const secret = String(process.env.WEBHOOK_SECRET || '').trim();
@@ -639,7 +652,7 @@ async function findConversationJidsByMessageIds(url, key, instanceName, messageI
 
 module.exports = {
   sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
-  getQrCode, getConnectionState, setWebhook, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
+  getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
   normalizePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findMessages, findConversationJidsByMessageIds,
   getEvolutionErrorDetail,

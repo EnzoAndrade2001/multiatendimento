@@ -365,9 +365,8 @@ server.listen(PORT, () => {
       const instances = await prisma.waInstance.findMany();
       if (instances.length > 0) {
         console.log(`[startup-webhook-fix] Verificando/atualizando webhooks para ${instances.length} instâncias...`);
-        const backendUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3002}`;
-        const webhookUrl = `${backendUrl}/api/webhook`;
-        
+        const webhookUrl = evolution.getWebhookCallbackUrl();
+
         for (const inst of instances) {
           // Ignore deleted Evolution records and isolate failures per instance.
           if (String(inst.instanceName || '').startsWith('DELETED_')) continue;

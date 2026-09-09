@@ -876,7 +876,17 @@ async function handleWebhook(req, res) {
   try {
     const { event, instance, data } = req.body;
     const ev = String(event || '').toLowerCase();
-    
+
+    // Marca que a Evolution ESTA falando com a gente -- em QUALQUER evento, nao
+    // so connection.update. Alimenta o alarme de "instancia muda" (conectada
+    // mas sem receber webhook). Best-effort, nao bloqueia o processamento.
+    if (instance) {
+      prisma.waInstance.updateMany({
+        where: { instanceName: instance },
+        data: { lastWebhookAt: new Date() },
+      }).catch(() => {});
+    }
+
     // Trata atualização de conexão e QR Code
     if (ev === 'connection.update' || ev === 'qrcode.updated') {
       const waInstance = await prisma.waInstance.findFirst({ where: { instanceName: instance } });

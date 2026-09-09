@@ -1,12 +1,30 @@
 const prisma = require('../lib/prisma');
 const evolution = require('./evolutionService');
+const { syncMissedMessages } = require('./syncMissedMessagesService');
 
 const DEFAULT_INTERVAL_MS = 30 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15 * 1000;
 
+// "Instancia muda": conectada, mas sem NENHUM webhook da Evolution ha muito
+// tempo. O monitor so olhava o estado da conexao (open/close) e ficava cego
+// para esse caso -- foi exatamente o que aconteceu no incidente de 08/09.
+const SILENCE_ALERT_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.WEBHOOK_SILENCE_ALERT_MS || 25 * 60 * 1000),
+);
+// Reconciliacao periodica: puxa as mensagens recentes da Evolution e preenche
+// o que faltou (rede de seguranca contra webhook perdido, seja qual for a causa).
+const RECONCILE_INTERVAL_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.WEBHOOK_RECONCILE_INTERVAL_MS || 10 * 60 * 1000),
+);
+const HEALTH_EVENT_RETENTION_DAYS = 30;
+
 let io = null;
 let timer = null;
 let running = false;
+const lastReconcileAt = new Map();
+let lastPruneAt = 0;
 
 function setIo(socketIo) {
   io = socketIo;
@@ -49,11 +67,42 @@ function emitHealth(instance, state, healthStatus, checkedAt, error = null) {
   });
 }
 
+// Historico append-only: uma linha por TRANSICAO (nao a cada checagem).
+async function recordHealthEvent(instance, { status, healthStatus, connectionState, error, lastWebhookAt, source = 'health-monitor' }) {
+  try {
+    const ageSec = lastWebhookAt ? Math.round((Date.now() - new Date(lastWebhookAt).getTime()) / 1000) : null;
+    await prisma.waInstanceHealthEvent.create({
+      data: {
+        tenantId: instance.tenantId,
+        instanceId: instance.id,
+        instanceName: instance.instanceName,
+        status,
+        healthStatus,
+        connectionState: connectionState || null,
+        lastWebhookAt: lastWebhookAt || null,
+        webhookAgeSec: ageSec,
+        error: error ? String(error).slice(0, 1000) : null,
+        source,
+      },
+    });
+  } catch (err) {
+    console.warn('[instance-health] falha ao gravar historico:', err.message);
+  }
+}
+
+async function pruneHealthEvents() {
+  if (Date.now() - lastPruneAt < 6 * 60 * 60 * 1000) return;
+  lastPruneAt = Date.now();
+  try {
+    const cutoff = new Date(Date.now() - HEALTH_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    await prisma.waInstanceHealthEvent.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  } catch (err) {
+    console.warn('[instance-health] falha ao limpar historico:', err.message);
+  }
+}
+
 async function checkInstance(instance) {
   const checkedAt = new Date();
-  // O ambiente local de demonstração não deve tentar falar com a Evolution
-  // nem transformar instâncias fictícias em "desconectadas". Em produção essa
-  // variável nunca é habilitada e o monitor segue validando cada conexão.
   if (String(process.env.LOCAL_DEMO || '').toLowerCase() === 'true') {
     return instance;
   }
@@ -63,6 +112,7 @@ async function checkInstance(instance) {
 
   if (!evolutionUrl || !evolutionKey) {
     const health = { status: 'degraded', healthStatus: 'misconfigured' };
+    const changed = instance.status !== health.status || instance.healthStatus !== health.healthStatus;
     const updated = await prisma.waInstance.update({
       where: { id: instance.id },
       data: {
@@ -72,7 +122,10 @@ async function checkInstance(instance) {
         lastHealthError: 'Evolution API não configurada para esta empresa.',
       },
     });
-    emitHealth(updated, 'unknown', health.healthStatus, checkedAt, updated.lastHealthError);
+    if (changed) {
+      emitHealth(updated, 'unknown', health.healthStatus, checkedAt, updated.lastHealthError);
+      await recordHealthEvent(updated, { ...health, connectionState: 'unknown', error: updated.lastHealthError });
+    }
     return updated;
   }
 
@@ -84,21 +137,45 @@ async function checkInstance(instance) {
       { timeout: DEFAULT_REQUEST_TIMEOUT_MS },
     );
     const state = parseConnectionState(payload);
-    const health = healthForState(state);
-    const changed = instance.lastConnectionState !== state || instance.status !== health.status;
+    let health = healthForState(state);
+    let healthError = state ? null : 'Evolution respondeu sem informar o estado da conexão.';
+
+    // D: conectada mas SEM webhook ha muito tempo -> "instancia muda".
+    if (state === 'open' && instance.lastWebhookAt) {
+      const silenceMs = Date.now() - new Date(instance.lastWebhookAt).getTime();
+      if (silenceMs > SILENCE_ALERT_MS) {
+        health = { status: 'degraded', healthStatus: 'silent' };
+        healthError = `Instância conectada, mas sem receber eventos da Evolution há ${Math.round(silenceMs / 60000)} min. Mensagens podem estar sendo perdidas.`;
+      }
+    }
+
+    const changed = instance.lastConnectionState !== state
+      || instance.status !== health.status
+      || instance.healthStatus !== health.healthStatus;
     const updated = await prisma.waInstance.update({
       where: { id: instance.id },
       data: {
         ...health,
         lastConnectionState: state || 'unknown',
-        ...(changed ? { lastConnectionAt: checkedAt } : {}),
+        ...(changed && (state === 'open') !== (instance.lastConnectionState === 'open') ? { lastConnectionAt: checkedAt } : {}),
         lastHealthCheckAt: checkedAt,
-        lastHealthError: state ? null : 'Evolution respondeu sem informar o estado da conexão.',
+        lastHealthError: healthError,
       },
     });
-    if (changed) emitHealth(updated, state, health.healthStatus, checkedAt);
+    if (changed) {
+      emitHealth(updated, state, health.healthStatus, checkedAt, healthError);
+      await recordHealthEvent(updated, {
+        status: health.status,
+        healthStatus: health.healthStatus,
+        connectionState: state || 'unknown',
+        error: healthError,
+        lastWebhookAt: updated.lastWebhookAt,
+      });
+    }
     return updated;
   } catch (error) {
+    const errText = String(error?.response?.data?.message || error?.message || 'Evolution sem resposta').slice(0, 500);
+    const changed = instance.status !== 'degraded' || instance.healthStatus !== 'degraded';
     const updated = await prisma.waInstance.update({
       where: { id: instance.id },
       data: {
@@ -106,15 +183,27 @@ async function checkInstance(instance) {
         healthStatus: 'degraded',
         lastConnectionState: 'unknown',
         lastHealthCheckAt: checkedAt,
-        lastHealthError: String(error?.response?.data?.message || error?.message || 'Evolution sem resposta').slice(0, 500),
+        lastHealthError: errText,
       },
     });
-    if (instance.status !== 'degraded' || instance.healthStatus !== 'degraded') {
-      emitHealth(updated, 'unknown', 'degraded', checkedAt, updated.lastHealthError);
+    if (changed) {
+      emitHealth(updated, 'unknown', 'degraded', checkedAt, errText);
+      await recordHealthEvent(updated, { status: 'degraded', healthStatus: 'degraded', connectionState: 'unknown', error: errText });
     }
-    console.warn(`[instance-health] ${instance.instanceName} indisponível: ${updated.lastHealthError}`);
+    console.warn(`[instance-health] ${instance.instanceName} indisponível: ${errText}`);
     return updated;
   }
+}
+
+// C: reconciliacao periodica -- puxa mensagens recentes da Evolution e preenche
+// o que faltou. Nao bloqueia o loop de health.
+function maybeReconcile(instance) {
+  if (instance.status !== 'connected' && instance.healthStatus !== 'silent') return;
+  const last = lastReconcileAt.get(instance.instanceName) || 0;
+  if (Date.now() - last < RECONCILE_INTERVAL_MS) return;
+  lastReconcileAt.set(instance.instanceName, Date.now());
+  syncMissedMessages(instance.instanceName, { hours: 3, limitPerChat: 30, maxChats: 40 })
+    .catch((err) => console.warn(`[instance-health] reconciliação de ${instance.instanceName} falhou: ${err.message}`));
 }
 
 async function checkAllInstances() {
@@ -127,11 +216,13 @@ async function checkAllInstances() {
     });
     for (const instance of instances) {
       try {
-        await checkInstance(instance);
+        const updated = await checkInstance(instance);
+        maybeReconcile(updated || instance);
       } catch (error) {
         console.warn(`[instance-health] falha ao registrar ${instance.instanceName}: ${error.message}`);
       }
     }
+    await pruneHealthEvents();
   } catch (error) {
     console.warn(`[instance-health] falha ao consultar instâncias: ${error.message}`);
   } finally {
@@ -148,7 +239,7 @@ function start() {
   checkAllInstances().catch(() => {});
   timer = setInterval(() => checkAllInstances().catch(() => {}), interval);
   if (typeof timer.unref === 'function') timer.unref();
-  console.log(`[instance-health] monitoramento iniciado (intervalo=${interval}ms)`);
+  console.log(`[instance-health] monitoramento iniciado (intervalo=${interval}ms, alarme de silêncio=${Math.round(SILENCE_ALERT_MS / 60000)}min, reconciliação=${Math.round(RECONCILE_INTERVAL_MS / 60000)}min)`);
 }
 
 function stop() {
@@ -164,5 +255,5 @@ module.exports = {
   checkInstance,
   parseConnectionState,
   healthForState,
-  __testing: { parseConnectionState, healthForState },
+  __testing: { parseConnectionState, healthForState, SILENCE_ALERT_MS },
 };

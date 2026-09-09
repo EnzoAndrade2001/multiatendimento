@@ -10,6 +10,11 @@ import ActionButton from '../components/ui/ActionButton';
 function getConnectionView(instance) {
   const state = String(instance?.state || instance?.lastConnectionState || '').toLowerCase();
   const health = String(instance?.healthStatus || '').toLowerCase();
+  // Conectada mas sem receber eventos da Evolution há muito tempo -- mensagens
+  // podem estar sendo perdidas em silêncio (o caso do incidente de 08/09).
+  if (health === 'silent') {
+    return { key: 'silent', label: 'Conectada, mas sem receber mensagens', pill: 'Sem eventos', color: 'var(--danger)', icon: <AlertTriangle size={20} /> };
+  }
   if (instance?.status === 'connected' && (state === 'open' || health === 'healthy')) {
     return { key: 'connected', label: 'Conectado', pill: 'Sessão ativa', color: 'var(--success)', icon: <Wifi size={20} /> };
   }
@@ -227,10 +232,13 @@ export default function Connections() {
                       <Smartphone size={16} />
                       Pronto para uso
                     </div>
-                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' ? (
+                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' ? (
                     <div style={{ ...s.healthBox, borderColor: connectionView.key === 'unstable' ? 'var(--warning-border)' : 'var(--danger-border)', color: connectionView.color }}>
                       <AlertTriangle size={16} />
-                      {inst.lastHealthError || (connectionView.key === 'unstable' ? 'A Evolution está reconectando. Aguarde alguns segundos.' : 'A Evolution não respondeu à última verificação.')}
+                      {inst.lastHealthError || (
+                        connectionView.key === 'unstable' ? 'A Evolution está reconectando. Aguarde alguns segundos.'
+                          : connectionView.key === 'silent' ? 'A sessão está conectada, mas o CRM parou de receber eventos da Evolution. Mensagens podem estar sendo perdidas — verifique a Evolution / o webhook.'
+                            : 'A Evolution não respondeu à última verificação.')}
                     </div>
                   ) : isOfficial ? (
                     <div style={s.officialBox}>Credenciais oficiais registradas. Atualize para consultar o estado na Evolution.</div>

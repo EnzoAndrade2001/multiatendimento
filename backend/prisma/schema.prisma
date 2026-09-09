@@ -66,6 +66,7 @@ model Tenant {
   crmMeterReadings           CrmMeterReading[]
   crmBillingStatements       CrmBillingStatement[]
   crmBillingStatementLines   CrmBillingStatementLine[]
+  waInstanceHealthEvents     WaInstanceHealthEvent[]
   firebirdAgents             FirebirdAgent[]
 }
 
@@ -289,6 +290,30 @@ model WaInstance {
   campaigns           Campaign[]
   campaignRecipients  CampaignRecipient[]
   tenant              Tenant              @relation(fields: [tenantId], references: [id])
+}
+
+// Historico append-only de saude das instancias WhatsApp. Uma linha por
+// TRANSICAO de estado/health (nao a cada checagem) + eventos de "instancia
+// muda" (conectada mas sem receber webhook). Sem isso, um incidente
+// transitorio nao deixa rastro -- o WaInstance so guarda o estado atual.
+model WaInstanceHealthEvent {
+  id              String    @id @default(cuid())
+  tenantId        String
+  instanceId      String
+  instanceName    String
+  status          String // connected | connecting | disconnected | degraded
+  healthStatus    String // healthy | unstable | offline | degraded | silent | misconfigured
+  connectionState String? // open | connecting | close | unknown
+  lastWebhookAt   DateTime?
+  webhookAgeSec   Int?
+  error           String?   @db.Text
+  source          String // health-monitor | webhook
+  createdAt       DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, instanceName, createdAt])
+  @@index([createdAt])
 }
 
 model MetaInstance {
