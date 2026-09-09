@@ -83,8 +83,10 @@ export default function Login() {
     }
   }
 
-  // Sem cor de tenant, segue o acento do sistema (laranja PrintGuard, --accent).
-  const primaryColor = tenantInfo?.primaryColor || '#FF6A00';
+  // Login sempre usa o acento do sistema (laranja PrintGuard = --accent).
+  // O primaryColor de tenant nao tematiza mais nada no app; para reativar um
+  // login white-label no futuro, voltar a: tenantInfo?.primaryColor || '#FF6A00'.
+  const primaryColor = '#FF6A00';
   const displayName = tenantInfo?.name || (routeSlug ? routeSlug.toUpperCase() : 'Multiatendimento');
   const hasTenant = Boolean(tenantInfo?.name);
   const year = new Date().getFullYear();
