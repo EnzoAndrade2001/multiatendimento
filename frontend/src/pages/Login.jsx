@@ -83,7 +83,8 @@ export default function Login() {
     }
   }
 
-  const primaryColor = tenantInfo?.primaryColor || '#C9A84E';
+  // Sem cor de tenant, segue o acento do sistema (laranja PrintGuard, --accent).
+  const primaryColor = tenantInfo?.primaryColor || '#FF6A00';
   const displayName = tenantInfo?.name || (routeSlug ? routeSlug.toUpperCase() : 'Multiatendimento');
   const hasTenant = Boolean(tenantInfo?.name);
   const year = new Date().getFullYear();
@@ -126,7 +127,7 @@ export default function Login() {
         .login-input:-webkit-autofill:focus,
         .login-input:-webkit-autofill:focus-visible {
           -webkit-text-fill-color: #F4F6FA !important;
-          -webkit-box-shadow: 0 0 0 1000px #161B24 inset !important;
+          -webkit-box-shadow: 0 0 0 1000px #171C26 inset !important;
           caret-color: #F4F6FA;
           border-color: #2A3546;
           transition: background-color 9999s ease-out 0s;
@@ -278,9 +279,9 @@ const s = {
   shell: {
     display: 'flex',
     minHeight: '100dvh',
-    background: '#0B0D12',
+    background: 'var(--bg-base, #0B0D12)',
     fontFamily: 'var(--font-main)',
-    color: '#F4F6FA',
+    color: 'var(--text-main, #F4F6FA)',
     overflow: 'hidden',
   },
 
@@ -294,8 +295,10 @@ const s = {
     padding: 'clamp(2.5rem, 5vw, 4.5rem)',
     overflow: 'hidden',
     background:
-      'radial-gradient(120% 120% at 100% 100%, rgba(41,50,65,0.45) 0%, transparent 55%), linear-gradient(160deg, #0F1218 0%, #0B0D12 60%)',
-    borderRight: '1px solid #1B2230',
+      'radial-gradient(85% 70% at 0% 0%, color-mix(in srgb, var(--login-accent) 13%, transparent) 0%, transparent 55%), '
+      + 'radial-gradient(120% 120% at 100% 100%, rgba(255,255,255,0.04) 0%, transparent 55%), '
+      + 'linear-gradient(160deg, var(--bg-surface, #11151D) 0%, var(--bg-base, #0B0D12) 62%)',
+    borderRight: '1px solid var(--border-color, #1B2230)',
   },
   brandGlow: {
     position: 'absolute',
@@ -333,13 +336,13 @@ const s = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '9px 14px',
-    background: '#F4F6FA',
-    borderRadius: '12px',
-    border: '1px solid rgba(255,255,255,0.12)',
-    boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
+    padding: '14px 20px',
+    background: '#FFFFFF',
+    borderRadius: '16px',
+    border: '1px solid rgba(255,255,255,0.14)',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.32)',
   },
-  brandLogoImg: { height: '30px', maxWidth: '150px', objectFit: 'contain', display: 'block' },
+  brandLogoImg: { height: '44px', maxWidth: '210px', objectFit: 'contain', display: 'block' },
   brandBody: { position: 'relative', maxWidth: '30rem' },
   brandEyebrow: {
     margin: '0 0 1rem',
@@ -395,7 +398,7 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 'clamp(1.25rem, 4vw, 3rem)',
-    background: '#0C0F15',
+    background: 'var(--bg-base, #0B0D12)',
   },
   formInner: {
     width: '100%',
@@ -408,7 +411,7 @@ const s = {
     height: '48px',
     marginBottom: '1.1rem',
     borderRadius: '13px',
-    background: '#161B24',
+    background: 'var(--bg-panel, #171C26)',
     border: '1px solid',
     color: '#F4F6FA',
     display: 'inline-flex',
@@ -458,8 +461,8 @@ const s = {
   input: {
     minHeight: '48px',
     padding: '0.75rem 0.95rem',
-    background: '#161B24',
-    border: '1px solid #2A3546',
+    background: 'var(--bg-panel, #171C26)',
+    border: '1px solid var(--border-color, #2A3546)',
     borderRadius: '11px',
     fontSize: '0.95rem',
     color: '#F4F6FA',
