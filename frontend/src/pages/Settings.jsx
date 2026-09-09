@@ -29,6 +29,7 @@ import {
   downloadAgent,
   getSystemPromptPreview,
   syncCompanyFromFirebird,
+  syncPlugBoletoConfig,
   getTechnicalContacts,
   createTechnicalContact,
   updateTechnicalContact,
@@ -145,6 +146,9 @@ export default function Settings() {
     plugBoletoCedenteCnpj: '',
     plugBoletoToken: '',
     plugBoletoTokenSet: false,
+    plugBoletoConfigSyncStatus: 'never',
+    plugBoletoConfigSyncedAt: '',
+    plugBoletoConfigSyncError: '',
     firebirdCompany: null,
     firebirdCompanySyncStatus: 'not_synced',
     firebirdCompanySyncRequestedAt: '',
@@ -188,6 +192,7 @@ export default function Settings() {
   const [testingIntegration, setTestingIntegration] = useState(false);
   const [syncingIntegration, setSyncingIntegration] = useState(false);
   const [syncingCompany, setSyncingCompany] = useState(false);
+  const [syncingPlugBoleto, setSyncingPlugBoleto] = useState(false);
   const [technicalContacts, setTechnicalContacts] = useState([]);
   const [technicalContactForm, setTechnicalContactForm] = useState({ name: '', phone: '', firebirdSupportName: '' });
   const [editingTechnicalContact, setEditingTechnicalContact] = useState(null);
@@ -297,6 +302,9 @@ export default function Settings() {
       }
       // O token do PlugBoleto só é enviado quando digitado; vazio = manter o atual.
       delete settingsToSave.plugBoletoTokenSet;
+      delete settingsToSave.plugBoletoConfigSyncStatus;
+      delete settingsToSave.plugBoletoConfigSyncedAt;
+      delete settingsToSave.plugBoletoConfigSyncError;
       if (!String(settingsToSave.plugBoletoToken || '').trim()) {
         delete settingsToSave.plugBoletoToken;
       }
@@ -358,6 +366,33 @@ export default function Settings() {
       toast.error(err.response?.data?.error || 'Não foi possível solicitar a sincronização da empresa.');
     } finally {
       setSyncingCompany(false);
+    }
+  }
+
+  async function handleSyncPlugBoleto() {
+    setSyncingPlugBoleto(true);
+    try {
+      await syncPlugBoletoConfig();
+      toast.success('Consulta da credencial enviada ao agente iLux.');
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const response = await getSettings();
+        const next = response.data || {};
+        setForm((current) => ({ ...current, ...next, plugBoletoToken: '' }));
+        if (next.plugBoletoConfigSyncStatus !== 'pending') {
+          if (next.plugBoletoConfigSyncStatus === 'ok') {
+            toast.success('Credencial do PlugBoleto sincronizada do iLux.');
+          } else {
+            toast.error(next.plugBoletoConfigSyncError || 'O agente não confirmou a consulta da credencial.');
+          }
+          return;
+        }
+      }
+      toast.info('A consulta ficou pendente. O agente atualizará assim que estiver online.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível solicitar a sincronização da credencial.');
+    } finally {
+      setSyncingPlugBoleto(false);
     }
   }
 
@@ -1911,6 +1946,27 @@ export default function Settings() {
                       Com isto ligado, o CRM busca o PDF do boleto direto na API do banco (PlugBoleto), sem depender da pasta monitorada.
                       Sem PlugBoleto ou em caso de erro, o agente continua sendo o fallback. Credenciais do cedente vêm do iLux.
                     </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                      <button
+                        type="button"
+                        style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap' }}
+                        onClick={handleSyncPlugBoleto}
+                        disabled={syncingPlugBoleto}
+                      >
+                        {syncingPlugBoleto ? 'Consultando iLux...' : 'Sincronizar credencial do iLux'}
+                      </button>
+                      <span style={{ fontSize: 'var(--text-sm)', color:
+                        form.plugBoletoConfigSyncStatus === 'ok' ? 'var(--success)'
+                        : form.plugBoletoConfigSyncStatus === 'failed' ? 'var(--danger)'
+                        : 'var(--text-dim)' }}>
+                        {form.plugBoletoConfigSyncStatus === 'ok'
+                          ? `Sincronizada${form.plugBoletoConfigSyncedAt ? ` em ${new Date(form.plugBoletoConfigSyncedAt).toLocaleString('pt-BR')}` : ''}`
+                          : form.plugBoletoConfigSyncStatus === 'pending' ? 'Aguardando o agente...'
+                          : form.plugBoletoConfigSyncStatus === 'failed' ? (form.plugBoletoConfigSyncError || 'Falha na última consulta')
+                          : (form.plugBoletoTokenSet ? 'Configurada manualmente' : 'Ainda não configurada')}
+                      </span>
+                    </div>
+                    <p style={s.hint}>Puxa CNPJ e token do cedente do iLux (CE_CEDENTE / CE_PARAM_CONFIG) e guarda cifrado. Preencha abaixo à mão só se preferir.</p>
                   </div>
 
                   <div style={s.field}>

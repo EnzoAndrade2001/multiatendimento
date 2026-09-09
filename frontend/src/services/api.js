@@ -110,6 +110,7 @@ export const downloadAgent = () => api.get('/settings/agent-download', { respons
 export const saveSettings = (data) => api.post('/settings', data);
 export const testAiProvider = (data) => api.post('/settings/ai/test', data);
 export const syncCompanyFromFirebird = () => api.post('/settings/company/sync');
+export const syncPlugBoletoConfig = () => api.post('/settings/plugboleto/sync');
 export const getSystemPromptPreview = (systemPrompt) => api.post('/settings/system-prompt-preview', { systemPrompt });
 export const getBusinessHours = () => api.get('/settings/business-hours');
 export const saveBusinessHours = (data) => api.post('/settings/business-hours', data);

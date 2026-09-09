@@ -62,6 +62,7 @@ AGENT_CAPABILITIES = (
     "commands.process-billing",
     "commands.fetch-billing-document",
     "commands.fetch-company-profile",
+    "commands.fetch-plugboleto-config",
 )
 
 # A command listener normally waits up to 25 seconds for work. Authentication
@@ -742,6 +743,11 @@ class CRMClient:
                             "Cadastro da empresa sincronizado: %s.",
                             company.get("name") or company.get("companyCode") or "sem nome",
                         )
+                    elif cmd_type == "FETCH_PLUGBOLETO_CONFIG":
+                        logging.info("Consultando credencial do PlugBoleto no iLux (CE_CEDENTE / CE_PARAM_CONFIG)...")
+                        plug_config = repo.fetch_plugboleto_config()
+                        self.report_command_result(cmd_id, success=True, result={"plugBoleto": plug_config})
+                        logging.info("Credencial do PlugBoleto sincronizada com o CRM.")
                     else:
                         logging.warning("Tipo de comando desconhecido: %s", cmd_type)
                 except Exception as e:
@@ -1410,6 +1416,44 @@ class FirebirdRepository:
             order by r.DTVECTOREC, r.SEQRECEITA
         """
         yield from self._rows(sql, ())
+
+    def fetch_plugboleto_config(self) -> dict[str, Any]:
+        """Le a credencial do PlugBoleto no iLux para o CRM chamar a API direto.
+
+        Mesma cadeia que fetch_billing_pdf percorre por titulo, sem um titulo
+        especifico: CE_CEDENTE -> CE_CONTA -> CE_CONVENIO -> CE_PARAM_CONFIG.
+        """
+        con = self.connect()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                """
+                select first 1
+                    ced.CEDENTECPFCNPJ, ced.TOKEN_CEDENTE,
+                    cfg.URL_BASE, cfg.PATH_BOLETO_IMPRESSAO
+                from CE_CEDENTE ced
+                join CE_CONTA conta on conta.CD_CEDENTE = ced.ID_CEDENTE
+                join CE_CONVENIO conv on conv.CD_CONTA = conta.ID_CONTA
+                join CE_PARAM_CONFIG cfg
+                  on cfg.TP_AMBIENTE = conv.TP_AMBIENTE
+                where coalesce(ced.TOKEN_CEDENTE, '') <> ''
+                """,
+            )
+            row = cur.fetchone()
+        finally:
+            con.close()
+        if not row:
+            raise ValueError("Nenhuma credencial do PlugBoleto encontrada no iLux (CE_CEDENTE / CE_PARAM_CONFIG).")
+        cnpj, token, base_url, print_path = row
+        digits = "".join(ch for ch in str(cnpj or "") if ch.isdigit())
+        if not digits or not str(token or "").strip():
+            raise ValueError("Credencial do PlugBoleto incompleta no iLux (CNPJ ou token vazio).")
+        return {
+            "cedenteCnpj": digits,
+            "token": str(token).strip(),
+            "baseUrl": str(base_url or "").strip(),
+            "printPath": str(print_path or "").strip(),
+        }
 
     def fetch_billing_pdf(self, payload: dict[str, Any]) -> dict[str, Any]:
         receivable_id = int(payload.get("receivableExternalId") or 0)
