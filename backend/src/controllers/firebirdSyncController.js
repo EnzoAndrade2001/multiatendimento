@@ -974,10 +974,18 @@ async function pushBatch(req, res) {
           const token = String(record.token || '').trim();
           const cnpj = String(record.cedenteCnpj || record.cnpj || '').replace(/\D/g, '');
           if (token && cnpj) {
+            // So LIGA a flag na PRIMEIRA sincronizacao (quando ainda nao havia
+            // credencial). Depois disso, quem manda no on/off e o usuario -- o
+            // agente sincroniza a credencial mas nao sobrescreve a escolha dele.
+            const current = await prisma.tenantSettings.findUnique({
+              where: { tenantId: tenant.id },
+              select: { plugBoletoTokenCipher: true },
+            });
+            const firstSync = !current?.plugBoletoTokenCipher;
             await prisma.tenantSettings.update({
               where: { tenantId: tenant.id },
               data: {
-                plugBoletoEnabled: true,
+                ...(firstSync ? { plugBoletoEnabled: true } : {}),
                 plugBoletoCedenteCnpj: cnpj,
                 plugBoletoBaseUrl: String(record.baseUrl || '').trim() || undefined,
                 plugBoletoPrintPath: String(record.printPath || '').trim() || undefined,

@@ -22,18 +22,29 @@ function makeRes() {
 
 // pushBatch tambem grava firebirdLastSyncAt no fim; a gente so olha a chamada
 // que carrega a credencial.
-function patch(context) {
-  const og = { find: prisma.tenant.findUnique, upd: prisma.tenantSettings.update, upsert: prisma.externalSyncRecord.upsert };
-  context.after(() => { prisma.tenant.findUnique = og.find; prisma.tenantSettings.update = og.upd; prisma.externalSyncRecord.upsert = og.upsert; });
+function patch(context, { tokenAlreadySet = false } = {}) {
+  const og = {
+    find: prisma.tenant.findUnique,
+    settingsFind: prisma.tenantSettings.findUnique,
+    upd: prisma.tenantSettings.update,
+    upsert: prisma.externalSyncRecord.upsert,
+  };
+  context.after(() => {
+    prisma.tenant.findUnique = og.find;
+    prisma.tenantSettings.findUnique = og.settingsFind;
+    prisma.tenantSettings.update = og.upd;
+    prisma.externalSyncRecord.upsert = og.upsert;
+  });
   const updates = [];
   prisma.tenant.findUnique = async () => ({ ...TENANT });
+  prisma.tenantSettings.findUnique = async () => ({ plugBoletoTokenCipher: tokenAlreadySet ? 'v1.xxx' : null });
   prisma.tenantSettings.update = async (args) => { updates.push(args.data); return {}; };
   prisma.externalSyncRecord.upsert = async () => ({});
   return updates;
 }
 
-test('pushBatch plugBoletoConfig: cifra o token e grava em TenantSettings', async (context) => {
-  const updates = patch(context);
+test('pushBatch plugBoletoConfig: 1a sincronizacao cifra o token E liga a flag', async (context) => {
+  const updates = patch(context, { tokenAlreadySet: false });
   const res = makeRes();
   await pushBatch(makeReq({
     entity: 'plugBoletoConfig',
@@ -43,10 +54,25 @@ test('pushBatch plugBoletoConfig: cifra o token e grava em TenantSettings', asyn
   assert.equal(res.statusCode, 200);
   const credUpdate = updates.find((d) => d.plugBoletoTokenCipher);
   assert.ok(credUpdate, 'deve gravar a credencial');
-  assert.equal(credUpdate.plugBoletoEnabled, true);
+  assert.equal(credUpdate.plugBoletoEnabled, true, '1a vez -> liga sozinho');
   assert.equal(credUpdate.plugBoletoCedenteCnpj, '35692721000194');
   assert.equal(decryptSecret(credUpdate.plugBoletoTokenCipher), 'TOK-1');
   assert.ok(credUpdate.plugBoletoConfigSyncedAt instanceof Date);
+});
+
+test('pushBatch plugBoletoConfig: credencial JA existia -> NAO mexe em plugBoletoEnabled (respeita o usuario)', async (context) => {
+  const updates = patch(context, { tokenAlreadySet: true });
+  const res = makeRes();
+  await pushBatch(makeReq({
+    entity: 'plugBoletoConfig',
+    records: [{ cedenteCnpj: '35.692.721/0001-94', token: 'TOK-2', baseUrl: 'x', printPath: 'y' }],
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  const credUpdate = updates.find((d) => d.plugBoletoTokenCipher);
+  assert.ok(credUpdate, 'ainda sincroniza a credencial');
+  assert.equal('plugBoletoEnabled' in credUpdate, false, 'nao sobrescreve o on/off do usuario');
+  assert.equal(decryptSecret(credUpdate.plugBoletoTokenCipher), 'TOK-2');
 });
 
 test('pushBatch plugBoletoConfig: sem token nao grava credencial', async (context) => {
