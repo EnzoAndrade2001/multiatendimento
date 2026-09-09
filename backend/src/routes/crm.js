@@ -15,6 +15,7 @@ const {
   getReceivableDocument,
   sendReceivableDocuments,
   listFlaggedBillingDocuments,
+  getBillingDocumentAudit,
   listEquipments,
 } = require('../controllers/crmController');
 const auditEvent = require('../middlewares/auditEvent');
@@ -35,6 +36,7 @@ router.get('/customers/:id/receivables/:receivableId/documents', requirePermissi
 router.post('/customers/:id/receivables/:receivableId/documents/send', requirePermission('crm.financial.send'), auditEvent('FINANCIAL_DOCUMENTS_SEND', 'receivable', { resourceId: (req) => req.params.receivableId }), asyncRoute(sendReceivableDocuments));
 router.post('/customers/:id/receivables/:receivableId/documents/:documentType', requirePermission('crm.financial.view'), auditEvent('FINANCIAL_DOCUMENT_ACCESS', 'receivable', { resourceId: (req) => req.params.receivableId }), asyncRoute(getReceivableDocument));
 router.get('/financial/flagged-documents', requirePermission('crm.financial.view'), asyncRoute(listFlaggedBillingDocuments));
+router.get('/financial/audit', requirePermission('crm.financial.view'), asyncRoute(getBillingDocumentAudit));
 router.get('/equipments', asyncRoute(listEquipments));
 
 module.exports = router;

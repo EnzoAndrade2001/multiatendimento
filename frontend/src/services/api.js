@@ -369,6 +369,7 @@ export const sendCrmReceivableDocuments = (customerId, receivableId, data) => ap
 );
 export const getCrmEquipments = (params = {}) => api.get('/crm/equipments', { params });
 export const getCrmFlaggedDocuments = () => api.get('/crm/financial/flagged-documents', { timeout: 15000 });
+export const getCrmBillingAudit = () => api.get('/crm/financial/audit', { timeout: 20000 });
 
 // Billing Integration (Automação de Cobranças)
 export const getBillingLogs = () => api.get('/integrations/firebird/billing-logs');

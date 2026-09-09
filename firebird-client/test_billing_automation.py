@@ -190,6 +190,19 @@ class FindReadyBillingPackagesTest(unittest.TestCase):
             packages = self.repo.find_ready_billing_packages(["invoice", "statement"], ledger)
         self.assertEqual(packages, [])
 
+    def test_expoe_resumo_da_varredura_em_last_scan_stats(self):
+        (self.root / "b.pdf").unlink()  # sem demonstrativo na pasta
+        self.repo.scan_financial_documents()
+        row = {**self.receivable_row, "seqdemonstrativo": None}  # e sem seqdemo -> incompleto
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[row]):
+            self.repo.find_ready_billing_packages(["invoice", "statement"], ledger)
+        stats = self.repo._last_scan_stats
+        self.assertEqual(stats["checked"], 1)
+        self.assertEqual(stats["ready"], 0)
+        self.assertEqual(stats["missingByType"]["statement"], 1)
+        self.assertIn("ambiguous", stats)
+
     def test_pasta_tem_prioridade_sobre_statementRef(self):
         # Com o PDF oficial na pasta, o pacote usa o arquivo -- nao a referencia.
         ledger = BillingSendLedger(self.root / "ledger.json")

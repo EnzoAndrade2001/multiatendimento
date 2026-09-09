@@ -166,6 +166,7 @@ async function queueDocumentRequest({ tenantId, receivable, customerName, docume
         invoiceExternalId: receivable.invoiceExternalId,
         statementExternalId: receivable.statementExternalId,
         customerName,
+        receivableValue: Number.isFinite(receivable.value) ? receivable.value : (Number.isFinite(receivable.openValue) ? receivable.openValue : null),
         fileName: defaultFileName(documentType, receivable, customerName),
       },
     },
@@ -183,6 +184,7 @@ async function queueDocumentRequest({ tenantId, receivable, customerName, docume
         invoiceExternalId: receivable.invoiceExternalId,
         statementExternalId: receivable.statementExternalId,
         customerName,
+        receivableValue: Number.isFinite(receivable.value) ? receivable.value : (Number.isFinite(receivable.openValue) ? receivable.openValue : null),
         fileName: defaultFileName(documentType, receivable, customerName),
       },
     },
@@ -324,6 +326,13 @@ async function completeDocumentRequest({ request, success, result, error }) {
         // direto pela API). Fica visível no modal de documentos da cobranca.
         source: result.source || request.payload.source || null,
         sha256: result.sha256 || null,
+        // Auditoria de divergencia (pasta): amountOk = o valor do titulo aparece
+        // no texto do PDF casado; matchScore = confianca do matcher do agente.
+        amountOk: typeof result.amountOk === 'boolean' ? result.amountOk : null,
+        matchScore: Number.isFinite(result.matchScore) ? result.matchScore : null,
+        receivableValue: Number.isFinite(result.receivableValue)
+          ? result.receivableValue
+          : (Number.isFinite(request.payload.receivableValue) ? request.payload.receivableValue : null),
       },
     },
   });
@@ -460,6 +469,7 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
   const sent = [];
   const caption = billingCaption(receivable, customerName);
   let updatedTicket = null;
+  let firstMediaMessageId = null;
 
   try {
     for (const document of documents) {
@@ -492,6 +502,7 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
           externalId: evolutionMessageId(result),
         },
       });
+      if (!firstMediaMessageId) firstMediaMessageId = evolutionMessageId(result) || null;
       sent.push({ ...document, messageId: message.id });
       updatedTicket = await prisma.ticket.update({
         where: { id: delivery.ticketId },
@@ -525,7 +536,7 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
         },
       }),
       prisma.billingLog.create({
-        data: { tenantId, cpfCnpj: customer.cpfCnpj, clientName: customerName, fileName: sent.map((item) => item.fileName).join(', '), status: 'SUCCESS' },
+        data: { tenantId, cpfCnpj: customer.cpfCnpj, clientName: customerName, fileName: sent.map((item) => item.fileName).join(', '), status: 'SUCCESS', messageId: firstMediaMessageId, deliveryStatus: 'sent' },
       }),
     ]);
 

@@ -14,12 +14,16 @@ function fakeRes() {
 test('lista documentos financeiros marcados como falha, com o cliente CRM resolvido', async (context) => {
   const originalExternalFindMany = prisma.externalSyncRecord.findMany;
   const originalCustomerFindMany = prisma.crmCustomer.findMany;
+  const originalSettings = prisma.tenantSettings.findUnique;
   context.after(() => {
     prisma.externalSyncRecord.findMany = originalExternalFindMany;
     prisma.crmCustomer.findMany = originalCustomerFindMany;
+    prisma.tenantSettings.findUnique = originalSettings;
   });
+  prisma.tenantSettings.findUnique = async () => ({ billingScanStatus: null });
 
   prisma.externalSyncRecord.findMany = async ({ where }) => {
+    if (where.entity === billingDocuments.REQUEST_ENTITY && where.payload?.equals === 'pending') return [];
     if (where.entity === billingDocuments.REQUEST_ENTITY) {
       return [{
         id: 'req-1',
@@ -59,9 +63,15 @@ test('lista documentos financeiros marcados como falha, com o cliente CRM resolv
 
 test('nao resolve o cliente quando o titulo nao e encontrado, mas ainda assim lista o item', async (context) => {
   const originalExternalFindMany = prisma.externalSyncRecord.findMany;
-  context.after(() => { prisma.externalSyncRecord.findMany = originalExternalFindMany; });
+  const originalSettings = prisma.tenantSettings.findUnique;
+  context.after(() => {
+    prisma.externalSyncRecord.findMany = originalExternalFindMany;
+    prisma.tenantSettings.findUnique = originalSettings;
+  });
+  prisma.tenantSettings.findUnique = async () => null;
 
   prisma.externalSyncRecord.findMany = async ({ where }) => {
+    if (where.entity === billingDocuments.REQUEST_ENTITY && where.payload?.equals === 'pending') return [];
     if (where.entity === billingDocuments.REQUEST_ENTITY) {
       return [{
         id: 'req-2',

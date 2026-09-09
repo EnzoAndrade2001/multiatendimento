@@ -199,6 +199,10 @@ class MatchResult:
     document_type: str
     score: int
     sha256: str
+    # None = nao deu pra checar (titulo sem valor no contexto); True/False =
+    # o valor do titulo aparece (ou nao) no texto do PDF casado. Alimenta a
+    # auditoria de divergencia do CRM.
+    amount_ok: bool | None = None
 
 
 class FinancialDocumentIndex:
@@ -499,7 +503,18 @@ class FinancialDocumentIndex:
         # documento novo.
         chosen_path = min(next(iter(by_text.values())), key=str)
         sha = _sha256(chosen_path)
-        return MatchResult(path=chosen_path, document_type=document_type, score=best_score, sha256=sha)
+        chosen_text = next((t for p, t in best_candidates if p == chosen_path), "")
+        # _money_variants(None) devolve "0,00" e afins -- so checa quando o titulo
+        # tem um valor real.
+        amount_ok = (
+            any(value in chosen_text for value in amount_variants)
+            if context.get("valreceita")
+            else None
+        )
+        return MatchResult(
+            path=chosen_path, document_type=document_type, score=best_score,
+            sha256=sha, amount_ok=amount_ok,
+        )
 
 
 def friendly_filename(document_type: str, context: dict[str, Any]) -> str:

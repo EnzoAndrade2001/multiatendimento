@@ -45,7 +45,7 @@ Depois preencha o arquivo `.env` com:
 
 O agente também informa sua identificação em cada heartbeat enviado ao CRM:
 
-- `AGENT_VERSION`: versão do executável instalado (release atual: `1.1.5`)
+- `AGENT_VERSION`: versão do executável instalado (release atual: `1.1.6`)
 - `AGENT_PROTOCOL_VERSION`: versão do contrato de comunicação com o backend
 - `AGENT_INSTALL_ID`: identificador persistente da instalação (gerado
   automaticamente quando vazio, usado apenas para diagnóstico)

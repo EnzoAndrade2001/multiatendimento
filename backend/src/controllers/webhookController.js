@@ -859,6 +859,17 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
   }
 }
 
+// WhatsApp/baileys ACK -> status de entrega da cobranca. 1/PENDING e 2/SERVER_ACK
+// nao interessam (mensagem ainda no servidor). Aceita numero ou enum em texto.
+function mapWhatsappAck(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const s = String(raw).toUpperCase();
+  if (s === '3' || s === 'DELIVERY_ACK' || s === 'DELIVERY') return 'delivered';
+  if (s === '4' || s === '5' || s === 'READ' || s === 'PLAYED') return 'read';
+  if (s === '0' || s === 'ERROR') return 'failed';
+  return null;
+}
+
 async function handleWebhook(req, res) {
   res.sendStatus(200);
 
@@ -935,6 +946,40 @@ async function handleWebhook(req, res) {
       return;
     }
 
+    // messages.update tambem carrega ACK de entrega/leitura (WhatsApp). Quando
+    // for um ACK de uma mensagem de cobranca, atualiza o BillingLog -- e NAO
+    // trata como exclusao (o codigo antigo marcava isDeleted em todo update).
+    if (ev === 'messages.update') {
+      const entries = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.messages) ? data.messages : [data];
+      let handledAck = false;
+      for (const entry of entries) {
+        const key = entry?.key || entry?.message?.key || entry?.update?.key;
+        const ack = mapWhatsappAck(entry?.update?.status ?? entry?.status ?? entry?.ack);
+        if (!key?.id || !ack) continue;
+        handledAck = true;
+        try {
+          const lowerStates = {
+            delivered: ['sent', 'failed'],
+            read: ['sent', 'failed', 'delivered'],
+            failed: ['sent'],
+          }[ack] || [];
+          const updated = await prisma.billingLog.updateMany({
+            where: { messageId: key.id, OR: [{ deliveryStatus: { in: lowerStates } }, { deliveryStatus: null }] },
+            data: { deliveryStatus: ack, deliveryUpdatedAt: new Date() },
+          });
+          if (updated.count && io) {
+            const log = await prisma.billingLog.findFirst({ where: { messageId: key.id }, select: { id: true, tenantId: true } });
+            if (log) io.to(log.tenantId).emit('billing_log_updated', { id: log.id, deliveryStatus: ack });
+          }
+        } catch (ackErr) {
+          console.error('[webhook] falha ao registrar ACK de cobranca:', ackErr.message);
+        }
+      }
+      if (handledAck) return;
+    }
+
     // Trata exclusão de mensagens
     if (ev === 'messages.delete' || ev === 'messages.update') {
       const key = data?.key || data?.message?.key || data;
@@ -943,7 +988,7 @@ async function handleWebhook(req, res) {
           where: { externalId: key.id },
           include: { ticket: true }
         });
-        
+
         if (msgToUpdate) {
           const updated = await prisma.message.update({
             where: { id: msgToUpdate.id },
@@ -1438,5 +1483,6 @@ module.exports = {
     isHistoricalMessage,
     messageOccurredAt,
     shouldReopenResolvedTicket,
+    mapWhatsappAck,
   },
 };

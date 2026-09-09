@@ -348,6 +348,7 @@ async function sendBilling(req, res) {
     });
 
     // 2. Envia as mídias (PDFs) sequencialmente
+    let firstMediaMessageId = null;
     for (const file of files) {
       const base64 = (await fs.promises.readFile(file.path)).toString('base64');
       const mime = file.mimetype;
@@ -363,6 +364,7 @@ async function sendBilling(req, res) {
       });
 
       const externalId = result?.key?.id || result?.message?.key?.id;
+      if (!firstMediaMessageId) firstMediaMessageId = externalId || null;
 
       // Cria a mensagem correspondente no banco
       await prisma.message.create({
@@ -393,7 +395,9 @@ async function sendBilling(req, res) {
         cpfCnpj,
         clientName: contact.name,
         fileName: files.map(f => f.originalname).join(', '),
-        status: 'SUCCESS'
+        status: 'SUCCESS',
+        messageId: firstMediaMessageId,
+        deliveryStatus: 'sent'
       }
     });
     await prisma.ticketEvent.create({
@@ -747,6 +751,7 @@ async function autoSendBilling(req, res) {
     const ticket = await getOutboundBillingTicket({ tenantId: tenant.id, contactId: contact.id, instanceId: billingInstance.id });
     await prisma.message.create({ data: { ticketId: ticket.id, body: template, fromMe: true, automationType: 'BILLING', externalId: textExternalId } });
 
+    let firstMediaMessageId = null;
     for (const document of cachedDocuments) {
       const filePath = path.join(mediaPath, path.basename(document.mediaUrl));
       const base64 = (await fs.promises.readFile(filePath)).toString('base64');
@@ -758,6 +763,7 @@ async function autoSendBilling(req, res) {
         filePath,
       });
       const externalId = result?.key?.id || result?.message?.key?.id;
+      if (!firstMediaMessageId) firstMediaMessageId = externalId || null;
       const message = await prisma.message.create({
         data: { ticketId: ticket.id, body: '', fromMe: true, automationType: 'BILLING', mediaUrl: document.mediaUrl, mediaType: 'document', fileName: document.fileName, externalId, mediaStatus: 'ok' },
       });
@@ -767,7 +773,7 @@ async function autoSendBilling(req, res) {
     const updatedTicket = await prisma.ticket.update({ where: { id: ticket.id }, data: { lastMessageAt: new Date() } });
 
     await prisma.billingLog.create({
-      data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SUCCESS' },
+      data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SUCCESS', messageId: firstMediaMessageId, deliveryStatus: 'sent' },
     });
     await prisma.ticketEvent.create({
       data: {

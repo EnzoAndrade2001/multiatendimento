@@ -65,8 +65,24 @@ function coverageDetail(contact) {
   return contact.lastError || (contact.status === 'NO_PHONE' ? 'Contato sem telefone cadastrado.' : 'Nenhum envio concluído no período.');
 }
 
+const DELIVERY_LABEL = {
+  sent: 'entregue ao servidor',
+  delivered: 'entregue no aparelho',
+  read: 'lido pelo cliente',
+  failed: 'falha na entrega',
+};
+
+function deliveryLabel(log) {
+  if (log.status !== 'SUCCESS' || !log.deliveryStatus) return null;
+  const when = log.deliveryUpdatedAt ? ` (${new Date(log.deliveryUpdatedAt).toLocaleString('pt-BR')})` : '';
+  return `${DELIVERY_LABEL[log.deliveryStatus] || log.deliveryStatus}${when}`;
+}
+
 function billingLogDetail(log) {
-  if (log.status === 'SUCCESS') return 'Enviado para o WhatsApp com sucesso.';
+  if (log.status === 'SUCCESS') {
+    const delivery = deliveryLabel(log);
+    return delivery ? `Enviado no WhatsApp · ${delivery}.` : 'Enviado para o WhatsApp com sucesso.';
+  }
   const raw = log.errorMessage || 'Falha sem mensagem detalhada.';
   if (/status code 400/i.test(raw)) {
     return 'WhatsApp recusou a solicitacao (HTTP 400). Verifique o telefone, a instancia e tente novamente.';
@@ -654,6 +670,15 @@ export default function BillingReports() {
                               <span className="status-badge" style={{ ...s.badge, backgroundColor: `${badgeColor}20`, color: badgeColor }}>
                                 {isSuccess ? 'Enviado' : isSkipped ? (isOptin ? 'Sem Permissão' : 'S/ Telefone') : 'Erro'}
                               </span>
+                              {isSuccess && log.deliveryStatus && log.deliveryStatus !== 'sent' ? (
+                                <span
+                                  className="status-badge no-print"
+                                  style={{ ...s.badge, marginLeft: 4, backgroundColor: log.deliveryStatus === 'failed' ? `${STATUS_COLORS.FAILED}20` : `${STATUS_COLORS.SUCCESS}20`, color: log.deliveryStatus === 'failed' ? STATUS_COLORS.FAILED : STATUS_COLORS.SUCCESS }}
+                                  title={deliveryLabel(log) || ''}
+                                >
+                                  {log.deliveryStatus === 'read' ? '✓✓ Lido' : log.deliveryStatus === 'delivered' ? '✓ Entregue' : 'Falha entrega'}
+                                </span>
+                              ) : null}
                             </td>
                             <td style={s.tdMessage}>
                               <strong style={s.detailCategory}>{billingLogCategory(log)}</strong>

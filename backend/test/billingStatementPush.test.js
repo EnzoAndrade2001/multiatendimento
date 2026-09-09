@@ -115,3 +115,31 @@ test('pushBatch billingStatement: header-only nao chama createMany', async (cont
   assert.equal(calls.deleteMany.length, 1);
   assert.equal(calls.createMany.length, 0);
 });
+
+test('pushBatch billingScanStatus: grava o resumo da varredura em TenantSettings', async (context) => {
+  const og = { find: prisma.tenant.findUnique, upd: prisma.tenantSettings.update, agent: prisma.firebirdAgent.upsert };
+  context.after(() => {
+    prisma.tenant.findUnique = og.find;
+    prisma.tenantSettings.update = og.upd;
+    prisma.firebirdAgent.upsert = og.agent;
+  });
+  prisma.tenant.findUnique = async () => ({ ...TENANT });
+  prisma.firebirdAgent.upsert = async () => ({});
+  const updates = [];
+  prisma.tenantSettings.update = async (args) => { updates.push(args.data); return {}; };
+
+  const res = makeRes();
+  await pushBatch(makeReq({
+    entity: 'billingScanStatus',
+    records: [{ checked: 120, ready: 3, alreadySent: 90, skippedPeriod: 25, ambiguous: 1, missingByType: { invoice: 1, statement: 2, boleto: 0 } }],
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  const scan = updates.find((d) => d.billingScanStatus)?.billingScanStatus;
+  assert.ok(scan, 'gravou billingScanStatus');
+  assert.equal(scan.checked, 120);
+  assert.equal(scan.ready, 3);
+  assert.equal(scan.ambiguous, 1);
+  assert.equal(scan.missingByType.statement, 2);
+  assert.ok(typeof scan.checkedAt === 'string');
+});

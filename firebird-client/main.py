@@ -46,7 +46,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.5"
+DEFAULT_AGENT_VERSION = "1.1.6"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -911,6 +911,7 @@ class FirebirdRepository:
     def __init__(self, config: AppConfig):
         self.config = config
         self._financial_index: FinancialDocumentIndex | None = None
+        self._last_scan_stats: dict[str, Any] | None = None
 
     def financial_document_index(self) -> FinancialDocumentIndex:
         if self._financial_index is None:
@@ -954,6 +955,7 @@ class FirebirdRepository:
         checked = 0
         already_sent = 0
         skipped_period = 0
+        ambiguous = 0
         # Por tipo de documento: quantos titulos pararam ali por falta de match
         # (nao ambiguo - simplesmente nenhum PDF indexado bateu). O aviso de
         # "ambiguo" ja e logado individualmente; sem isso aqui, um "0 prontos"
@@ -1033,6 +1035,7 @@ class FirebirdRepository:
                         "Envio automatico: titulo %s tem %s ambiguo, pulando ate revisao manual (%s)",
                         receivable_id, document_type, exc,
                     )
+                    ambiguous += 1
                     ok = False
                     break
                 if match is None:
@@ -1084,9 +1087,17 @@ class FirebirdRepository:
             })
         logging.info(
             "Envio automatico: %s titulo(s) verificado(s), %s pronto(s), %s ja enviado(s), "
-            "%s fora do periodo atual. Sem match/boleto por tipo: %s",
-            checked, len(packages), already_sent, skipped_period, missing_by_type,
+            "%s fora do periodo atual, %s ambiguo(s). Sem match/boleto por tipo: %s",
+            checked, len(packages), already_sent, skipped_period, ambiguous, missing_by_type,
         )
+        self._last_scan_stats = {
+            "checked": checked,
+            "ready": len(packages),
+            "alreadySent": already_sent,
+            "skippedPeriod": skipped_period,
+            "ambiguous": ambiguous,
+            "missingByType": dict(missing_by_type),
+        }
         return packages
 
     def connect(self):
@@ -1743,6 +1754,10 @@ class FirebirdRepository:
             "documentType": document_type,
             "source": "ilux-export-folder",
             "sha256": match.sha256,
+            # Auditoria de divergencia no CRM.
+            "amountOk": match.amount_ok,
+            "matchScore": match.score,
+            "receivableValue": float(context.get("valreceita") or 0) or None,
         }
 
     def _fetch_billing_document_context(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3649,6 +3664,14 @@ def run_billing_automation(
     packages = repo.find_ready_billing_packages(
         config.billing_auto_send_document_types, ledger, min_mtime_ns=min_mtime_ns,
     )
+    # Resumo da varredura para a visao operacional do CRM ("titulos aguardando
+    # documento na pasta"). Best-effort -- nunca derruba o envio.
+    scan_stats = getattr(repo, "_last_scan_stats", None)
+    if scan_stats:
+        try:
+            crm.push("billingScanStatus", [scan_stats])
+        except Exception as exc:
+            logging.debug("Nao foi possivel enviar o resumo da varredura: %s", exc)
     sent = failed = skipped = 0
     for package in packages:
         labels = ", ".join(

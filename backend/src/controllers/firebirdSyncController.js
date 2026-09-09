@@ -999,6 +999,32 @@ async function pushBatch(req, res) {
           if (ok) stats.stored += 1; else stats.skipped += 1;
           continue;
         }
+        if (entity === 'billingScanStatus') {
+          // Resumo da ultima varredura do envio automatico (o agente empurra
+          // uma vez por ciclo). Guarda em TenantSettings para a visao "titulos
+          // aguardando documento na pasta".
+          const mbt = record.missingByType || {};
+          await prisma.tenantSettings.update({
+            where: { tenantId: tenant.id },
+            data: {
+              billingScanStatus: {
+                checkedAt: new Date().toISOString(),
+                checked: Number(record.checked) || 0,
+                ready: Number(record.ready) || 0,
+                alreadySent: Number(record.alreadySent) || 0,
+                skippedPeriod: Number(record.skippedPeriod) || 0,
+                ambiguous: Number(record.ambiguous) || 0,
+                missingByType: {
+                  invoice: Number(mbt.invoice) || 0,
+                  statement: Number(mbt.statement) || 0,
+                  boleto: Number(mbt.boleto) || 0,
+                },
+              },
+            },
+          });
+          stats.stored += 1;
+          continue;
+        }
         const payloadToStore = entity === COMPANY_ENTITY
           ? normalizeCompanyProfile(record)
           : record;

@@ -46,6 +46,7 @@ import {
   exportCrmCustomers,
   getCrmSummary,
   getCrmFlaggedDocuments,
+  getCrmBillingAudit,
   prepareCrmReceivableDocument,
   sendCrmReceivableDocuments,
   sendOSManagerCopy,
@@ -92,6 +93,9 @@ export default function CRM() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [flaggedDocuments, setFlaggedDocuments] = useState([]);
+  const [flaggedSummary, setFlaggedSummary] = useState(null);
+  const [billingScanStatus, setBillingScanStatus] = useState(null);
+  const [billingAudit, setBillingAudit] = useState([]);
   const [flaggedExpanded, setFlaggedExpanded] = useState(false);
 
   useEffect(() => { load(new URLSearchParams(window.location.search).get('q') || '', 1); }, []);
@@ -100,7 +104,14 @@ export default function CRM() {
     // ambíguo ou ainda não localizado nas pastas). Usuário sem acesso financeiro
     // recebe 403 do backend - o painel simplesmente não aparece para ele.
     getCrmFlaggedDocuments()
-      .then((response) => setFlaggedDocuments(arrayOf(response.data?.items)))
+      .then((response) => {
+        setFlaggedDocuments(arrayOf(response.data?.items));
+        setFlaggedSummary(response.data?.summary || null);
+        setBillingScanStatus(response.data?.scanStatus || null);
+      })
+      .catch(() => {});
+    getCrmBillingAudit()
+      .then((response) => setBillingAudit(arrayOf(response.data?.items)))
       .catch(() => {});
   }, []);
 
@@ -325,20 +336,43 @@ export default function CRM() {
         />
       </div>
 
-      {flaggedDocuments.length ? (
+      {(flaggedDocuments.length || billingAudit.length || billingScanStatus) ? (
         <div style={s.flaggedPanel}>
           <button type="button" style={s.flaggedHeader} onClick={() => setFlaggedExpanded((current) => !current)} aria-expanded={flaggedExpanded}>
             <span style={s.flaggedHeaderMain}>
               <Siren size={18} />
-              <strong>{flaggedDocuments.length} documento(s) financeiro(s) precisam de revisão</strong>
+              <strong>
+                {(flaggedDocuments.length + billingAudit.length) || 'Sem'} pendência(s) de documento financeiro
+                {billingScanStatus?.missingByType
+                  ? ` · ${(billingScanStatus.missingByType.invoice || 0) + (billingScanStatus.missingByType.statement || 0) + (billingScanStatus.missingByType.boleto || 0)} título(s) aguardando a pasta`
+                  : ''}
+              </strong>
             </span>
             <ChevronDown size={16} style={{ transform: flaggedExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
           </button>
           {flaggedExpanded ? (
             <div style={s.flaggedList}>
+              {billingScanStatus ? (
+                <div style={{ ...s.flaggedItem, ...s.flaggedItemDisabled, cursor: 'default' }}>
+                  <div style={s.flaggedItemMain}>
+                    <strong>Última varredura do envio automático</strong>
+                    <small>
+                      {billingScanStatus.checked || 0} título(s) verificados · {billingScanStatus.ready || 0} prontos · {billingScanStatus.alreadySent || 0} já enviados · {billingScanStatus.skippedPeriod || 0} fora do mês
+                      {billingScanStatus.ambiguous ? ` · ${billingScanStatus.ambiguous} ambíguo(s)` : ''}
+                    </small>
+                    {billingScanStatus.missingByType ? (
+                      <small>
+                        Aguardando na pasta: {billingScanStatus.missingByType.invoice || 0} nota · {billingScanStatus.missingByType.statement || 0} demonstrativo · {billingScanStatus.missingByType.boleto || 0} boleto
+                      </small>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
               {flaggedDocuments.map((item) => {
                 const clickable = Boolean(item.customerId);
                 const Wrapper = clickable ? 'button' : 'div';
+                const reasonLabel = { stuck_pending: 'agente não respondeu', retry_exhausted: 'tentativas esgotadas', failed: 'falha ao localizar' }[item.reason] || 'revisar';
                 return (
                   <Wrapper
                     key={item.id}
@@ -346,12 +380,33 @@ export default function CRM() {
                     style={{ ...s.flaggedItem, ...(clickable ? {} : s.flaggedItemDisabled) }}
                   >
                     <div style={s.flaggedItemMain}>
-                      <strong>{item.customerName}</strong>
-                      <span>{documentTypeLabel(item.documentType)}{item.invoiceNumber ? ` · NF ${item.invoiceNumber}` : ''}</span>
+                      <strong>{item.customerName} <span style={s.flaggedBadge}>{reasonLabel}</span></strong>
+                      <span>
+                        {documentTypeLabel(item.documentType)}{item.invoiceNumber ? ` · NF ${item.invoiceNumber}` : ''}
+                        {item.ageMinutes != null ? ` · há ${item.ageMinutes} min` : ''}
+                        {item.attempts ? ` · ${item.attempts} tentativa(s)` : ''}
+                      </span>
                       <small>{item.error || 'Documento não localizado nas pastas monitoradas.'}</small>
                     </div>
                     {clickable ? <ChevronRight size={16} /> : <span style={s.flaggedItemHint}>Título não localizado</span>}
                   </Wrapper>
+                );
+              })}
+
+              {billingAudit.map((item, index) => {
+                const kindLabel = { value_mismatch: 'valor divergente', duplicate_file: 'arquivo duplicado', statement_inconsistent: 'demonstrativo não fecha' }[item.kind] || 'divergência';
+                return (
+                  <div key={`audit-${index}`} style={{ ...s.flaggedItem, ...s.flaggedItemDisabled, cursor: 'default' }}>
+                    <div style={s.flaggedItemMain}>
+                      <strong>
+                        <span style={{ ...s.flaggedBadge, background: 'var(--danger-light)', color: 'var(--danger-text)' }}>{kindLabel}</span>
+                        {' '}{item.documentType ? documentTypeLabel(item.documentType) : ''}
+                        {item.receivableExternalId ? ` · título ${item.receivableExternalId}` : ''}
+                        {item.statementExternalId ? ` · demonstrativo ${item.statementExternalId}` : ''}
+                      </strong>
+                      <small>{item.detail}</small>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -1881,6 +1936,7 @@ const s = {
   flaggedItemDisabled: { cursor: 'default', opacity: 0.75 },
   flaggedItemMain: { display: 'grid', gap: 2, minWidth: 0 },
   flaggedItemHint: { color: 'var(--text-dim)', fontSize: '0.72rem', flexShrink: 0 },
+  flaggedBadge: { fontSize: '0.66rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '1px 6px', borderRadius: 6, background: 'var(--warning-light)', color: 'var(--warning-text)', verticalAlign: 'middle' },
   searchBar: { display: 'flex', alignItems: 'center', gap: '0.7rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '0.7rem', marginBottom: '0.6rem' },
   searchInput: { flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-main)', fontSize: '0.93rem' },
   clearSearch: { display: 'grid', placeItems: 'center', color: 'var(--text-muted)', background: 'transparent', border: 0, cursor: 'pointer' },

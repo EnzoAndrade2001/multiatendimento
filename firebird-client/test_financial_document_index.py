@@ -63,6 +63,15 @@ class FinancialDocumentIndexTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_match_carrega_amount_ok_para_auditoria(self):
+        index = FinancialDocumentIndex([str(self.root)], self.root / "index.json", "35.692.721/0001-94")
+        index.scan()
+        # o PDF "a.pdf" contem "141,30" -> amount_ok True
+        self.assertIs(index.find("invoice", self.context).amount_ok, True)
+        # sem valor no contexto -> amount_ok None (nao da pra checar)
+        no_value = {k: v for k, v in self.context.items() if k != "valreceita"}
+        self.assertIsNone(index.find("invoice", no_value).amount_ok)
+
     def test_matches_all_documents_without_using_file_names(self):
         index = FinancialDocumentIndex([str(self.root)], self.root / "index.json", "35.692.721/0001-94")
         stats = index.scan()

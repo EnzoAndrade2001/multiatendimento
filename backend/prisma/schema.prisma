@@ -148,6 +148,12 @@ model TenantSettings {
   // em vez de exigir o PDF oficial na pasta monitorada. Rollout por tenant.
   statementRerenderEnabled Boolean @default(false)
 
+  // Resumo da ultima varredura do envio automatico (empurrado pelo agente a cada
+  // ciclo): { checkedAt, checked, ready, alreadySent, skippedPeriod, ambiguous,
+  // missingByType:{invoice,statement,boleto} }. Alimenta a visao operacional de
+  // "titulos aguardando documento na pasta".
+  billingScanStatus Json?
+
   // Configurações de KPI do RevGuard AI
   kpiContractValue       Float? @default(1200.0)
   kpiServiceValue        Float? @default(350.0)
@@ -996,18 +1002,24 @@ model CrmTechnician {
 }
 
 model BillingLog {
-  id           String   @id @default(cuid())
-  tenantId     String
-  cpfCnpj      String?
-  clientName   String?
-  fileName     String
-  status       String // "SUCCESS", "FAILED" ou "TEST" (envio simulado, modo teste)
-  errorMessage String?  @db.Text
-  sentAt       DateTime @default(now())
+  id                String    @id @default(cuid())
+  tenantId          String
+  cpfCnpj           String?
+  clientName        String?
+  fileName          String
+  status            String // "SUCCESS", "FAILED" ou "TEST" (envio simulado, modo teste)
+  errorMessage      String?   @db.Text
+  sentAt            DateTime  @default(now())
+  // Confirmacao de entrega no WhatsApp (Evolution messages.update / ACK).
+  // messageId = id da 1a midia enviada; deliveryStatus: sent|delivered|read|failed.
+  messageId         String?
+  deliveryStatus    String?   @default("sent")
+  deliveryUpdatedAt DateTime?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+  @@index([tenantId, messageId])
 }
 
 model PrivacyAuditLog {

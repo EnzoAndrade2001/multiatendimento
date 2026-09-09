@@ -1657,21 +1657,44 @@ async function listFlaggedBillingDocuments(req, res) {
     // already writes (billingDocumentService.completeDocumentRequest), so a
     // failed/ambiguous lookup is never lost, and a successful retry clears it
     // automatically - no separate "resolved" bookkeeping to keep in sync.
-    const failedRequests = await prisma.externalSyncRecord.findMany({
-      where: {
-        tenantId,
-        source: 'crm',
-        entity: billingDocuments.REQUEST_ENTITY,
-        payload: { path: ['status'], equals: 'failed' },
-      },
-      orderBy: { receivedAt: 'desc' },
-      take: 200,
-      select: { id: true, payload: true },
-    });
-    if (!failedRequests.length) return res.json({ items: [] });
+    // Alem dos 'failed', mostramos 'pending' parados ha muito tempo (o agente
+    // nunca respondeu) e o resumo da ultima varredura do envio automatico.
+    const STUCK_PENDING_MIN = 20;
+    const stuckBefore = new Date(Date.now() - STUCK_PENDING_MIN * 60 * 1000).toISOString();
+    const [failedRequests, stuckPending, settings] = await Promise.all([
+      prisma.externalSyncRecord.findMany({
+        where: {
+          tenantId, source: 'crm', entity: billingDocuments.REQUEST_ENTITY,
+          payload: { path: ['status'], equals: 'failed' },
+        },
+        orderBy: { receivedAt: 'desc' },
+        take: 200,
+        select: { id: true, payload: true, receivedAt: true },
+      }),
+      prisma.externalSyncRecord.findMany({
+        where: {
+          tenantId, source: 'crm', entity: billingDocuments.REQUEST_ENTITY,
+          payload: { path: ['status'], equals: 'pending' },
+          receivedAt: { lt: stuckBefore },
+        },
+        orderBy: { receivedAt: 'asc' },
+        take: 100,
+        select: { id: true, payload: true, receivedAt: true },
+      }).catch(() => []),
+      prisma.tenantSettings.findUnique({
+        where: { tenantId }, select: { billingScanStatus: true },
+      }).catch(() => null),
+    ]);
+
+    const scanStatus = settings?.billingScanStatus || null;
+    const flagged = [
+      ...failedRequests.map((r) => ({ ...r, _reason: 'failed' })),
+      ...stuckPending.map((r) => ({ ...r, _reason: 'stuck_pending' })),
+    ];
+    if (!flagged.length) return res.json({ items: [], summary: { failed: 0, stuckPending: 0, total: 0 }, scanStatus });
 
     const receivableIds = [...new Set(
-      failedRequests.map((record) => text(record.payload?.receivableExternalId)).filter(Boolean),
+      flagged.map((record) => text(record.payload?.receivableExternalId)).filter(Boolean),
     )];
     const receivableRecords = receivableIds.length ? await prisma.externalSyncRecord.findMany({
       where: { tenantId, source: 'firebird', entity: 'receivables', externalId: { in: receivableIds } },
@@ -1688,17 +1711,27 @@ async function listFlaggedBillingDocuments(req, res) {
     }) : [];
     const customerByExternalId = new Map(customers.map((customer) => [text(customer.externalId), customer]));
 
-    const items = failedRequests.map((record) => {
+    const now = Date.now();
+    const items = flagged.map((record) => {
       const payload = record.payload || {};
       const receivableExternalId = text(payload.receivableExternalId);
       const receivable = receivableExternalId ? receivableByExternalId.get(receivableExternalId) : null;
       const customer = receivable ? customerByExternalId.get(text(receivable.clientExternalId)) : null;
+      const since = payload.requestedAt || record.receivedAt || payload.completedAt;
+      const ageMinutes = since ? Math.round((now - new Date(since).getTime()) / 60000) : null;
+      const attempts = Number(payload.retryCount || payload.attempts || 0) || 0;
+      let reason = record._reason;
+      if (reason === 'failed' && attempts >= 12) reason = 'retry_exhausted';
       return {
         id: record.id,
+        reason, // failed | stuck_pending | retry_exhausted
+        status: payload.status || null,
         documentType: payload.documentType || null,
         invoiceNumber: payload.invoiceNumber || receivable?.invoiceNumber || null,
         receivableExternalId,
-        error: payload.error || null,
+        error: payload.error || (record._reason === 'stuck_pending' ? 'O agente não respondeu a este pedido.' : null),
+        attempts,
+        ageMinutes,
         requestedAt: payload.requestedAt || null,
         completedAt: payload.completedAt || null,
         customerId: customer?.id || null,
@@ -1709,7 +1742,31 @@ async function listFlaggedBillingDocuments(req, res) {
       return !receivable?.isCancelled;
     });
 
-    return res.json({ items });
+    const summary = items.reduce((acc, it) => {
+      if (it.reason === 'stuck_pending') acc.stuckPending += 1;
+      else if (it.reason === 'retry_exhausted') acc.retryExhausted += 1;
+      else acc.failed += 1;
+      return acc;
+    }, { failed: 0, stuckPending: 0, retryExhausted: 0, total: items.length });
+
+    return res.json({ items, summary, scanStatus });
+  } catch (error) {
+    return sendFinancialError(res, error);
+  }
+}
+
+// Auditoria de divergencia dos documentos de cobranca (pasta): valores que nao
+// batem, arquivos casados em mais de um titulo, demonstrativos que nao fecham.
+async function getBillingDocumentAudit(req, res) {
+  try {
+    if (!canViewFinancial(req.user)) {
+      const error = new Error('Informacoes financeiras disponiveis apenas para administradores.');
+      error.statusCode = 403;
+      throw error;
+    }
+    const { auditBillingDocuments } = require('../services/billingAuditService');
+    const result = await auditBillingDocuments(req.user.tenantId);
+    return res.json(result);
   } catch (error) {
     return sendFinancialError(res, error);
   }
@@ -1769,6 +1826,7 @@ module.exports = {
   getReceivableDocument,
   sendReceivableDocuments,
   listFlaggedBillingDocuments,
+  getBillingDocumentAudit,
   listEquipments,
   loadContracts,
   loadCustomerOrders,
