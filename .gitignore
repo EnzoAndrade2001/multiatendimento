@@ -87,3 +87,4 @@ firebird-client/command-results.json.tmp
 # Impeccable Critique
 # ===========================
 .impeccable/critique/
+output/
