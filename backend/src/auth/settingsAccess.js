@@ -3,6 +3,7 @@ const { hasPermission } = require('./permissions');
 const SECRET_PLACEHOLDER = '********';
 const SECRET_SETTINGS_FIELDS = new Set([
   'evolutionKey', 'geminiKey', 'openaiKey', 'anthropicKey', 'serpApiKey', 'firebirdApiKey', 'firebirdClientToken',
+  'plugBoletoToken',
 ]);
 
 const SETTINGS_FIELDS = Object.freeze({
@@ -26,6 +27,8 @@ const SETTINGS_FIELDS = Object.freeze({
     'firebirdClientToken', 'firebirdApiUrl', 'firebirdApiKey', 'firebirdAuthMode',
     'firebirdHealthPath', 'firebirdContactsPath', 'firebirdSyncEnabled', 'firebirdLastSyncAt',
     'firebirdLastSyncStatus', 'firebirdLastSyncError',
+    'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath', 'plugBoletoCedenteCnpj',
+    'plugBoletoToken', 'plugBoletoTokenSet',
   ],
   'connections.manage': ['evolutionUrl', 'evolutionKey', 'webhookUrl'],
   'leads.manage': ['serpApiKey'],

@@ -231,6 +231,7 @@ function normalizeReceivable(record) {
     contractExternalId: first(rawValue(payload, 'contractExternalId', 'seqixlcontratos', 'seqcontrato')),
     paymentMethod: first(rawValue(payload, 'paymentMethod', 'nmformapagto')),
     boletoId: first(rawValue(payload, 'boletoId', 'id_boleto')),
+    boletoIntegrationId: first(rawValue(payload, 'boletoIntegrationId', 'chave_integracao')),
     boletoStatus: first(rawValue(payload, 'boletoStatus', 'boleto_situacao')),
     boletoUrl: first(rawValue(payload, 'boletoUrl', 'urlboleto')),
     boletoPdfProtocol: first(rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo')),

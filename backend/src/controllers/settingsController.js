@@ -4,6 +4,7 @@ const botPromptService = require('../services/botPromptService');
 const { filterSettingsOutput } = require('../auth/settingsAccess');
 const { getLatestCompanyProfile, getPendingCompanyRequest, getLatestCompanyRequest, requestCompanySync } = require('../services/companyProfileService');
 const aiService = require('../services/aiService');
+const { encryptSecret } = require('../services/printGuardCrypto');
 
 async function getSettings(req, res) {
   const [settings, firebirdCompany, pendingCompanyRequest, latestCompanyRequest] = await Promise.all([
@@ -43,6 +44,8 @@ async function getSettings(req, res) {
     systemPrompt: settings.botSystemPrompt,
     transferKeyword: settings.botTransferWord,
     outOfOfficeMessage: settings.outOfOfficeMessage,
+    // O token do PlugBoleto nunca sai; a UI só precisa saber se está configurado.
+    plugBoletoTokenSet: Boolean(settings.plugBoletoTokenCipher),
     ...companySync,
   }));
 }
@@ -103,9 +106,26 @@ async function saveSettings(req, res) {
     firebirdLastSyncAt,
     firebirdLastSyncStatus,
     firebirdLastSyncError,
+    plugBoletoEnabled, plugBoletoBaseUrl, plugBoletoPrintPath, plugBoletoCedenteCnpj, plugBoletoToken,
     kpiContractValue, kpiServiceValue, kpiSlaLimitHours, kpiReincidentThreshold,
     billingMessageTemplate, billingInstanceId
   } = req.body;
+
+  // PlugBoleto: token entra em texto puro e sai cifrado; string vazia limpa;
+  // undefined = não mexe. base/path só aceitam string; CNPJ guarda só dígitos.
+  const parsedPlugBoletoToken = plugBoletoToken === undefined
+    ? undefined
+    : (String(plugBoletoToken).trim() === '' ? null : encryptSecret(String(plugBoletoToken).trim()));
+  const parsedPlugBoletoCnpj = plugBoletoCedenteCnpj === undefined
+    ? undefined
+    : (String(plugBoletoCedenteCnpj).replace(/\D/g, '') || null);
+  const parsedPlugBoletoEnabled = plugBoletoEnabled === undefined ? undefined : Boolean(plugBoletoEnabled);
+  const parsedPlugBoletoBaseUrl = plugBoletoBaseUrl === undefined
+    ? undefined
+    : (String(plugBoletoBaseUrl).trim() || null);
+  const parsedPlugBoletoPrintPath = plugBoletoPrintPath === undefined
+    ? undefined
+    : (String(plugBoletoPrintPath).trim() || null);
 
   const parsedBillingInstanceId = billingInstanceId === undefined
     ? undefined
@@ -201,6 +221,11 @@ async function saveSettings(req, res) {
       firebirdLastSyncAt: firebirdLastSyncAt ? new Date(firebirdLastSyncAt) : undefined,
       firebirdLastSyncStatus,
       firebirdLastSyncError,
+      plugBoletoEnabled: parsedPlugBoletoEnabled,
+      plugBoletoBaseUrl: parsedPlugBoletoBaseUrl,
+      plugBoletoPrintPath: parsedPlugBoletoPrintPath,
+      plugBoletoCedenteCnpj: parsedPlugBoletoCnpj,
+      plugBoletoTokenCipher: parsedPlugBoletoToken,
       kpiContractValue: parsedContractValue,
       kpiServiceValue: parsedServiceValue,
       kpiSlaLimitHours: parsedSlaLimitHours,
@@ -251,6 +276,11 @@ async function saveSettings(req, res) {
       firebirdLastSyncAt: firebirdLastSyncAt ? new Date(firebirdLastSyncAt) : undefined,
       firebirdLastSyncStatus,
       firebirdLastSyncError,
+      plugBoletoEnabled: parsedPlugBoletoEnabled,
+      plugBoletoBaseUrl: parsedPlugBoletoBaseUrl,
+      plugBoletoPrintPath: parsedPlugBoletoPrintPath,
+      plugBoletoCedenteCnpj: parsedPlugBoletoCnpj,
+      plugBoletoTokenCipher: parsedPlugBoletoToken,
       kpiContractValue: parsedContractValue,
       kpiServiceValue: parsedServiceValue,
       kpiSlaLimitHours: parsedSlaLimitHours,

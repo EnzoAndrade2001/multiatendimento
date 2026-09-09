@@ -139,6 +139,12 @@ export default function Settings() {
     firebirdLastSyncAt: '',
     firebirdLastSyncStatus: 'idle',
     firebirdLastSyncError: '',
+    plugBoletoEnabled: false,
+    plugBoletoBaseUrl: 'https://plugboleto.com.br/api/v1',
+    plugBoletoPrintPath: '/boletos/impressao/lote',
+    plugBoletoCedenteCnpj: '',
+    plugBoletoToken: '',
+    plugBoletoTokenSet: false,
     firebirdCompany: null,
     firebirdCompanySyncStatus: 'not_synced',
     firebirdCompanySyncRequestedAt: '',
@@ -288,6 +294,11 @@ export default function Settings() {
       // placeholder back as if it were a real agent token.
       if (isMaskedSecret(settingsToSave.firebirdClientToken)) {
         delete settingsToSave.firebirdClientToken;
+      }
+      // O token do PlugBoleto só é enviado quando digitado; vazio = manter o atual.
+      delete settingsToSave.plugBoletoTokenSet;
+      if (!String(settingsToSave.plugBoletoToken || '').trim()) {
+        delete settingsToSave.plugBoletoToken;
       }
       await saveSettings(settingsToSave);
       if (tab === 1) {
@@ -1882,6 +1893,67 @@ export default function Settings() {
                       Selecione obrigatoriamente a instância para as cobranças não saírem por um número errado.
                       Na instância <strong>oficial</strong>, o envio financeiro fica bloqueado fora da janela de 24 horas enquanto não houver um template de utilidade aprovado configurado para essa automação.
                     </p>
+                  </div>
+
+                  <div style={{ ...s.integrationGuide, marginTop: '0.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <strong style={s.integrationGuideTitle}>Boleto direto (PlugBoleto)</strong>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!form.plugBoletoEnabled}
+                          onChange={(e) => setForm({ ...form, plugBoletoEnabled: e.target.checked })}
+                        />
+                        Ativado
+                      </label>
+                    </div>
+                    <p style={s.hint}>
+                      Com isto ligado, o CRM busca o PDF do boleto direto na API do banco (PlugBoleto), sem depender da pasta monitorada.
+                      Sem PlugBoleto ou em caso de erro, o agente continua sendo o fallback. Credenciais do cedente vêm do iLux.
+                    </p>
+                  </div>
+
+                  <div style={s.field}>
+                    <label style={s.label}>CNPJ do cedente</label>
+                    <input
+                      style={s.input}
+                      value={form.plugBoletoCedenteCnpj || ''}
+                      onChange={(e) => setForm({ ...form, plugBoletoCedenteCnpj: e.target.value })}
+                      placeholder="Só números — CE_CEDENTE.CEDENTECPFCNPJ no iLux"
+                    />
+                  </div>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Token do cedente (token-cedente)</label>
+                    <input
+                      style={s.input}
+                      type="password"
+                      value={form.plugBoletoToken || ''}
+                      onChange={(e) => setForm({ ...form, plugBoletoToken: e.target.value })}
+                      placeholder={form.plugBoletoTokenSet ? '•••••••• configurado — digite para trocar' : 'CE_CEDENTE.TOKEN_CEDENTE no iLux'}
+                    />
+                    <p style={s.hint}>Guardado cifrado. Não é exibido depois de salvo.</p>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', flexDirection: isMobile ? 'column' : 'row' }}>
+                    <div style={{ ...s.field, flex: 2 }}>
+                      <label style={s.label}>URL base da API</label>
+                      <input
+                        style={s.input}
+                        value={form.plugBoletoBaseUrl || ''}
+                        onChange={(e) => setForm({ ...form, plugBoletoBaseUrl: e.target.value })}
+                        placeholder="https://plugboleto.com.br/api/v1"
+                      />
+                    </div>
+                    <div style={{ ...s.field, flex: 2 }}>
+                      <label style={s.label}>Caminho de impressão</label>
+                      <input
+                        style={s.input}
+                        value={form.plugBoletoPrintPath || ''}
+                        onChange={(e) => setForm({ ...form, plugBoletoPrintPath: e.target.value })}
+                        placeholder="/boletos/impressao/lote"
+                      />
+                    </div>
                   </div>
 
               <button style={s.saveBtn} onClick={handleSave} disabled={saving}>

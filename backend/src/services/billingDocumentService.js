@@ -4,6 +4,7 @@ const path = require('path');
 const prisma = require('../lib/prisma');
 const whatsappComplianceService = require('./whatsappComplianceService');
 const evolutionService = require('./evolutionService');
+const plugBoletoService = require('./plugBoletoService');
 const { mediaPath } = require('../utils/uploads');
 
 const DOCUMENT_TYPES = Object.freeze(['invoice', 'statement', 'boleto']);
@@ -199,10 +200,40 @@ async function waitForDocument(requestId, timeoutMs = REQUEST_TIMEOUT_MS) {
   throw error;
 }
 
+// Boleto: tenta buscar o PDF direto no PlugBoleto antes de enfileirar o pedido
+// para o agente. Sucesso -> grava no mesmo registro que o callback do agente
+// gravaria (cache/painel/reenvio seguem iguais). Falha -> nao marca "failed",
+// deixa o fluxo cair para o agente (pasta / PlugBoleto via agente).
+async function tryPlugBoletoDirect(request, params) {
+  if (params.documentType !== 'boleto') return false;
+  if (!plugBoletoService.isBoletoPrintable(params.receivable)) return false;
+  try {
+    const result = await plugBoletoService.fetchBoletoPdf({
+      tenantId: params.tenantId,
+      receivable: params.receivable,
+      customerName: params.customerName,
+    });
+    await completeDocumentRequest({ request, success: true, result });
+    return true;
+  } catch (error) {
+    if (error?.statusCode !== 501) {
+      console.warn('[plugboleto] busca direta falhou, caindo para o agente:', error.message);
+    }
+    return false;
+  }
+}
+
 async function getOrRequestDocument(params) {
   const request = await queueDocumentRequest(params);
-  const payload = request.payload?.status === 'success' && publicFileExists(request.payload.mediaUrl)
-    ? request.payload
+  const alreadyDone = request.payload?.status === 'success' && publicFileExists(request.payload.mediaUrl);
+  if (!alreadyDone) {
+    await tryPlugBoletoDirect(request, params);
+  }
+  const fresh = alreadyDone
+    ? request
+    : await prisma.externalSyncRecord.findUnique({ where: { id: request.id }, select: { payload: true } });
+  const payload = fresh?.payload?.status === 'success' && publicFileExists(fresh.payload.mediaUrl)
+    ? fresh.payload
     : await waitForDocument(request.id);
   return {
     type: params.documentType,
