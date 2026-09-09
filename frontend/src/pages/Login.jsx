@@ -129,7 +129,7 @@ export default function Login() {
         .login-input:-webkit-autofill:focus,
         .login-input:-webkit-autofill:focus-visible {
           -webkit-text-fill-color: #F4F6FA !important;
-          -webkit-box-shadow: 0 0 0 1000px #171C26 inset !important;
+          -webkit-box-shadow: 0 0 0 1000px #161B24 inset !important;
           caret-color: #F4F6FA;
           border-color: #2A3546;
           transition: background-color 9999s ease-out 0s;
@@ -277,13 +277,22 @@ export default function Login() {
   );
 }
 
+// A tela de login roda ANTES de qualquer classe de tema ser aplicada, entao
+// NAO usa tokens (--bg-*, --text-*) -- eles cairiam no tema claro do SO do
+// visitante. E um design escuro fixo (grafite + laranja), pintado na mao.
+const INK = '#0B0D12';
+const INK_2 = '#0E121A';
+const PANEL = '#161B24';
+const LINE = '#232C3A';
+const TEXT = '#F4F6FA';
+
 const s = {
   shell: {
     display: 'flex',
     minHeight: '100dvh',
-    background: 'var(--bg-base, #0B0D12)',
+    background: INK,
     fontFamily: 'var(--font-main)',
-    color: 'var(--text-main, #F4F6FA)',
+    color: TEXT,
     overflow: 'hidden',
   },
 
@@ -297,10 +306,10 @@ const s = {
     padding: 'clamp(2.5rem, 5vw, 4.5rem)',
     overflow: 'hidden',
     background:
-      'radial-gradient(85% 70% at 0% 0%, color-mix(in srgb, var(--login-accent) 13%, transparent) 0%, transparent 55%), '
-      + 'radial-gradient(120% 120% at 100% 100%, rgba(255,255,255,0.04) 0%, transparent 55%), '
-      + 'linear-gradient(160deg, var(--bg-surface, #11151D) 0%, var(--bg-base, #0B0D12) 62%)',
-    borderRight: '1px solid var(--border-color, #1B2230)',
+      'radial-gradient(90% 75% at 0% 0%, rgba(255,106,0,0.16) 0%, transparent 55%), '
+      + 'radial-gradient(120% 120% at 100% 100%, rgba(255,255,255,0.035) 0%, transparent 55%), '
+      + `linear-gradient(160deg, ${INK_2} 0%, ${INK} 62%)`,
+    borderRight: `1px solid ${LINE}`,
   },
   brandGlow: {
     position: 'absolute',
@@ -400,7 +409,7 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 'clamp(1.25rem, 4vw, 3rem)',
-    background: 'var(--bg-base, #0B0D12)',
+    background: '#0C0F16',
   },
   formInner: {
     width: '100%',
@@ -413,9 +422,9 @@ const s = {
     height: '48px',
     marginBottom: '1.1rem',
     borderRadius: '13px',
-    background: 'var(--bg-panel, #171C26)',
+    background: PANEL,
     border: '1px solid',
-    color: '#F4F6FA',
+    color: TEXT,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -448,9 +457,9 @@ const s = {
     margin: '0.55rem 0 0',
   },
   tenantNotice: {
-    color: 'var(--warning-text)',
-    background: 'var(--warning-light)',
-    border: '1px solid var(--warning-border)',
+    color: '#F0C574',
+    background: 'rgba(230, 170, 60, 0.10)',
+    border: '1px solid rgba(230, 170, 60, 0.28)',
     borderRadius: '10px',
     fontSize: '0.78rem',
     lineHeight: 1.45,
@@ -463,11 +472,11 @@ const s = {
   input: {
     minHeight: '48px',
     padding: '0.75rem 0.95rem',
-    background: 'var(--bg-panel, #171C26)',
-    border: '1px solid var(--border-color, #2A3546)',
+    background: PANEL,
+    border: `1px solid ${LINE}`,
     borderRadius: '11px',
     fontSize: '0.95rem',
-    color: '#F4F6FA',
+    color: TEXT,
     outline: 'none',
     transition: 'border-color 0.16s ease, box-shadow 0.16s ease',
     width: '100%',
@@ -496,7 +505,7 @@ const s = {
     minHeight: '50px',
     marginTop: '0.35rem',
     padding: '0.75rem 1rem',
-    color: '#1A150A',
+    color: '#241200',
     border: 'none',
     borderRadius: '11px',
     fontSize: '0.92rem',
@@ -508,16 +517,16 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '0.5rem',
-    boxShadow: '0 12px 30px color-mix(in srgb, var(--login-accent) 24%, transparent)',
+    boxShadow: '0 12px 30px rgba(255, 106, 0, 0.28)',
   },
   error: {
-    color: 'var(--danger-text)',
+    color: '#FF9B9B',
     fontSize: '0.86rem',
     lineHeight: 1.45,
-    background: 'var(--danger-light)',
+    background: 'rgba(224, 78, 78, 0.12)',
     padding: '0.7rem 0.85rem',
     borderRadius: '10px',
-    border: '1px solid var(--danger-border)',
+    border: '1px solid rgba(224, 78, 78, 0.32)',
   },
   formFooter: {
     marginTop: '1.75rem',
