@@ -528,7 +528,13 @@ body.light-theme .app-global-nav .primary-nav-link:focus-visible {
   .app-global-nav .app-nav-center,
   .app-global-nav .desktop-nav-scroll {
     min-width: 0 !important;
-    overflow: hidden !important;
+    /* Clipa a fila de links no eixo X (para nao empurrar logo/acoes),
+       mas deixa o eixo Y livre para o dropdown "Operacao" descer.
+       overflow: hidden aqui derrubava o menu em telas 769-1450px
+       (notebooks) - so abria com zoom-out do navegador. */
+    overflow-x: clip !important;
+    overflow-y: visible !important;
+    overflow-clip-margin: 1px !important;
   }
 
   .app-global-nav .desktop-nav-scroll {
