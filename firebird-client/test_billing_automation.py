@@ -165,6 +165,40 @@ class FindReadyBillingPackagesTest(unittest.TestCase):
             packages = self.repo.find_ready_billing_packages(["invoice", "statement", "estatement-x"], ledger)
         self.assertEqual(packages, [])
 
+    def test_statement_sem_pdf_na_pasta_cai_para_statementRef(self):
+        # Sem o PDF do demonstrativo na pasta, mas com SEQDEMONSTRATIVO no
+        # titulo: o pacote fica pronto assim mesmo, com uma referencia para o
+        # backend re-renderizar (Fase 2 "faturamento sem a pasta").
+        (self.root / "b.pdf").unlink()
+        self.repo.scan_financial_documents()
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]):
+            packages = self.repo.find_ready_billing_packages(["invoice", "statement"], ledger)
+        self.assertEqual(len(packages), 1)
+        docs = {d["documentType"]: d for d in packages[0]["documents"]}
+        self.assertIn("statement", docs)
+        self.assertNotIn("path", docs["statement"])
+        self.assertEqual(docs["statement"]["statementRef"]["seqDemonstrativo"], "14365")
+        self.assertEqual(docs["statement"]["statementRef"]["receivableExternalId"], "501")
+
+    def test_statement_sem_pdf_e_sem_seqdemo_continua_incompleto(self):
+        (self.root / "b.pdf").unlink()
+        self.repo.scan_financial_documents()
+        row = {**self.receivable_row, "seqdemonstrativo": None}
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[row]):
+            packages = self.repo.find_ready_billing_packages(["invoice", "statement"], ledger)
+        self.assertEqual(packages, [])
+
+    def test_pasta_tem_prioridade_sobre_statementRef(self):
+        # Com o PDF oficial na pasta, o pacote usa o arquivo -- nao a referencia.
+        ledger = BillingSendLedger(self.root / "ledger.json")
+        with patch.object(self.repo, "fetch_open_receivables_for_billing", return_value=[self.receivable_row]):
+            packages = self.repo.find_ready_billing_packages(["invoice", "statement"], ledger)
+        docs = {d["documentType"]: d for d in packages[0]["documents"]}
+        self.assertIn("path", docs["statement"])
+        self.assertNotIn("statementRef", docs["statement"])
+
     def test_ignores_documents_older_than_min_mtime_ns(self):
         """Regression: the backlog folder can have a year+ of already-filed
         documents. Turning on automatic sending must never blast that whole
@@ -180,6 +214,43 @@ class FindReadyBillingPackagesTest(unittest.TestCase):
                 ["invoice", "statement", "boleto"], ledger, min_mtime_ns=future_cutoff_ns,
             )
         self.assertEqual(packages, [])
+
+
+class SendBillingPackageRefTest(unittest.TestCase):
+    """O corpo do POST muda quando o documento e uma referencia (boletoRef /
+    statementRef) em vez de um arquivo lido da pasta."""
+
+    class _Resp:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"success": True}
+
+    def _crm(self):
+        config = AppConfig(crm_base_url="https://crm.example", crm_tenant_slug="acme")
+        return CRMClient(config)
+
+    def test_statementRef_vai_sem_pdfBase64(self):
+        crm = self._crm()
+        captured = {}
+        def fake_post(url, json=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json
+            return self._Resp()
+        with patch.object(crm.session, "post", side_effect=fake_post):
+            crm.send_billing_package({
+                "receivableExternalId": 501,
+                "documents": [{
+                    "documentType": "statement",
+                    "fileName": "DEMONSTRATIVO 2026-08 - ACME.pdf",
+                    "statementRef": {"receivableExternalId": "501", "seqDemonstrativo": "14365", "period": "2026/08"},
+                }],
+            })
+        doc = captured["json"]["documents"][0]
+        self.assertEqual(doc["statementRef"]["seqDemonstrativo"], "14365")
+        self.assertNotIn("pdfBase64", doc)
+        self.assertEqual(doc["mimeType"], "application/pdf")
 
 
 class RunBillingAutomationTest(unittest.TestCase):

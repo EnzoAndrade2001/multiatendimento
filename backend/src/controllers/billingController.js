@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const evolutionService = require('../services/evolutionService');
 const billingDocuments = require('../services/billingDocumentService');
 const plugBoletoService = require('../services/plugBoletoService');
+const billingStatementService = require('../services/billingStatementService');
 const whatsappComplianceService = require('../services/whatsappComplianceService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
 const { mediaPath } = require('../utils/uploads');
@@ -630,6 +631,39 @@ async function autoSendBilling(req, res) {
               success: true,
               skipped: true,
               message: 'PlugBoleto nao configurado; configure a credencial em Configuracoes > Agente Local.',
+            });
+          }
+          throw error;
+        }
+        document.pdfBase64 = fetched.pdfBase64;
+        document.fileName = document.fileName || fetched.fileName;
+        document.mimeType = 'application/pdf';
+      }
+
+      // Demonstrativo sem PDF: o agente nao achou o oficial na pasta e mandou so
+      // a referencia. Re-renderiza pelo iLux quando o tenant tem a flag ligada.
+      if (documentType === 'statement' && !document.pdfBase64 && document.statementRef) {
+        const ref = document.statementRef;
+        let fetched;
+        try {
+          fetched = await billingStatementService.renderStatementPdf({
+            tenantId: tenant.id,
+            receivable: {
+              externalId: ref.receivableExternalId || receivableExternalId,
+              statementExternalId: ref.seqDemonstrativo,
+              billingPeriod: ref.period,
+              invoiceNumber: receivableRecord.payload?.invoiceNumber,
+            },
+            customerName,
+          });
+        } catch (error) {
+          if (error?.statusCode === 501) {
+            // Flag desligada ou demonstrativo ainda nao sincronizado: o agente
+            // nao deve re-tentar todo ciclo -- o titulo espera a pasta.
+            return res.json({
+              success: true,
+              skipped: true,
+              message: 'Re-render de demonstrativo desativado ou nao sincronizado; ligue em Configuracoes > Agente Local ou deixe o PDF na pasta.',
             });
           }
           throw error;

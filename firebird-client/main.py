@@ -840,6 +840,16 @@ class CRMClient:
                     "boletoRef": document["boletoRef"],
                 })
                 continue
+            if document.get("statementRef") and not document.get("path"):
+                # Demonstrativo: o backend re-renderiza pelo iLux (CrmBillingStatement)
+                # quando o tenant tem statementRerenderEnabled; senao o envio pula.
+                documents.append({
+                    "documentType": document["documentType"],
+                    "fileName": document["fileName"],
+                    "mimeType": "application/pdf",
+                    "statementRef": document["statementRef"],
+                })
+                continue
             pdf_bytes = Path(document["path"]).read_bytes()
             documents.append({
                 "documentType": document["documentType"],
@@ -1026,6 +1036,25 @@ class FirebirdRepository:
                     ok = False
                     break
                 if match is None:
+                    # Demonstrativo sem PDF oficial na pasta: manda uma referencia
+                    # e o backend re-renderiza pelo iLux (CrmBillingStatement) --
+                    # so quando o tenant tem statementRerenderEnabled; caso
+                    # contrario o backend responde "pulado" e o titulo espera a
+                    # pasta. A pasta continua sendo preferida quando existe.
+                    seqdemo = str(row.get("seqdemonstrativo") or "").strip()
+                    if document_type == "statement" and seqdemo:
+                        period = str(row.get("billing_period") or issued_ym.replace("-", "/")).strip()
+                        documents.append({
+                            "documentType": "statement",
+                            "fileName": friendly_filename("statement", context),
+                            "statementRef": {
+                                "receivableExternalId": str(receivable_id),
+                                "seqDemonstrativo": seqdemo,
+                                "period": period,
+                            },
+                        })
+                        hash_parts.append(f"statement:{receivable_id}:{seqdemo}:{period}")
+                        continue
                     missing_by_type[document_type] += 1
                     ok = False
                     break
