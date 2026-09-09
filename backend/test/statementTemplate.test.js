@@ -17,33 +17,38 @@ function flattenText(node, out = []) {
 }
 
 const baseStatement = {
-  externalId: '14893',
+  externalId: '14719',
   period: '2026/08',
-  statementDate: '2026-09-04T00:00:00',
-  dueDate: '2026-09-22T00:00:00',
-  invoiceNumber: '14894',
-  customerExternalId: '107',
-  totalValue: 2075.35,
-  fixedValue: 1080,
-  excessValue: 995.35,
+  statementDate: '2026-08-20T00:00:00',
+  dueDate: '2026-09-10T00:00:00',
+  invoiceNumber: '14743',
+  customerExternalId: '1505',
+  totalValue: 220,
+  fixedValue: 220,
+  excessValue: 0,
   discountValue: 0,
   surchargeValue: 0,
   notes: null,
   lines: [
     {
-      lineNo: 0, contractExternalId: '585', equipmentName: 'MULTIFUNCIONAL XEROX', equipmentExternalId: '333',
-      equipmentSerial: 'ABC', meterCode: 'PBA4', installLocation: 'RECEPCAO',
-      periodStart: '2026-07-21T00:00:00', periodEnd: '2026-08-20T00:00:00',
-      meterStart: 615734, meterEnd: 620123, qtyProduction: 4389, qtyFranchise: 23000, qtyExcess: 0,
-      franchiseCharged: 405, excessCharged: 0, invoiceValue: 0, isProrated: false,
-    },
-    {
-      lineNo: 1, contractExternalId: '585', equipmentName: 'IMPRESSORA CORA', equipmentExternalId: '335',
-      meterCode: 'CORA4', periodStart: '2026-07-21T00:00:00', periodEnd: '2026-08-20T00:00:00',
-      meterStart: 94642, meterEnd: 96142, qtyProduction: 1500, qtyFranchise: 700, qtyExcess: 868,
-      franchiseCharged: 135, excessCharged: 150, invoiceValue: 0, isProrated: true,
+      lineNo: 0, contractExternalId: '652', contractNumber: '2134',
+      equipmentName: 'MULTIFUNCIONAL BROTHER DCP T730W', equipmentExternalId: '2140',
+      equipmentModel: 'BROTHER T730', equipmentSerial: 'U67686A6H062656',
+      equipmentAsset: 'LCD DIGITAL', meterCode: 'CORA4',
+      periodStart: '2026-08-14T00:00:00', periodEnd: '2026-08-20T00:00:00', readingDate: null,
+      meterStart: 1, meterEnd: 1, meterDiscount: 0,
+      qtyProduction: 0, qtyFranchise: 1, qtyExcess: 0,
+      franchiseValue: 220, excessValue: 0, franchiseCharged: 220, excessCharged: 0,
+      invoiceValue: 0, discountValue: 0, surchargeValue: 0, isProrated: false,
     },
   ],
+};
+
+const model = {
+  statement: baseStatement,
+  company: { name: 'CLAUDIA CARDINALI LTDA', tradeName: 'LCD DIGITAL', cnpj: '35.692.721/0001-94', stateRegistration: '0963799100', city: 'Porto Alegre', state: 'RS' },
+  customer: { name: 'ANDERSON LUIZ D AVILA VAZ', code: '1505', document: '44.058.952/0001-31', address: 'RUA PATRIMONIO', number: '241', neighborhood: 'CORONEL APARICIO', city: 'PORTO ALEGRE', state: 'RS', zipCode: '91710300', phone: '90163088', stateRegistration: '8001481474' },
+  accentColor: '#D62828',
 };
 
 test('normalizeAccent valida #RRGGBB e cai para o vermelho padrao', () => {
@@ -58,47 +63,59 @@ test('lineValue usa franquia+excedente cobrados (COB)', () => {
   assert.equal(lineValue({ franchiseCharged: 0, excessCharged: 0, invoiceValue: 0 }), 0);
 });
 
-test('buildStatementDocDefinition monta um demonstrativo com linhas e totais', () => {
-  const doc = buildStatementDocDefinition({
-    statement: baseStatement,
-    company: { name: 'MINHA EMPRESA LTDA', cnpj: '12.345.678/0001-90' },
-    customer: { name: 'CLIENTE TESTE', code: '107', document: '99.999.999/0001-99' },
-    accentColor: '#1D4ED8',
-  });
+test('layout iLux: paisagem, titulo "DO FATURAMENTO", colunas e Quadro Resumo Contrato', () => {
+  const doc = buildStatementDocDefinition(model);
+  assert.equal(doc.pageOrientation, 'landscape');
   const text = flattenText(doc.content).join(' | ');
-  assert.match(text, /DEMONSTRATIVO DE FATURAMENTO/);
-  assert.match(text, /2026\/08/);
-  assert.match(text, /MINHA EMPRESA LTDA/);
-  assert.match(text, /CLIENTE TESTE/);
-  assert.match(text, /QUADRO RESUMO/);
-  assert.match(text, /MULTIFUNCIONAL XEROX/);
+  assert.match(text, /DEMONSTRATIVO DO FATURAMENTO/);
+  assert.match(text, /Período: 2026\/08/);
+  assert.match(text, /LCD DIGITAL/);
+  assert.match(text, /ANDERSON LUIZ D AVILA VAZ/);
+  assert.match(text, /Demost\.: 14719/);
+  assert.match(text, /Contrato \(Seq \/ Nr\): 652 \/ 2134/);
+  // colunas do iLux
+  assert.match(text, /Val\.Franquia\/Taxa Fixa/);
+  assert.match(text, /Excedente\/Produção\(mil\)/);
+  assert.match(text, /Val\.Excedido\/Produzido/);
+  // secao de equipamento + quadro resumo
+  assert.match(text, /Equipamento 2140/);
+  assert.match(text, /Patrimônio: LCD DIGITAL/);
+  assert.match(text, /Série: U67686A6H062656/);
+  assert.match(text, /Quadro Resumo Contrato/);
+  assert.match(text, /Total Contrato:/);
+  // valores: franquia cobrada 220,00 e total 220,0000 (4 casas como o iLux)
+  assert.match(text, /220,00/);
+  assert.match(text, /220,0000/);
+});
+
+test('um so contrato -> nao mostra bloco "TOTAL DO DEMONSTRATIVO" (Total Contrato ja e o total)', () => {
+  const text = flattenText(buildStatementDocDefinition(model).content).join(' | ');
+  assert.doesNotMatch(text, /TOTAL DO DEMONSTRATIVO/);
+});
+
+test('multi-contrato -> mostra o bloco de total geral', () => {
+  const multi = {
+    ...model,
+    statement: {
+      ...baseStatement,
+      totalValue: 440, fixedValue: 440,
+      lines: [
+        { ...baseStatement.lines[0], lineNo: 0, contractExternalId: '652' },
+        { ...baseStatement.lines[0], lineNo: 1, contractExternalId: '999', equipmentExternalId: '3000', franchiseCharged: 220 },
+      ],
+    },
+  };
+  const text = flattenText(buildStatementDocDefinition(multi).content).join(' | ');
   assert.match(text, /TOTAL DO DEMONSTRATIVO/);
-  // total = 2.075,35 formatado pt-BR
-  assert.match(text, /2\.075,35/);
-  assert.match(text, /1\.080,00/); // valor fixo
-  assert.match(text, /995,35/); // excedentes
-  assert.equal(doc.defaultStyle.font, 'Roboto');
+  assert.match(text, /440,00/);
 });
 
-test('header-only (sem linhas) mostra aviso e total', () => {
+test('header-only (sem linhas) mostra aviso e nao quebra', () => {
   const doc = buildStatementDocDefinition({
+    ...model,
     statement: { ...baseStatement, lines: [], totalValue: 6168.25, fixedValue: 858.33, excessValue: 5309.92 },
-    company: {}, customer: { name: 'X' }, accentColor: '#D62828',
   });
   const text = flattenText(doc.content).join(' | ');
-  assert.match(text, /sem detalhamento de produção/i);
-  assert.match(text, /6\.168,25/);
-});
-
-test('desconto/acrescimo do header NAO entram no bloco de totais', () => {
-  // A reconciliacao e fixo + excedente == total; VALDESCONTO/VALACRESCIMO do
-  // header sao do boleto, nao do demonstrativo -- exibi-los sugeriria subtracao.
-  const doc = buildStatementDocDefinition({
-    statement: { ...baseStatement, discountValue: 430.6, surchargeValue: 10 },
-    company: {}, customer: { name: 'X' },
-  });
-  const t1 = flattenText(doc.content).join(' | ');
-  assert.doesNotMatch(t1, /Descontos/);
-  assert.doesNotMatch(t1, /Acréscimos/);
-  assert.match(t1, /TOTAL DO DEMONSTRATIVO/);
+  assert.match(text, /não detalha produção/i);
+  assert.match(text, /Demost\.: 14719/);
 });

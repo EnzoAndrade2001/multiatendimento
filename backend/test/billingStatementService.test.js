@@ -9,6 +9,8 @@ function patch(context, overrides = {}) {
     'crmBillingStatement.findFirst': overrides.statement,
     'crmCustomer.findFirst': overrides.customer ?? (async () => null),
     'externalSyncRecord.findFirst': overrides.company ?? (async () => null),
+    'crmContract.findMany': overrides.contracts ?? (async () => []),
+    'crmEquipment.findMany': overrides.equipments ?? (async () => []),
   };
   const restore = [];
   for (const [pathKey, impl] of Object.entries(targets)) {

@@ -106,7 +106,7 @@ async function loadCustomer(tenantId, receivable = {}, statement = {}, customerN
       where: { tenantId, externalSource: 'firebird', externalId: String(externalId) },
       select: {
         name: true, fantasyName: true, cpfCnpj: true, address: true,
-        neighborhood: true, city: true, state: true, zipCode: true,
+        neighborhood: true, city: true, state: true, zipCode: true, phone: true,
       },
     });
   }
@@ -115,11 +115,52 @@ async function loadCustomer(tenantId, receivable = {}, statement = {}, customerN
     code: externalId || '',
     document: crmCustomer?.cpfCnpj || receivable.customerDocument || '',
     address: crmCustomer?.address || '',
+    number: '',
     neighborhood: crmCustomer?.neighborhood || '',
     city: crmCustomer?.city || '',
     state: crmCustomer?.state || '',
     zipCode: crmCustomer?.zipCode || '',
+    phone: crmCustomer?.phone || '',
+    stateRegistration: '',
   };
+}
+
+// Enriquece as linhas do demonstrativo com o numero do contrato (CrmContract) e
+// o patrimonio do equipamento (CrmEquipment) -- campos que o iLux mostra e que
+// nao estao em CrmBillingStatementLine. Uma consulta por tipo, nao por linha.
+async function enrichLines(tenantId, lines = []) {
+  const contractIds = [...new Set(lines.map((l) => l.contractExternalId).filter(Boolean).map(String))];
+  const equipIds = [...new Set(lines.map((l) => l.equipmentExternalId).filter(Boolean).map(String))];
+
+  const [contracts, equipments] = await Promise.all([
+    contractIds.length
+      ? prisma.crmContract.findMany({
+        where: { tenantId, externalSource: 'firebird', externalId: { in: contractIds } },
+        select: { externalId: true, number: true },
+      })
+      : [],
+    equipIds.length
+      ? prisma.crmEquipment.findMany({
+        where: { tenantId, externalSource: 'firebird', externalId: { in: equipIds } },
+        select: { externalId: true, assetTag: true, model: true, serialNumber: true },
+      })
+      : [],
+  ]);
+  const contractBy = new Map(contracts.map((c) => [String(c.externalId), c]));
+  const equipBy = new Map(equipments.map((e) => [String(e.externalId), e]));
+
+  return lines.map((l) => {
+    const c = contractBy.get(String(l.contractExternalId));
+    const e = equipBy.get(String(l.equipmentExternalId));
+    return {
+      ...l,
+      contractNumber: c?.number || null,
+      equipmentAsset: e?.assetTag || null,
+      equipmentName: l.equipmentName || e?.model || null,
+      equipmentModel: l.equipmentModel || e?.model || null,
+      equipmentSerial: l.equipmentSerial || e?.serialNumber || null,
+    };
+  });
 }
 
 async function loadCompany(tenantId) {
@@ -167,13 +208,15 @@ async function renderStatementPdf({ tenantId, receivable, customerName }) {
     throw billingError('Demonstrativo ainda nao sincronizado do iLux para este titulo.', 501);
   }
 
-  const [company, customer] = await Promise.all([
+  const [company, customer, lines] = await Promise.all([
     loadCompany(tenantId),
     loadCustomer(tenantId, receivable, statement, customerName),
+    enrichLines(tenantId, statement.lines || []),
   ]);
 
   const docDefinition = buildStatementDocDefinition({
     statement,
+    lines,
     company,
     customer,
     accentColor: settings.osAccentColor || '#D62828',
