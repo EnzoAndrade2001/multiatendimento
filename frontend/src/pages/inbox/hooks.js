@@ -96,14 +96,17 @@ export function useInboxTickets({ me }) {
     }
   }, []);
 
-  const loadTickets = useCallback(async () => {
+  const loadTickets = useCallback(async ({ background = false } = {}) => {
     const requestId = ++requestIdRef.current;
     const currentTab = tabRef.current;
     const currentFilters = filtersRef.current || {};
     const currentSearch = searchRef.current || '';
     const filtersKey = JSON.stringify(currentFilters);
 
-    setLoading(true);
+    // Refresh de fundo (timer de 30s, reconexao de socket) nao acende o
+    // "loading" -- senao a lista pisca a cada ciclo (a linha "Atualizado as"
+    // some e volta, empurrando a lista).
+    if (!background) setLoading(true);
     setError(null);
 
     try {
@@ -130,7 +133,7 @@ export function useInboxTickets({ me }) {
         setError(error);
       }
     } finally {
-      if (requestId === requestIdRef.current) {
+      if (!background && requestId === requestIdRef.current) {
         setLoading(false);
       }
     }
@@ -142,7 +145,7 @@ export function useInboxTickets({ me }) {
     }
 
     debounceTimerRef.current = setTimeout(() => {
-      loadTickets();
+      loadTickets({ background: true });
     }, 2000);
   }, [loadTickets]);
 
@@ -335,7 +338,15 @@ export function useInboxRealtime({
   shouldScrollToBottomRef,
   upsertTicket,
   debouncedLoadTickets,
+  onSelectedTicketRealtime,
 }) {
+  const onSelectedTicketRealtimeRef = useRef(onSelectedTicketRealtime);
+  useEffect(() => { onSelectedTicketRealtimeRef.current = onSelectedTicketRealtime; }, [onSelectedTicketRealtime]);
+  const notifySelectedTicket = useCallback((ticket) => {
+    if (ticket?.id && ticket.id === selectedIdRef.current) {
+      onSelectedTicketRealtimeRef.current?.(ticket);
+    }
+  }, [selectedIdRef]);
   const [isDisconnected, setIsDisconnected] = useState(false);
   const socketRef = useRef(null);
 
@@ -357,7 +368,7 @@ export function useInboxRealtime({
     setIsDisconnected(!socket.connected);
 
     const refreshTimer = setInterval(() => {
-      loadTickets();
+      loadTickets({ background: true });
     }, 30000);
 
     socket.on('new_message', ({ message, ticket }) => {
@@ -390,6 +401,7 @@ export function useInboxRealtime({
               ? ticket.unreadCount
               : undefined;
 
+        notifySelectedTicket(ticket);
         upsertTicket({ ...ticket, unreadCount });
       } else {
         debouncedLoadTickets();
@@ -398,7 +410,7 @@ export function useInboxRealtime({
 
     socket.on('connect', () => {
       setIsDisconnected(false);
-      loadTickets();
+      loadTickets({ background: true });
       if (selectedIdRef.current) {
         loadMessages({ ticketId: selectedIdRef.current, replace: true, background: true }).catch((error) => console.error(error));
       }
@@ -420,6 +432,7 @@ export function useInboxRealtime({
 
     socket.on('ticket_updated', (payload = {}) => {
       if (payload.ticket) {
+        notifySelectedTicket(payload.ticket);
         upsertTicket(payload.ticket);
         return;
       }
@@ -462,6 +475,7 @@ export function useInboxRealtime({
     loadInitial,
     loadMessages,
     loadTickets,
+    notifySelectedTicket,
     selectedIdRef,
     setMessages,
     setTickets,

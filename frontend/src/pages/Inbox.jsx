@@ -449,12 +449,24 @@ export default function Inbox() {
     }
   }, []);
 
+  // Quando o ticket ABERTO muda em tempo real (ex.: respondi um da fila e ele
+  // virou "meu"), a aba acompanha e a conversa nao pisca em branco na troca.
+  const onSelectedTicketRealtime = useCallback((incoming) => {
+    if (!incoming?.id) return;
+    setDirectTicket((prev) => (prev?.id === incoming.id ? { ...prev, ...incoming } : { ...incoming }));
+    const mineNow = incoming.status === 'open' && incoming.agentId === me?.id;
+    if (mineNow) {
+      setTab((current) => (current === 'mine' || current === 'all' ? current : 'mine'));
+    }
+  }, [me?.id, setTab]);
+
   const { isDisconnected, onReconnect } = useInboxRealtime({
     debouncedLoadTickets,
     historySearchRef,
     loadInitial,
     loadMessages,
     loadTickets,
+    onSelectedTicketRealtime,
     selectedIdRef,
     setMessages,
     setTickets,
@@ -785,6 +797,9 @@ export default function Inbox() {
     
     // Zera o contador localmente para feedback imediato
     const ticket = tickets.find((item) => item.id === id);
+    // Guarda uma copia do ticket seguindo o selecionado: se ele sair da lista
+    // da aba atual (mudou de status/dono), a conversa nao some da tela.
+    setDirectTicket(ticket || null);
     setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0, isUnread: false } : t));
     if (ticket?.isUnread) updateTicketPreferences(id, { isUnread: false }).catch(() => {});
     

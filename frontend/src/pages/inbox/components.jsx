@@ -1723,7 +1723,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
       {loading && tickets.length === 0 ? (
         <div style={styles.sidebarLoading} role="status" aria-live="polite">Carregando conversas...</div>
       ) : null}
-      {!loading && lastUpdatedAt && !error ? (
+      {lastUpdatedAt && !error ? (
         <div className="inbox-updated-at" style={styles.sidebarUpdated} aria-live="polite">
           Atualizado às {new Date(lastUpdatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
         </div>
@@ -2554,6 +2554,20 @@ export const MessageComposer = React.memo(function MessageComposer({
     const frame = requestAnimationFrame(() => textInputRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, [sendingMessage, isDisconnected, isRecording]);
+
+  // Ao clicar em "Responder" numa mensagem, o cursor vai direto para o campo
+  // de texto -- antes era preciso clicar de novo para digitar.
+  useEffect(() => {
+    if (!replyingTo) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const input = textInputRef.current;
+      if (!input) return;
+      input.focus();
+      const end = input.value.length;
+      try { input.setSelectionRange(end, end); } catch { /* alguns browsers */ }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [replyingTo]);
 
   function appendFiles(incomingFiles, sourceLabel = 'anexos') {
     const rejectedFiles = [];
