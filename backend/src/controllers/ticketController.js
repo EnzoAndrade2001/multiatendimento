@@ -554,6 +554,10 @@ async function getMessages(req, res) {
 
   const hasMore = combinedDesc.length > limit;
   const pageItems = hasMore ? combinedDesc.slice(0, limit) : combinedDesc;
+  // pageItems ainda esta em ordem DECRESCENTE aqui -> o ultimo e o MAIS ANTIGO
+  // da pagina. Precisa ser capturado ANTES do reverse() (que muta o array), ou
+  // o cursor vira a mensagem mais nova e o "carregar mais" so anda 1 por vez.
+  const oldestInPage = pageItems[pageItems.length - 1]?.createdAt || null;
   const combined = pageItems.reverse();
 
   const ticketMap = Object.fromEntries(allTickets.map(t => [t.id, t]));
@@ -575,7 +579,7 @@ async function getMessages(req, res) {
     result.push(item);
   }
 
-  const nextCursor = hasMore ? pageItems[pageItems.length - 1]?.createdAt : null;
+  const nextCursor = hasMore ? oldestInPage : null;
   res.json({
     items: result,
     hasMore,

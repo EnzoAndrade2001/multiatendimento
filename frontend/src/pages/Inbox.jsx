@@ -732,6 +732,15 @@ export default function Inbox() {
     [tickets, selectedId, directTicket]
   );
 
+  // Mantém uma cópia fresca do ticket aberto. Se um evento em tempo real ou o
+  // refresh de 30s tirar ele da lista da aba atual, a conversa continua montada
+  // (sem isso o painel desmontava e o scroll voltava pro topo).
+  useEffect(() => {
+    if (!selectedId) return;
+    const inList = tickets.find((t) => t.id === selectedId);
+    if (inList) setDirectTicket((prev) => (prev?.id === selectedId ? { ...prev, ...inList } : inList));
+  }, [tickets, selectedId]);
+
   useEffect(() => {
     // Pré-seleciona a instância da própria conversa: no dia a dia (e em QR) o
     // atendente não precisa escolher nada. Só troca se quiser mudar de número.
