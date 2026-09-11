@@ -95,7 +95,7 @@ async function saveSettings(req, res) {
     ratingEnabled, ratingMessage, notificationPhone,
     serviceOrderManagerCopyEnabled, serviceOrderManagerPhone, serviceOrderManagerInstanceId,
     companyName, companyCnpj, companyIE, companyAddress, companyBairro, companyCep, companyPhone,
-    companyCity, companyState, osAccentColor,
+    companyCity, companyState, osAccentColor, osBarcodeEnabled,
     serpApiKey,
     firebirdClientToken,
     firebirdApiUrl,
@@ -165,6 +165,9 @@ async function saveSettings(req, res) {
       : (/^#[0-9a-fA-F]{6}$/.test(String(osAccentColor).trim())
         ? String(osAccentColor).trim().toUpperCase()
         : undefined));
+  const parsedOsBarcodeEnabled = osBarcodeEnabled === undefined
+    ? undefined
+    : Boolean(osBarcodeEnabled);
 
   if (managerCopyEnabled) {
     if (!managerPhone || managerPhone.length < 12) {
@@ -215,6 +218,7 @@ async function saveSettings(req, res) {
       companyCity,
       companyState,
       osAccentColor: parsedOsAccentColor,
+      osBarcodeEnabled: parsedOsBarcodeEnabled,
       serpApiKey,
       firebirdClientToken,
       firebirdApiUrl,
@@ -271,6 +275,7 @@ async function saveSettings(req, res) {
       companyCity,
       companyState,
       osAccentColor: parsedOsAccentColor,
+      osBarcodeEnabled: parsedOsBarcodeEnabled,
       serpApiKey,
       firebirdClientToken,
       firebirdApiUrl,

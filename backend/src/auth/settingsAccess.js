@@ -18,7 +18,7 @@ const SETTINGS_FIELDS = Object.freeze({
   ],
   'settings.company.manage': [
     'companyName', 'companyCnpj', 'companyIE', 'companyAddress', 'companyBairro',
-    'companyCep', 'companyPhone', 'companyCity', 'companyState', 'osAccentColor',
+    'companyCep', 'companyPhone', 'companyCity', 'companyState', 'osAccentColor', 'osBarcodeEnabled',
     // Perfil somente leitura sincronizado do Firebird/IEMPRESA.
     'firebirdCompany', 'firebirdCompanySyncStatus', 'firebirdCompanySyncRequestedAt',
     'firebirdCompanySyncRequestId', 'firebirdCompanySyncError',

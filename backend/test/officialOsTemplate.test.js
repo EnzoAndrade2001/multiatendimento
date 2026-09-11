@@ -31,3 +31,17 @@ test('sem marca, o logo de texto cai para "OS"', () => {
   const html = renderOfficialOsTemplate({ ...base, company: {} });
   assert.match(html, /<span class="logo-fallback">OS<\/span>/);
 });
+
+test('exibe Code 128 com o numero da O.S. por padrao', () => {
+  const html = renderOfficialOsTemplate(base);
+  assert.match(html, /class="os-barcode"/);
+  assert.match(html, /aria-label="Código de barras da O\.S\. 123"/);
+  assert.match(html, /<svg[^>]+viewBox=/);
+  assert.match(html, /data-barcode-value="123"/);
+});
+
+test('permite desativar o codigo de barras na configuracao', () => {
+  const html = renderOfficialOsTemplate({ ...base, barcodeEnabled: false });
+  assert.doesNotMatch(html, /class="os-barcode"/);
+  assert.doesNotMatch(html, /<svg/);
+});

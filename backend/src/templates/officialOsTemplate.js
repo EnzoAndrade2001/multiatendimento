@@ -1,3 +1,5 @@
+const bwipjs = require('bwip-js');
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -5,6 +7,21 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function renderBarcode(value, enabled) {
+  const barcodeText = String(value ?? '').trim();
+  if (!enabled || !barcodeText) return '';
+  try {
+    return `<div class="os-barcode" data-barcode-value="${escapeHtml(barcodeText)}" aria-label="Código de barras da O.S. ${escapeHtml(barcodeText)}">${bwipjs.toSVG({
+      bcid: 'code128', text: barcodeText, scale: 1, height: 7,
+      includetext: true, textsize: 8, textxalign: 'center',
+      paddingwidth: 0, paddingheight: 0,
+    })}</div>`;
+  } catch (error) {
+    // Um identificador inesperado nunca deve impedir a impressão da O.S.
+    return '';
+  }
 }
 
 function text(value, fallback = '-') {
@@ -62,6 +79,7 @@ function renderOfficialOsTemplate(model) {
   const logo = model.logoDataUri
     ? `<img class="logo-lcd" src="${model.logoDataUri}" alt="${logoInitials}">`
     : `<span class="logo-fallback">${logoInitials}</span>`;
+  const barcode = renderBarcode(model.number, model.barcodeEnabled !== false);
 
   const html = `<!doctype html>
 <html lang="pt-BR">
@@ -85,7 +103,10 @@ function renderOfficialOsTemplate(model) {
     .company-legal { display: block; margin-top: 1px; font-size: 10px; font-weight: 700; line-height: 1.1; }
     .logo-lcd { width: 15mm; height: 13mm; object-fit: contain; flex: 0 0 auto; }
     .logo-fallback { width: 15mm; color: ${accent}; font-size: 23px; font-weight: 700; line-height: 1; }
-    .title { width: 22%; text-align: center; font-size: 12px; vertical-align: middle; }
+    .title { width: 22%; padding: 4px 3px; text-align: center; font-size: 12px; vertical-align: middle; }
+    .title-label { display: block; }
+    .os-barcode { width: 100%; margin: 7px auto 0; line-height: 0; }
+    .os-barcode svg { display: block; width: auto; max-width: 94%; height: 13mm; margin: 0 auto; }
     .meta { width: 25%; padding: 2px 4px; font-size: 12px; line-height: 1.16; }
     .meta-top { display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; font-size: 11px; }
     .section-title { background: #cfcfcf; font-weight: 700; font-size: 12px; line-height: 1.1; padding: 1.5px 4px; border: 1px solid #111; }
@@ -137,7 +158,7 @@ function renderOfficialOsTemplate(model) {
         Cidade: ${text(model.company.city)} (${text(model.company.state, '')}) &nbsp; Bairro: ${text(model.company.neighborhood)}<br>
         Fone: ${text(model.company.phone)} &nbsp; CEP: ${text(model.company.zipCode)}
       </td>
-      <td class="title">ORDEM DE SERVIÇO</td>
+      <td class="title"><span class="title-label">ORDEM DE SERVIÇO</span>${barcode}</td>
       <td class="meta"><div class="meta-top"><span><b>Número:</b> ${text(model.number)}</span><span><b>Data:</b> ${text(model.date, '')}</span></div>
         <b>Hora:</b> ${text(model.time, '')}<br>
         <b>Técnico abertura:</b> ${text(model.openedBy, '')}<br>

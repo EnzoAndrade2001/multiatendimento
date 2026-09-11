@@ -1070,6 +1070,7 @@ async function generatePdf(req, res) {
     const officialHtml = renderOfficialOsTemplate({
       accentColor,
       accentTextColor,
+      barcodeEnabled: settings?.osBarcodeEnabled !== false,
       number: os.externalId || os.id.slice(-6).toUpperCase(),
       date: currentOsDate,
       time: currentOsTime,

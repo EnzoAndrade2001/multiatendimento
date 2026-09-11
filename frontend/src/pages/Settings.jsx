@@ -128,6 +128,7 @@ export default function Settings() {
     companyCity: '',
     companyState: '',
     osAccentColor: '#D62828',
+    osBarcodeEnabled: true,
     serpApiKey: '',
     firebirdClientToken: '',
     firebirdApiUrl: '',
@@ -1479,6 +1480,21 @@ export default function Settings() {
                     />
                   ))}
                 </div>
+              </div>
+
+              <div style={s.field}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '.65rem', cursor: 'pointer', color: 'var(--text-main)', fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.osBarcodeEnabled !== false}
+                    onChange={(e) => setForm({ ...form, osBarcodeEnabled: e.target.checked })}
+                    style={{ width: 18, height: 18, accentColor: 'var(--accent)' }}
+                  />
+                  Exibir código de barras na O.S.
+                </label>
+                <p style={{ ...s.hint, margin: '.4rem 0 0 1.65rem' }}>
+                  Gera um Code 128 com o número da ordem de serviço abaixo do título no cabeçalho.
+                </p>
               </div>
 
               <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
