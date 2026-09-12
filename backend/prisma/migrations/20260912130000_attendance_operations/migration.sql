@@ -12,5 +12,5 @@ CREATE TABLE IF NOT EXISTS "AttendancePolicy" (
   "maxActiveTickets" INTEGER NOT NULL DEFAULT 10,
   "unavailableMinutes" INTEGER NOT NULL DEFAULT 5,
   "rules" JSONB NOT NULL DEFAULT '[]',
-  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "updatedAt" TIMESTAMP(3) NOT NULL
 );
