@@ -1122,7 +1122,7 @@ export default function Settings() {
 
       {tab === 1 && (
         <div style={s.sections}>
-          <AttendanceOperations />
+          <AttendanceOperations styles={s} />
           <div style={s.card}>
             <h2 style={s.cardTitle}>Horário de atendimento</h2>
             <div style={s.form}>

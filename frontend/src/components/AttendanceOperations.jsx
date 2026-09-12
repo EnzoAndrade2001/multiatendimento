@@ -1,42 +1,139 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import api from '../services/api';
 
-export default function AttendanceOperations() {
+const priorityOptions = [['low', 'Baixa'], ['medium', 'Média'], ['high', 'Alta'], ['urgent', 'Urgente']];
+
+export default function AttendanceOperations({ styles }) {
   const [state, setState] = useState(null);
   const [notice, setNotice] = useState('');
+  const [noticeType, setNoticeType] = useState('success');
   const [busy, setBusy] = useState(false);
+
   useEffect(() => {
-    const load = () => api.get('/attendance-operations').then(({ data }) => setState(current => current ? { ...current, alerts: data.alerts } : data)).catch(() => setNotice('Não foi possível carregar a configuração.'));
-    load(); const timer = setInterval(load, 30000); return () => clearInterval(timer);
+    const load = () => api.get('/attendance-operations')
+      .then(({ data }) => setState((current) => (current ? { ...current, alerts: data.alerts } : data)))
+      .catch(() => { setNoticeType('error'); setNotice('Não foi possível carregar a configuração.'); });
+    load();
+    const timer = setInterval(load, 30000);
+    return () => clearInterval(timer);
   }, []);
-  if (!state) return <p>{notice || 'Carregando regras de atendimento…'}</p>;
-  const p = state.policy;
-  const change = (key, value) => setState(s => ({ ...s, policy: { ...s.policy, [key]: value } }));
-  const ruleChange = (index, key, value) => change('rules', p.rules.map((r, i) => i === index ? { ...r, [key]: value } : r));
-  return <section style={{ display: 'grid', gap: 16 }}>
-    <h2>SLA e distribuição de atendimentos</h2>
-    <p>O SLA mede a primeira resposta humana de cada conversa. A regra de equipe prevalece sobre a regra geral; dentro da equipe, a prioridade específica prevalece. A distribuição respeita equipe, disponibilidade e capacidade.</p>
-    <label><input type="checkbox" checked={p.slaEnabled} onChange={e => change('slaEnabled', e.target.checked)} /> Ativar SLA</label>
-    {p.rules.map((r, i) => <fieldset key={i} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', padding: 12 }}>
-      <legend>Regra {i + 1}</legend>
-      <label>Equipe <select value={r.teamId || ''} onChange={e => ruleChange(i, 'teamId', e.target.value || null)}><option value="">Todas</option>{state.teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-      <label>Prioridade <select value={r.priority || ''} onChange={e => ruleChange(i, 'priority', e.target.value || null)}><option value="">Todas</option>{[['low','Baixa'],['medium','Média'],['high','Alta'],['urgent','Urgente']].map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-      <label>Prazo (min) <input type="number" min="1" max="10080" value={r.minutes} onChange={e => ruleChange(i, 'minutes', Number(e.target.value))} style={{ width: 85 }} /></label>
-      <label>Avisar antes (min) <input type="number" min="0" value={r.warningMinutes} onChange={e => ruleChange(i, 'warningMinutes', Number(e.target.value))} style={{ width: 85 }} /></label>
-      <label><input type="checkbox" checked={r.businessHours} onChange={e => ruleChange(i, 'businessHours', e.target.checked)} />Contar horário comercial</label>
-      <button type="button" onClick={() => change('rules', p.rules.filter((_, n) => n !== i))}>Remover</button>
-    </fieldset>)}
-    <button type="button" onClick={() => change('rules', [...p.rules, { teamId: null, priority: null, minutes: 60, warningMinutes: 10, businessHours: false }])}>Adicionar regra de SLA</button>
-    <label><input type="checkbox" checked={p.assignmentEnabled} onChange={e => change('assignmentEnabled', e.target.checked)} /> Distribuição automática</label>
-    <label>Limite de conversas por atendente <input type="number" min="1" max="100" value={p.maxActiveTickets} onChange={e => change('maxActiveTickets', Number(e.target.value))} /></label>
-    <label><input type="checkbox" checked={p.redistributeUnavailable} onChange={e => change('redistributeUnavailable', e.target.checked)} /> Redistribuir conversas de atendentes indisponíveis</label>
-    <label>Considerar desconectado após (min) <input type="number" min="2" max="1440" value={p.unavailableMinutes} onChange={e => change('unavailableMinutes', Number(e.target.value))} /></label>
-    <p>Atendentes precisam marcar “Disponível para distribuição”. Ao sair do sistema, deixam de receber novas conversas após dois minutos. Conversas em bot ficam fora da distribuição. Se ninguém tiver capacidade, a conversa aguarda.</p>
-    <button disabled={busy} onClick={async () => { setBusy(true); try { await api.put('/attendance-operations', p); setNotice('Configuração salva. As regras serão aplicadas em até 30 segundos.'); } catch (e) { setNotice(e.response?.data?.error || 'Falha ao salvar.'); } finally { setBusy(false); } }}>Salvar regras</button>
-    {notice && <p role="status">{notice}</p>}
-    <h3>Escalações de SLA</h3>
-    <p>Atualização a cada 30 segundos. Até 100 conversas, ordenadas pelo prazo mais antigo.</p>
-    {state.alerts.length === 0 ? <p>Nenhuma conversa em alerta.</p> : <table><thead><tr><th>Cliente</th><th>Responsável / equipe</th><th>Prazo</th><th>Situação</th></tr></thead><tbody>{state.alerts.map(t => <tr key={t.id}><td><Link to={`/inbox?ticketId=${encodeURIComponent(t.id)}`}>{t.contact?.name || 'Abrir conversa'}</Link></td><td>{t.agent?.name || 'Sem responsável'} / {t.team?.name || 'Geral'}</td><td>{new Date(t.slaDueAt).toLocaleString('pt-BR')}</td><td>{t.slaBreachedAt ? 'Vencido — ação do supervisor' : 'Próximo do vencimento'}</td></tr>)}</tbody></table>}
-  </section>;
+
+  if (!state) return <div style={styles.card}><p style={styles.hint}>{notice || 'Carregando regras de atendimento…'}</p></div>;
+
+  const policy = state.policy;
+  const change = (key, value) => setState((current) => ({ ...current, policy: { ...current.policy, [key]: value } }));
+  const ruleChange = (index, key, value) => change('rules', policy.rules.map((rule, itemIndex) => (
+    itemIndex === index ? { ...rule, [key]: value } : rule
+  )));
+  const toggle = (title, description, checked, onChange) => (
+    <div style={styles.toggleCard}>
+      <div style={styles.toggleInfo}>
+        <span style={{ ...styles.toggleStatus, color: checked ? 'var(--accent)' : 'var(--text-dim)' }}>{title}</span>
+        <p style={styles.toggleHint}>{description}</p>
+      </div>
+      <input type="checkbox" style={styles.switch} checked={checked} onChange={(event) => onChange(event.target.checked)} />
+    </div>
+  );
+
+  async function save() {
+    setBusy(true);
+    setNotice('');
+    try {
+      await api.put('/attendance-operations', policy);
+      setNoticeType('success');
+      setNotice('Configuração salva. As regras serão aplicadas em até 30 segundos.');
+    } catch (error) {
+      setNoticeType('error');
+      setNotice(error.response?.data?.error || 'Não foi possível salvar as regras.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <div style={styles.card}>
+      <h2 style={styles.cardTitle}>SLA e distribuição</h2>
+      <div style={styles.form}>
+        {toggle(
+          policy.slaEnabled ? 'SLA ativo' : 'SLA desativado',
+          'Monitora o prazo até a primeira resposta humana.',
+          policy.slaEnabled,
+          (value) => change('slaEnabled', value),
+        )}
+
+        {policy.slaEnabled ? <div style={{ display: 'grid', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={styles.label}>Regras de prazo</span>
+            <button type="button" style={localStyles.secondaryButton} onClick={() => change('rules', [...policy.rules, { teamId: null, priority: null, minutes: 60, warningMinutes: 10, businessHours: false }])}>
+              <Plus size={15} /> Adicionar
+            </button>
+          </div>
+          {!policy.rules.length ? <div style={localStyles.empty}>Adicione uma regra para ativar o SLA.</div> : null}
+          {policy.rules.map((rule, index) => <div key={index} style={localStyles.ruleCard}>
+            <div style={localStyles.ruleHeader}><strong>Regra {index + 1}</strong><button type="button" style={localStyles.removeButton} onClick={() => change('rules', policy.rules.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remover regra ${index + 1}`}><Trash2 size={15} /></button></div>
+            <div style={localStyles.grid}>
+              <label style={styles.field}><span style={styles.label}>Equipe</span><select style={styles.input} value={rule.teamId || ''} onChange={(event) => ruleChange(index, 'teamId', event.target.value || null)}><option value="">Todas</option>{state.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+              <label style={styles.field}><span style={styles.label}>Prioridade</span><select style={styles.input} value={rule.priority || ''} onChange={(event) => ruleChange(index, 'priority', event.target.value || null)}><option value="">Todas</option>{priorityOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+              <label style={styles.field}><span style={styles.label}>Prazo em minutos</span><input style={styles.input} type="number" min="1" max="10080" value={rule.minutes} onChange={(event) => ruleChange(index, 'minutes', Number(event.target.value))} /></label>
+              <label style={styles.field}><span style={styles.label}>Avisar antes</span><input style={styles.input} type="number" min="0" value={rule.warningMinutes} onChange={(event) => ruleChange(index, 'warningMinutes', Number(event.target.value))} /></label>
+            </div>
+            <label style={localStyles.inlineCheck}><input type="checkbox" checked={rule.businessHours} onChange={(event) => ruleChange(index, 'businessHours', event.target.checked)} /> Contar apenas horário comercial</label>
+          </div>)}
+        </div> : null}
+
+        {toggle(
+          policy.assignmentEnabled ? 'Distribuição automática ativa' : 'Distribuição automática desativada',
+          'A IA atende primeiro; somente conversas na fila humana são distribuídas.',
+          policy.assignmentEnabled,
+          (value) => change('assignmentEnabled', value),
+        )}
+
+        {policy.assignmentEnabled ? <>
+          <div style={localStyles.grid}>
+            <label style={styles.field}><span style={styles.label}>Limite por atendente</span><input style={styles.input} type="number" min="1" max="100" value={policy.maxActiveTickets} onChange={(event) => change('maxActiveTickets', Number(event.target.value))} /></label>
+            <label style={styles.field}><span style={styles.label}>Desconectar após (min)</span><input style={styles.input} type="number" min="2" max="1440" value={policy.unavailableMinutes} onChange={(event) => change('unavailableMinutes', Number(event.target.value))} /></label>
+          </div>
+          {toggle(
+            'Redistribuir indisponíveis',
+            'Move a conversa para outro atendente quando o responsável ficar indisponível.',
+            policy.redistributeUnavailable,
+            (value) => change('redistributeUnavailable', value),
+          )}
+          <div style={localStyles.info}>A distribuição respeita equipe, disponibilidade e capacidade. Em empate, recebe quem possui menos conversas ativas.</div>
+        </> : null}
+
+        {notice ? <div role="status" style={{ ...localStyles.notice, ...(noticeType === 'error' ? localStyles.noticeError : {}) }}>{notice}</div> : null}
+        <button type="button" style={styles.saveBtn} disabled={busy} onClick={save}>{busy ? 'Salvando…' : 'Salvar SLA e distribuição'}</button>
+      </div>
+    </div>
+
+    <div style={styles.card}>
+      <h2 style={styles.cardTitle}>Alertas de SLA</h2>
+      <p style={styles.hint}>Atualização automática a cada 30 segundos.</p>
+      {!state.alerts.length ? <div style={localStyles.empty}>Nenhuma conversa em alerta.</div> : <div style={localStyles.alertList}>
+        {state.alerts.map((ticket) => <Link key={ticket.id} to={`/inbox?ticketId=${encodeURIComponent(ticket.id)}`} style={localStyles.alertItem}>
+          <AlertTriangle size={17} />
+          <span><strong>{ticket.contact?.name || 'Abrir conversa'}</strong><small>{ticket.agent?.name || 'Sem responsável'} · {new Date(ticket.slaDueAt).toLocaleString('pt-BR')}</small></span>
+          <b>{ticket.slaBreachedAt ? 'Vencido' : 'A vencer'}</b>
+        </Link>)}
+      </div>}
+    </div>
+  </>;
 }
+
+const localStyles = {
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem' },
+  ruleCard: { padding: '1rem', border: '1px solid var(--border-color)', borderRadius: '14px', background: 'var(--bg-base)', display: 'grid', gap: '0.85rem' },
+  ruleHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'var(--text-main)' },
+  secondaryButton: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.55rem 0.7rem', borderRadius: '9px', border: '1px solid var(--border-color)', color: 'var(--text-main)', background: 'var(--bg-base)', cursor: 'pointer', fontWeight: 700 },
+  removeButton: { width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 9, border: '1px solid var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-light)', cursor: 'pointer' },
+  inlineCheck: { display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' },
+  info: { padding: '0.85rem 1rem', border: '1px solid var(--accent-border)', borderRadius: 12, background: 'var(--accent-light)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.55 },
+  notice: { padding: '0.75rem 0.9rem', borderRadius: 10, background: 'var(--success-light)', color: 'var(--success-text)', fontSize: 'var(--text-sm)', fontWeight: 700 },
+  noticeError: { background: 'var(--danger-light)', color: 'var(--danger-text)' },
+  empty: { padding: '1rem', border: '1px dashed var(--border-color)', borderRadius: 12, color: 'var(--text-dim)', textAlign: 'center', fontSize: 'var(--text-sm)' },
+  alertList: { display: 'grid', gap: '0.65rem', marginTop: '1rem' },
+  alertItem: { display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.7rem', padding: '0.85rem', border: '1px solid var(--warning-border)', borderRadius: 12, background: 'var(--warning-light)', color: 'var(--text-main)', textDecoration: 'none' },
+};
