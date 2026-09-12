@@ -1121,8 +1121,25 @@ export default function Settings() {
       )}
 
       {tab === 1 && (
-        <div style={s.sections}>
-          <AttendanceOperations styles={s} />
+        <div className="attendance-settings-layout">
+          <section className="attendance-settings-section">
+            <div className="attendance-section-heading">
+              <span>Operação da equipe</span>
+              <h2>SLA e distribuição dos atendimentos</h2>
+              <p>Defina os prazos, a capacidade dos atendentes e acompanhe conversas que exigem atenção.</p>
+            </div>
+            <div className="attendance-settings-grid attendance-operations-grid">
+              <AttendanceOperations styles={s} />
+            </div>
+          </section>
+
+          <section className="attendance-settings-section">
+            <div className="attendance-section-heading">
+              <span>Jornada de atendimento</span>
+              <h2>Horários e comunicação de ausência</h2>
+              <p>Configure quando a equipe atende e qual mensagem o cliente recebe fora do expediente.</p>
+            </div>
+            <div className="attendance-settings-grid attendance-journey-grid">
           <div style={s.card}>
             <h2 style={s.cardTitle}>Horário de atendimento</h2>
             <div style={s.form}>
@@ -1202,6 +1219,17 @@ export default function Settings() {
               </button>
             </div>
           </div>
+
+            </div>
+          </section>
+
+          <section className="attendance-settings-section">
+            <div className="attendance-section-heading">
+              <span>Automações pós-atendimento</span>
+              <h2>Confirmações e qualidade</h2>
+              <p>Controle a cópia das ordens de serviço e a pesquisa de satisfação enviada ao cliente.</p>
+            </div>
+            <div className="attendance-settings-grid attendance-automation-grid">
 
           <div style={s.card}>
             <h2 style={s.cardTitle}>Cópia automática de O.S.</h2>
@@ -1299,6 +1327,8 @@ export default function Settings() {
               </button>
             </div>
           </div>
+            </div>
+          </section>
         </div>
       )}
 
@@ -2320,10 +2350,21 @@ const settingsResponsiveCss = `
   .settings-hour-controls input[type='time'] { width: 100%; min-width: 0; }
   .settings-mobile-select { display: none !important; }
   .settings-nav ~ * { margin-left: 244px; }
+  .attendance-settings-layout { display: grid; gap: 2rem; min-width: 0; max-width: 1320px; }
+  .attendance-settings-section { display: grid; gap: .9rem; min-width: 0; }
+  .attendance-section-heading { max-width: 760px; }
+  .attendance-section-heading span { display: block; margin-bottom: .3rem; color: var(--accent); font-size: var(--text-xs); font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .attendance-section-heading h2 { margin: 0 0 .3rem; color: var(--text-main); font-family: var(--font-display); font-size: 1.15rem; line-height: 1.3; }
+  .attendance-section-heading p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.55; }
+  .attendance-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; min-width: 0; }
+  .attendance-settings-grid > * { min-width: 0; }
+  .attendance-operations-grid { grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); }
   @media (max-width: 1050px) {
     .settings-container { padding: 1.5rem !important; }
     .settings-nav { width: 194px !important; }
     .settings-nav ~ * { margin-left: 214px; }
+    .attendance-settings-grid,
+    .attendance-operations-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 760px) {
     .settings-container { padding: 1rem !important; }
@@ -2336,6 +2377,12 @@ const settingsResponsiveCss = `
     .settings-container table { min-width: 620px; }
     .settings-hour-row { grid-template-columns: 1fr !important; gap: .55rem !important; align-items: stretch !important; }
     .settings-hour-day { width: auto !important; }
+    .attendance-settings-layout { gap: 1.5rem; }
+    .attendance-settings-section { gap: .75rem; }
+    .attendance-section-heading h2 { font-size: 1.05rem; }
+    .attendance-rule-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .attendance-alert-item { grid-template-columns: auto minmax(0, 1fr) !important; }
+    .attendance-alert-item > b { grid-column: 2; justify-self: start; }
     .settings-container .tag-header { flex-direction: column !important; }
     .settings-container .tag-stats { width: 100% !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
     .settings-container .tag-create-box { grid-template-columns: minmax(0, 1fr) 58px !important; }

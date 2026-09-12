@@ -73,7 +73,7 @@ export default function AttendanceOperations({ styles }) {
           {!policy.rules.length ? <div style={localStyles.empty}>Adicione uma regra para ativar o SLA.</div> : null}
           {policy.rules.map((rule, index) => <div key={index} style={localStyles.ruleCard}>
             <div style={localStyles.ruleHeader}><strong>Regra {index + 1}</strong><button type="button" style={localStyles.removeButton} onClick={() => change('rules', policy.rules.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remover regra ${index + 1}`}><Trash2 size={15} /></button></div>
-            <div style={localStyles.grid}>
+            <div className="attendance-rule-grid" style={localStyles.grid}>
               <label style={styles.field}><span style={styles.label}>Equipe</span><select style={styles.input} value={rule.teamId || ''} onChange={(event) => ruleChange(index, 'teamId', event.target.value || null)}><option value="">Todas</option>{state.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
               <label style={styles.field}><span style={styles.label}>Prioridade</span><select style={styles.input} value={rule.priority || ''} onChange={(event) => ruleChange(index, 'priority', event.target.value || null)}><option value="">Todas</option>{priorityOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
               <label style={styles.field}><span style={styles.label}>Prazo em minutos</span><input style={styles.input} type="number" min="1" max="10080" value={rule.minutes} onChange={(event) => ruleChange(index, 'minutes', Number(event.target.value))} /></label>
@@ -91,7 +91,7 @@ export default function AttendanceOperations({ styles }) {
         )}
 
         {policy.assignmentEnabled ? <>
-          <div style={localStyles.grid}>
+          <div className="attendance-rule-grid" style={localStyles.grid}>
             <label style={styles.field}><span style={styles.label}>Limite por atendente</span><input style={styles.input} type="number" min="1" max="100" value={policy.maxActiveTickets} onChange={(event) => change('maxActiveTickets', Number(event.target.value))} /></label>
             <label style={styles.field}><span style={styles.label}>Desconectar após (min)</span><input style={styles.input} type="number" min="2" max="1440" value={policy.unavailableMinutes} onChange={(event) => change('unavailableMinutes', Number(event.target.value))} /></label>
           </div>
@@ -113,7 +113,7 @@ export default function AttendanceOperations({ styles }) {
       <h2 style={styles.cardTitle}>Alertas de SLA</h2>
       <p style={styles.hint}>Atualização automática a cada 30 segundos.</p>
       {!state.alerts.length ? <div style={localStyles.empty}>Nenhuma conversa em alerta.</div> : <div style={localStyles.alertList}>
-        {state.alerts.map((ticket) => <Link key={ticket.id} to={`/inbox?ticketId=${encodeURIComponent(ticket.id)}`} style={localStyles.alertItem}>
+        {state.alerts.map((ticket) => <Link className="attendance-alert-item" key={ticket.id} to={`/inbox?ticketId=${encodeURIComponent(ticket.id)}`} style={localStyles.alertItem}>
           <AlertTriangle size={17} />
           <span><strong>{ticket.contact?.name || 'Abrir conversa'}</strong><small>{ticket.agent?.name || 'Sem responsável'} · {new Date(ticket.slaDueAt).toLocaleString('pt-BR')}</small></span>
           <b>{ticket.slaBreachedAt ? 'Vencido' : 'A vencer'}</b>
