@@ -8,8 +8,17 @@ const MAX_QUESTION_LENGTH = 500;
 async function query(req, res) {
   const tenantId = req.user.tenantId;
   const pergunta = String(req.body?.pergunta || '').trim().slice(0, MAX_QUESTION_LENGTH);
-  const crmCustomerId = req.body?.crmCustomerId ? String(req.body.crmCustomerId) : null;
+  let crmCustomerId = req.body?.crmCustomerId ? String(req.body.crmCustomerId) : null;
+  const ticketId = req.body?.ticketId ? String(req.body.ticketId) : null;
   if (!pergunta) return res.status(400).json({ error: 'Informe uma pergunta.' });
+
+  if (!crmCustomerId && ticketId) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, tenantId },
+      select: { contact: { select: { crmCustomerId: true } } },
+    });
+    crmCustomerId = ticket?.contact?.crmCustomerId || null;
+  }
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
   if (!settings || !aiService.hasConfiguredProvider(settings)) {

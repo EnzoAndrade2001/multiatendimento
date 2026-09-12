@@ -16,7 +16,7 @@ function formatSyncedAt(value) {
   return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-export default function AiAssistantDrawer({ isOpen, onClose, crmCustomerId, customerName, isMobile = false }) {
+export default function AiAssistantDrawer({ isOpen, onClose, ticketId, crmCustomerId, customerName, isMobile = false }) {
   const [exchanges, setExchanges] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -44,6 +44,7 @@ export default function AiAssistantDrawer({ isOpen, onClose, crmCustomerId, cust
     try {
       const { data } = await queryAiAssistant({
         pergunta: trimmed,
+        ticketId: ticketId || null,
         crmCustomerId: overrideCustomerId ?? crmCustomerId ?? null,
       });
       setExchanges((previous) => previous.map((item) => item.id === id ? { ...item, status: 'done', ...data } : item));

@@ -1263,8 +1263,9 @@ export default function Inbox() {
       <AiAssistantDrawer
         isOpen={aiAssistantOpen}
         onClose={() => setAiAssistantOpen(false)}
-        crmCustomerId={selectedTicket?.contact?.crmCustomer?.id || null}
-        customerName={selectedTicket?.contact?.crmCustomer?.fantasyName || selectedTicket?.contact?.crmCustomer?.name || null}
+        ticketId={selectedTicket?.id || null}
+        crmCustomerId={selectedTicket?.contact?.crmCustomer?.id || selectedTicket?.contact?.crmCustomerId || null}
+        customerName={selectedTicket?.contact?.crmCustomer?.fantasyName || selectedTicket?.contact?.crmCustomer?.name || selectedTicket?.contact?.fantasyName || selectedTicket?.contact?.name || null}
         isMobile={isMobile}
       />
 
