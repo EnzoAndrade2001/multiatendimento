@@ -1,4 +1,4 @@
-.my-tasks { padding: 28px; color: var(--text-main); max-width: 1400px; margin: auto; }
+.my-tasks { padding: 28px; color: var(--text-main); max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 .task-filters, .task-actions, .task-links, .task-badges, .task-modal-heading { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .task-filters { margin-bottom: 24px; align-items: end; }
 .my-tasks label { display: grid; gap: 7px; font-size: 13px; }
@@ -17,8 +17,8 @@
 .my-tasks a { color: var(--accent, #b58f25); text-decoration: underline; }
 .task-section-title { font-size: 20px; margin-top: 36px; }
 .task-modal-backdrop { position: fixed; inset: 0; background: #0009; z-index: 1000; display: grid; place-items: center; padding: 20px; }
-.task-modal { width: min(640px, 100%); max-height: 90vh; overflow: auto; padding: 24px; border-radius: 16px; background: var(--bg-primary, #fff); box-sizing: border-box; }
-.task-modal-heading { justify-content: space-between; }
+.task-modal { width: min(640px, 100%); max-height: calc(100dvh - 40px); min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; border-radius: 16px; background: var(--bg-primary, #fff); box-sizing: border-box; }
+.task-modal-heading { justify-content: space-between; position: sticky; top: 0; z-index: 2; padding: 20px 0 12px; background: var(--bg-primary, #fff); border-bottom: 1px solid var(--border-color, #d1d5db); }
 .task-modal-heading h2 { font-size: 20px; }
 .task-modal-heading button { background: transparent; color: inherit; border: 0; cursor: pointer; }
 .task-form { display: grid; gap: 16px; }

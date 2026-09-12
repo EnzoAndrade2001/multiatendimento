@@ -1472,6 +1472,7 @@ export const TicketSidebar = React.memo(function TicketSidebar({
   setDensity,
   sidebarMode = 'auto',
   setSidebarMode,
+  availabilityControl,
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('inbox:sort') || 'recent');
@@ -1589,6 +1590,12 @@ export const TicketSidebar = React.memo(function TicketSidebar({
           </select>
         </div>
       </div>
+
+      {availabilityControl ? (
+        <div style={{ padding: '0.55rem 0.9rem', borderBottom: '1px solid var(--rail-line)', color: 'var(--rail-dim)' }}>
+          {availabilityControl}
+        </div>
+      ) : null}
 
       <div className="inbox-tabs-wrap" style={styles.tabsWrap}>
         <div style={styles.tabs}>
@@ -1891,6 +1898,20 @@ export const ChatHeader = React.memo(function ChatHeader({
       </div>
 
       <div style={styles.headerActions}>
+        {canUseAiAssistant && !isMobile ? (
+          <button
+            type="button"
+            className="inbox-control"
+            style={styles.headerGhostBtn}
+            onClick={onOpenAiAssistant}
+            title="Conversar com a assistente de IA"
+            aria-label="Abrir assistente de IA"
+          >
+            <Bot size={15} strokeWidth={2.2} />
+            Assistente IA
+          </button>
+        ) : null}
+
         {canCreateOs && !isMobile ? (
           <button
             type="button"
@@ -1950,7 +1971,7 @@ export const ChatHeader = React.memo(function ChatHeader({
                 <Sparkles size={15} strokeWidth={2.2} />
                 {summarizing ? 'Gerando resumo...' : 'Resumo IA'}
               </button>
-              {canUseAiAssistant ? (
+              {canUseAiAssistant && isMobile ? (
                 <button type="button" className="inbox-control" style={styles.headerMenuItem} onClick={() => { onOpenAiAssistant(); setActionsOpen(false); }}>
                   <Bot size={15} strokeWidth={2.2} />
                   Perguntar à IA

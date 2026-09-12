@@ -35,7 +35,6 @@ import UserAvatar from './ui/UserAvatar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ToastContainer from './ToastContainer';
 import InternalChatDrawer from './InternalChatDrawer';
-import AttendanceAvailability from './AttendanceAvailability';
 import { usePermissions } from '../auth/PermissionContext';
 
 const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm', '/revenue'];
@@ -590,8 +589,7 @@ export default function Layout() {
         </div>
       )}
 
-      <div style={{ ...styles.content, paddingBottom: isMobile ? '74px' : '0' }} className="app-layout-content">
-        {can('inbox.view') && hasFeature('inbox') && !localStorage.getItem('supportMasterToken') ? <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--border-color)' }}><AttendanceAvailability /></div> : null}
+      <div style={{ ...styles.content, overflowY: location.pathname.startsWith('/inbox') ? 'hidden' : 'auto', paddingBottom: isMobile ? '74px' : '0' }} className="app-layout-content">
         <Outlet context={{ instances, internalSocket }} />
       </div>
 

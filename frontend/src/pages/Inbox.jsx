@@ -34,6 +34,7 @@ import InstanceSelectionModal from '../components/InstanceSelectionModal';
 import TicketPresence from '../components/TicketPresence';
 import ScheduledMessagesPanel from '../components/ScheduledMessagesPanel';
 import AiAssistantDrawer from '../components/AiAssistantDrawer';
+import AttendanceAvailability from '../components/AttendanceAvailability';
 import { CrmCustomerProfileModal } from './CRM';
 import { ChatHeader, ContactPanel, ForwardModal, MessageComposer, MessageList, TicketSidebar, TransferModal } from './inbox/components';
 import { Empty } from './inbox/helpers.jsx';
@@ -971,6 +972,7 @@ export default function Inbox() {
         setSidebarMode={setSidebarMode}
         view={view}
         lastUpdatedAt={ticketsLastUpdatedAt}
+        availabilityControl={!localStorage.getItem('supportMasterToken') ? <AttendanceAvailability /> : null}
       /> : null}
 
       {/* Main Chat */}

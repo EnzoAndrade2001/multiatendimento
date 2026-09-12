@@ -6,6 +6,7 @@ export const PERMISSION_KEYS = [
   'settings.bot.manage', 'settings.attendance.manage', 'users.manage', 'teams.manage',
   'settings.company.manage', 'quick_responses.manage', 'tags.manage',
   'settings.agent.manage', 'privacy.manage', 'audit.view', 'telemetry.view', 'telemetry.manage', 'internal_chat.view',
+  'ai.assistant.query',
 ];
 
 export const ACCESS_PROFILES = {
@@ -16,26 +17,26 @@ export const ACCESS_PROFILES = {
       'inbox.reopen', 'inbox.create_os', 'crm.view', 'quick_responses.manage',
       'tags.manage', 'internal_chat.view', 'inbox.view_all', 'inbox.delete_message',
       'crm.financial.view', 'billing.view', 'campaigns.manage', 'leads.manage',
-      'revenue.view', 'teams.manage', 'settings.attendance.manage', 'telemetry.view', 'telemetry.manage',
+      'revenue.view', 'teams.manage', 'settings.attendance.manage', 'telemetry.view', 'telemetry.manage', 'ai.assistant.query',
     ],
   },
   agent: {
     label: 'Atendente', homePage: '/inbox', permissions: [
       'dashboard.view', 'inbox.view', 'inbox.assign', 'inbox.transfer', 'inbox.resolve',
       'inbox.reopen', 'inbox.create_os', 'crm.view', 'quick_responses.manage',
-      'tags.manage', 'internal_chat.view', 'telemetry.view',
+      'tags.manage', 'internal_chat.view', 'telemetry.view', 'ai.assistant.query',
     ],
   },
   financeiro: {
     label: 'Financeiro', homePage: '/crm', permissions: [
       'dashboard.view', 'inbox.view', 'inbox.resolve', 'crm.view', 'crm.financial.view',
-      'crm.financial.send', 'billing.view', 'billing.reprocess', 'internal_chat.view', 'telemetry.view',
+      'crm.financial.send', 'billing.view', 'billing.reprocess', 'internal_chat.view', 'telemetry.view', 'ai.assistant.query',
     ],
   },
   tecnico: {
     label: 'Técnico', homePage: '/inbox', permissions: [
       'dashboard.view', 'inbox.view', 'inbox.assign', 'inbox.resolve', 'inbox.reopen', 'inbox.create_os',
-      'crm.view', 'internal_chat.view', 'telemetry.view',
+      'crm.view', 'internal_chat.view', 'telemetry.view', 'ai.assistant.query',
     ],
   },
   personalizado: { label: 'Personalizado', homePage: '/inbox', permissions: [] },
@@ -63,6 +64,7 @@ export const PERMISSION_LABELS = {
   'quick_responses.manage': 'Gerenciar respostas rápidas', 'tags.manage': 'Gerenciar etiquetas',
   'settings.agent.manage': 'Configurar Agente Local', 'privacy.manage': 'Gerenciar privacidade e LGPD',
   'internal_chat.view': 'Usar chat interno', 'audit.view': 'Consultar auditoria do sistema', 'telemetry.view': 'Acompanhar telemetria operacional', 'telemetry.manage': 'Gerenciar decisões do Sentinela',
+  'ai.assistant.query': 'Consultar a assistente de IA',
 };
 
 export function permissionsForUser(user = {}) {
