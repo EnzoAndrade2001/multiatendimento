@@ -120,7 +120,7 @@ export default function Layout() {
     localStorage.removeItem('supportMasterToken');
     localStorage.removeItem('supportMasterTenantId');
     localStorage.removeItem('supportMasterTenantName');
-    window.location.assign('/superadmin');
+    window.location.assign('/suporte');
   }
 
   React.useEffect(() => {
@@ -378,11 +378,10 @@ export default function Layout() {
     { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', feature: 'audit', roles: ['admin', 'superadmin'] },
     { section: 'Sistema', to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Sistema', to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
-    { section: 'Sistema', to: '/superadmin', icon: <ShieldCheck size={18} />, label: 'Painel Admin', roles: ['superadmin'] },
   ], [setIsChatOpen]);
 
   const visibleDesktopLinks = desktopLinks.filter((link) => (
-    link.to === '/superadmin' ? role === 'superadmin' : ((!link.permission || can(link.permission)) && (!link.feature || hasFeature(link.feature)))
+    (!link.permission || can(link.permission)) && (!link.feature || hasFeature(link.feature))
   ));
   const primaryDesktopLinks = visibleDesktopLinks.filter((link) => PRIMARY_NAV_PATHS.includes(link.to));
   const secondaryDesktopLinks = visibleDesktopLinks.filter((link) => !PRIMARY_NAV_PATHS.includes(link.to));

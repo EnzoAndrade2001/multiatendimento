@@ -2,7 +2,7 @@ const prisma = require('../lib/prisma');
 const { FEATURE_KEY_RE, normalizeLimits, resolveTenantEntitlements } = require('../services/featureEntitlementService');
 
 function deny(req, res) {
-  if (req.user?.role !== 'superadmin' || req.user?.supportMode) { res.status(403).json({ error: 'Acesso negado' }); return true; }
+  if (req.user?.role !== 'superadmin' || req.user?.supportMode || (req.user?.supportLevel || 'manager') !== 'manager') { res.status(403).json({ error: 'Acesso exclusivo do gestor da equipe de suporte.' }); return true; }
   return false;
 }
 const cleanCode = (value) => String(value || '').trim().toLowerCase();

@@ -7,6 +7,7 @@ import {
   startSupportSession,
   getFeatureCatalog, getTenantEntitlements, updateTenantEntitlements,
   updateProductPlan, updateProductPlanFeatures,
+  getSupportUsers, createSupportUser, updateSupportUser,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -37,6 +38,9 @@ export default function SuperAdmin() {
   const [featureCatalog, setFeatureCatalog] = useState({ features: [], plans: [] });
   const [entitlementsModal, setEntitlementsModal] = useState(null);
   const [plansModal, setPlansModal] = useState(false);
+  const [supportUsers, setSupportUsers] = useState([]);
+  const [supportModal, setSupportModal] = useState(false);
+  const isManager = (localStorage.getItem('supportLevel') || 'manager') === 'manager';
 
   useEffect(() => {
     load();
@@ -45,7 +49,7 @@ export default function SuperAdmin() {
   async function load() {
     setLoading(true);
     try {
-      const [tenantsResult, agentsResult, featuresResult] = await Promise.allSettled([getTenants(), getFirebirdAgents(), getFeatureCatalog()]);
+      const [tenantsResult, agentsResult, featuresResult, supportResult] = await Promise.allSettled([getTenants(), getFirebirdAgents(), getFeatureCatalog(), getSupportUsers()]);
       if (tenantsResult.status === 'fulfilled') {
         setTenants(tenantsResult.value.data);
       } else {
@@ -60,6 +64,7 @@ export default function SuperAdmin() {
           plans: payload.plans || payload.productPlans || [],
         });
       }
+      if (supportResult.status === 'fulfilled') setSupportUsers(supportResult.value.data || []);
     } catch (e) {
       toast.error(e.response?.data?.error || 'Não foi possível carregar as empresas. Verifique sua conexão ou permissão de acesso.');
     } finally {
@@ -199,8 +204,12 @@ export default function SuperAdmin() {
       totalInstances: tenants.reduce((acc, tenant) => acc + (tenant._count?.instances || 0), 0),
       messages30d: tenants.reduce((acc, tenant) => acc + (tenant.metrics?.messages30d || 0), 0),
       openTickets: tenants.reduce((acc, tenant) => acc + (tenant.metrics?.openTickets || 0), 0),
+      monthlyRevenue: tenants.filter((tenant) => tenant.active).reduce((acc, tenant) => {
+        const plan = featureCatalog.plans.find((item) => item.code === tenant.plan);
+        return acc + Number(plan?.monthlyPrice || 0);
+      }, 0),
     }),
-    [tenants]
+    [tenants, featureCatalog.plans]
   );
 
   // "há 2h", "há 5 dias"... usado tanto na coluna de atividade quanto na
@@ -229,12 +238,23 @@ export default function SuperAdmin() {
         title="Gestao SaaS"
         subtitle="Gerencie empresas, planos e limites da plataforma a partir de uma camada administrativa unica."
         actions={<div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <ActionButton variant="secondary" onClick={() => setPlansModal(true)}><PackageCheck size={18} /> Editar planos</ActionButton>
-          <ActionButton onClick={() => openModal()}><Plus size={18} /> Nova empresa</ActionButton>
+          {isManager && <ActionButton variant="secondary" onClick={() => setSupportModal(true)}><Users size={18} /> Equipe de suporte</ActionButton>}
+          {isManager && <ActionButton variant="secondary" onClick={() => setPlansModal(true)}><PackageCheck size={18} /> Editar planos</ActionButton>}
+          {isManager && <ActionButton onClick={() => openModal()}><Plus size={18} /> Nova empresa</ActionButton>}
         </div>}
       />
 
       <div style={s.statsRow}>
+        <SurfaceCard style={s.statCard}>
+          <PackageCheck size={18} style={s.statIcon} />
+          <div style={s.statVal}>{stats.monthlyRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+          <div style={s.statLabel}>Receita mensal prevista</div>
+        </SurfaceCard>
+        <SurfaceCard style={s.statCard}>
+          <Users size={18} style={s.statIcon} />
+          <div style={s.statVal}>{supportUsers.filter((user) => user.active).length}</div>
+          <div style={s.statLabel}>Equipe de suporte ativa</div>
+        </SurfaceCard>
         <SurfaceCard style={s.statCard}>
           <Building2 size={18} style={s.statIcon} />
           <div style={s.statVal}>{stats.total}</div>
@@ -367,23 +387,23 @@ export default function SuperAdmin() {
                       <button style={s.iconBtn} onClick={() => accessAsSupport(tenant)} title={`Acessar ${tenant.name} como suporte`}>
                         <LogIn size={16} />
                       </button>
-                      <button style={s.iconBtn} onClick={() => setUsersModal(tenant)} title={`Logins de ${tenant.name}`}>
+                      {isManager && <button style={s.iconBtn} onClick={() => setUsersModal(tenant)} title={`Logins de ${tenant.name}`}>
                         <KeyRound size={16} />
-                      </button>
-                      <button style={s.iconBtn} onClick={() => setEntitlementsModal(tenant)} title={`Plano e recursos de ${tenant.name}`}>
+                      </button>}
+                      {isManager && <button style={s.iconBtn} onClick={() => setEntitlementsModal(tenant)} title={`Plano e recursos de ${tenant.name}`}>
                         <PackageCheck size={16} />
-                      </button>
-                      <button style={s.iconBtn} onClick={() => openModal(tenant)} title="Editar empresa">
+                      </button>}
+                      {isManager && <button style={s.iconBtn} onClick={() => openModal(tenant)} title="Editar empresa">
                         <Pencil size={16} />
-                      </button>
-                      <button
+                      </button>}
+                      {isManager && <button
                         style={{ ...s.iconBtn, color: tenant.active ? 'var(--danger)' : 'var(--success)' }}
                         onClick={() => toggleActive(tenant)}
                         disabled={pendingId === tenant.id}
                         title={tenant.active ? `Bloquear empresa ${tenant.name}` : `Reativar empresa ${tenant.name}`}
                       >
                         <Power size={16} />
-                      </button>
+                      </button>}
                     </div>
                   </td>
                 </tr>
@@ -591,8 +611,35 @@ export default function SuperAdmin() {
         />
       ) : null}
       {plansModal ? <PlansModal catalog={featureCatalog} onClose={() => setPlansModal(false)} onChanged={load} /> : null}
+      {supportModal ? <SupportUsersModal users={supportUsers} onClose={() => setSupportModal(false)} onChanged={load} /> : null}
     </div>
   );
+}
+
+function SupportUsersModal({ users, onClose, onChanged }) {
+  const [form, setForm] = useState({ name: '', email: '', password: '', supportLevel: 'support' });
+  const [busy, setBusy] = useState(false);
+  async function create(event) {
+    event.preventDefault(); setBusy(true);
+    try { await createSupportUser(form); toast.success('Usuário de suporte criado.'); setForm({ name: '', email: '', password: '', supportLevel: 'support' }); await onChanged?.(); }
+    catch (error) { toast.error(error.response?.data?.error || 'Não foi possível criar o usuário.'); }
+    finally { setBusy(false); }
+  }
+  async function toggle(user) {
+    try { await updateSupportUser(user.id, { active: !user.active }); await onChanged?.(); }
+    catch (error) { toast.error(error.response?.data?.error || 'Não foi possível atualizar o usuário.'); }
+  }
+  return <ModalShell kicker="Controle de acesso" title="Equipe de suporte" onClose={onClose} maxWidth="52rem">
+    <div style={s.form}>
+      <form onSubmit={create} style={s.formCard}>
+        <div style={s.twoCols}><div style={s.field}><label style={s.label}>Nome</label><input required style={s.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div><div style={s.field}><label style={s.label}>E-mail</label><input required type="email" style={s.input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div></div>
+        <div style={s.twoCols}><div style={s.field}><label style={s.label}>Senha inicial</label><input required minLength={6} type="password" style={s.input} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div><div style={s.field}><label style={s.label}>Nível</label><select style={s.input} value={form.supportLevel} onChange={(e) => setForm({ ...form, supportLevel: e.target.value })}><option value="support">Técnico de suporte</option><option value="manager">Gestor superadmin</option></select></div></div>
+        <ActionButton type="submit" disabled={busy}>{busy ? 'Criando...' : 'Criar acesso'}</ActionButton>
+      </form>
+      <div style={{ display: 'grid', gap: 'var(--space-2)' }}>{users.map((user) => <div key={user.id} style={s.loginRow}><div><strong>{user.name}</strong><div style={s.companyMeta}>{user.email} · {user.supportLevel === 'manager' ? 'Gestor' : 'Suporte'} · último acesso {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</div></div><ActionButton variant="secondary" onClick={() => toggle(user)}>{user.active ? 'Desativar' : 'Ativar'}</ActionButton></div>)}</div>
+      <div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton></div>
+    </div>
+  </ModalShell>;
 }
 
 function PlansModal({ catalog, onClose, onChanged }) {

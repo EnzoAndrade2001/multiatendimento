@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { login, me, getTenantBySlug, accessOptions } = require('../controllers/authController');
+const { login, supportLogin, me, getTenantBySlug, accessOptions } = require('../controllers/authController');
 const { updateProfile } = require('../controllers/profileController');
 const authenticate = require('../middlewares/authenticate');
 const { parseUserAvatarUpload } = require('../middlewares/userAvatarUpload');
@@ -32,6 +32,7 @@ function loginRateLimit(req, res, next) {
 
 router.get('/tenant/:slug', getTenantBySlug);
 router.post('/login', loginRateLimit, login);
+router.post('/support-login', loginRateLimit, supportLogin);
 router.get('/me', authenticate, me);
 router.get('/access-options', authenticate, accessOptions);
 router.patch('/profile', authenticate, auditEvent('PROFILE_UPDATE', 'profile'), updateProfile);

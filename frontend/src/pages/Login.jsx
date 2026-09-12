@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Activity, Eye, EyeOff, MessageSquare, Receipt, ShieldCheck } from 'lucide-react';
-import { getMediaUrl, getTenantBySlug, login } from '../services/api';
+import { getMediaUrl, getTenantBySlug, login, supportLogin } from '../services/api';
 
 function getMonogram(name) {
   const words = String(name || '')
@@ -19,7 +19,7 @@ const FEATURES = [
   { icon: Activity, label: 'Indicadores e relatórios em tempo real' },
 ];
 
-export default function Login() {
+export default function Login({ supportPortal = false }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,7 +30,7 @@ export default function Login() {
   const navigate = useNavigate();
   const { slug } = useParams();
   const firstPath = window.location.pathname.split('/').filter(Boolean)[0] || '';
-  const routeSlug = slug || (firstPath !== 'login' ? firstPath : '') || '';
+  const routeSlug = supportPortal ? '' : (slug || (firstPath !== 'login' ? firstPath : '') || '');
 
   useEffect(() => {
     if (!routeSlug) return;
@@ -64,12 +64,13 @@ export default function Login() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await login(email, password, routeSlug);
+      const { data } = supportPortal ? await supportLogin(email, password) : await login(email, password, routeSlug);
       localStorage.setItem('token', data.token);
       localStorage.setItem('tenantId', data.tenant?.id || '');
       localStorage.setItem('userId', data.user.id);
       localStorage.setItem('role', data.user.role);
-      navigate(data.user.role === 'superadmin' ? '/superadmin' : (data.user.homePage || '/dashboard'));
+      if (data.user.supportLevel) localStorage.setItem('supportLevel', data.user.supportLevel);
+      navigate(data.user.role === 'superadmin' ? '/suporte' : (data.user.homePage || '/dashboard'));
     } catch (err) {
       if (!err?.response) {
         setError('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.');
@@ -87,7 +88,7 @@ export default function Login() {
   // O primaryColor de tenant nao tematiza mais nada no app; para reativar um
   // login white-label no futuro, voltar a: tenantInfo?.primaryColor || '#FF6A00'.
   const primaryColor = '#FF6A00';
-  const displayName = tenantInfo?.name || (routeSlug ? routeSlug.toUpperCase() : 'Multiatendimento');
+  const displayName = supportPortal ? 'Central de Suporte' : (tenantInfo?.name || (routeSlug ? routeSlug.toUpperCase() : 'Multiatendimento'));
   const hasTenant = Boolean(tenantInfo?.name);
   const year = new Date().getFullYear();
 

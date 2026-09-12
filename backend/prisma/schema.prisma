@@ -261,6 +261,8 @@ model User {
   email                      String
   password                   String
   role                       String                      @default("agent")
+  supportLevel               String?
+  lastLoginAt                DateTime?
   accessProfile              String                      @default("agent")
   permissions                Json?
   homePage                   String?

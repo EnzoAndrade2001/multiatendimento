@@ -5,12 +5,16 @@ const {
   listTenantUsers, createTenantUser, updateTenantUser,
   listFirebirdAgents,
   startSupportSession, endSupportSession,
+  listSupportUsers, createSupportUser, updateSupportUser,
 } = require('../controllers/superAdminController');
 const { listCatalog, upsertFeature, upsertPlan, setPlanFeatures, getTenantEntitlements, setTenantOverrides } = require('../controllers/entitlementController');
 
 router.use(authenticate);
 router.get('/tenants', listTenants);
 router.get('/firebird-agents', listFirebirdAgents);
+router.get('/support-users', listSupportUsers);
+router.post('/support-users', createSupportUser);
+router.patch('/support-users/:userId', updateSupportUser);
 router.get('/product-catalog', listCatalog);
 router.put('/features', upsertFeature);
 router.put('/plans', upsertPlan);

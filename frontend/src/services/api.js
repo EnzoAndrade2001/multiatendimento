@@ -81,6 +81,7 @@ api.interceptors.request.use((config) => {
 
 // Auth
 export const login = (email, password, slug) => api.post('/auth/login', { email, password, slug });
+export const supportLogin = (email, password) => api.post('/auth/support-login', { email, password });
 export const getMe = () => api.get('/auth/me');
 export const updateProfile = (data) => api.patch('/auth/profile', data);
 export const uploadProfileAvatar = (file) => {
@@ -246,6 +247,9 @@ export const getTenantEntitlements = (id) => api.get(`/superadmin/tenants/${id}/
 export const updateTenantEntitlements = (id, data) => api.put(`/superadmin/tenants/${id}/entitlements`, data);
 export const updateProductPlan = (data) => api.put('/superadmin/plans', data);
 export const updateProductPlanFeatures = (planId, features) => api.put(`/superadmin/plans/${planId}/features`, { features });
+export const getSupportUsers = () => api.get('/superadmin/support-users');
+export const createSupportUser = (data) => api.post('/superadmin/support-users', data);
+export const updateSupportUser = (id, data) => api.patch(`/superadmin/support-users/${id}`, data);
 export const getCurrentEntitlements = () => api.get('/entitlements/me');
 export const endSupportSession = () => api.post('/superadmin/support-session/end');
 

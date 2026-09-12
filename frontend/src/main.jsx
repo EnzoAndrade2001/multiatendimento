@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
+import SupportLayout from './components/SupportLayout';
 import api from './services/api';
 import AuthSpecPage from './pages/AuthSpecPage';
 import Forbidden from './components/Forbidden';
@@ -34,7 +35,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.clear();
-      window.location.href = '/login';
+      window.location.href = window.location.pathname.startsWith('/suporte') ? '/suporte/login' : '/login';
     }
     return Promise.reject(error);
   }
@@ -43,6 +44,7 @@ api.interceptors.response.use(
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('token');
   if (!token) return <Navigate to="/login" replace />;
+  if (localStorage.getItem('role') === 'superadmin' && !localStorage.getItem('supportMasterToken')) return <Navigate to="/suporte" replace />;
   return children;
 }
 
@@ -55,6 +57,13 @@ function RequirePermission({ permission, children }) {
 function RequireRole({ role, children }) {
   const currentRole = String(localStorage.getItem('role') || '').toLowerCase();
   return currentRole === role ? children : <Forbidden />;
+}
+
+function SupportPrivateRoute({ children }) {
+  const token = localStorage.getItem('token');
+  const role = localStorage.getItem('role');
+  if (!token) return <Navigate to="/suporte/login" replace />;
+  return role === 'superadmin' ? children : <Navigate to="/login" replace />;
 }
 
 function RequireFeature({ feature, children }) {
@@ -176,6 +185,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/suporte/login" element={<Login supportPortal />} />
           <Route path="/:slug/login" element={<Login />} />
           <Route path="/validation/auth-spec" element={<AuthSpecPage />} />
           <Route path="/__mock/inbox" element={<LocalMockRoute />} />
@@ -200,13 +210,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/campaigns" element={<RequireAccess permission="campaigns.manage" feature="campaigns"><Campaigns /></RequireAccess>} />
             <Route path="/os" element={<Navigate to="/inbox" replace />} />
               <Route path="/quick-responses" element={<RequireAccess permission="quick_responses.manage" feature="quick_responses"><QuickResponses /></RequireAccess>} />
-            <Route path="/superadmin" element={<RequireRole role="superadmin"><SuperAdmin /></RequireRole>} />
+            <Route path="/superadmin" element={<Navigate to="/suporte" replace />} />
             <Route path="/leads" element={<RequireAccess permission="leads.manage" feature="lead_generation"><LeadScraper /></RequireAccess>} />
             <Route path="/revenue" element={<RequireAccess permission="revenue.view" feature="ilux_sentinel"><RevGuard /></RequireAccess>} />
             <Route path="/billing-reports" element={<RequireAccess permission="billing.view" feature="billing_reports"><BillingReports /></RequireAccess>} />
               <Route path="/privacy" element={<RequireFeature feature="privacy"><Privacy /></RequireFeature>} />
             <Route path="/audit" element={<RequireAccess permission="audit.view" feature="audit"><Audit /></RequireAccess>} />
             <Route path="/telemetry" element={<Navigate to="/revenue?area=parque&section=fila" replace />} />
+          </Route>
+
+          <Route element={<SupportPrivateRoute><SupportLayout /></SupportPrivateRoute>}>
+            <Route path="/suporte" element={<SuperAdmin />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -17,6 +17,15 @@ function denySuperadmin(req, res) {
   return false;
 }
 
+function denySupportManager(req, res) {
+  if (denySuperadmin(req, res)) return true;
+  if ((req.user.supportLevel || 'manager') !== 'manager') {
+    res.status(403).json({ error: 'Ação exclusiva do gestor da equipe de suporte.' });
+    return true;
+  }
+  return false;
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function normalizeCredential({ name, email, password }, { requirePassword = true } = {}) {
@@ -83,7 +92,7 @@ async function listTenants(req, res) {
 }
 
 async function createTenant(req, res) {
-  if (denySuperadmin(req, res)) return;
+  if (denySupportManager(req, res)) return;
   const { name, slug, plan, maxConnections, maxUsers } = req.body;
 
   const cleanSlug = String(slug || '').trim().toLowerCase();
@@ -138,7 +147,7 @@ async function createTenant(req, res) {
 }
 
 async function updateTenant(req, res) {
-  if (denySuperadmin(req, res)) return;
+  if (denySupportManager(req, res)) return;
   const { id } = req.params;
   const { name, plan, active, maxConnections, maxUsers, primaryColor, logoUrl } = req.body;
 
@@ -331,9 +340,55 @@ async function listFirebirdAgents(req, res) {
   });
 }
 
+async function listSupportUsers(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const users = await prisma.user.findMany({
+    where: { role: 'superadmin' },
+    select: { id: true, name: true, email: true, supportLevel: true, active: true, lastLoginAt: true, createdAt: true },
+    orderBy: [{ active: 'desc' }, { name: 'asc' }],
+  });
+  res.json(users.map((user) => ({ ...user, supportLevel: user.supportLevel || 'manager' })));
+}
+
+async function createSupportUser(req, res) {
+  if (denySupportManager(req, res)) return;
+  const cred = normalizeCredential(req.body);
+  if (cred.error) return res.status(400).json({ error: cred.error });
+  const clash = await prisma.user.findFirst({ where: { email: cred.email }, select: { id: true } });
+  if (clash) return res.status(409).json({ error: 'Este e-mail já está sendo utilizado.' });
+  const user = await prisma.user.create({
+    data: { tenantId: req.user.tenantId, name: cred.name, email: cred.email, password: await bcrypt.hash(cred.password, 10), role: 'superadmin', accessProfile: 'admin', supportLevel: req.body.supportLevel === 'support' ? 'support' : 'manager' },
+    select: { id: true, name: true, email: true, supportLevel: true, active: true, lastLoginAt: true, createdAt: true },
+  });
+  res.json(user);
+}
+
+async function updateSupportUser(req, res) {
+  if (denySupportManager(req, res)) return;
+  const existing = await prisma.user.findFirst({ where: { id: req.params.userId, role: 'superadmin' } });
+  if (!existing) return res.status(404).json({ error: 'Usuário de suporte não encontrado.' });
+  const data = {};
+  if (req.body.name !== undefined) data.name = String(req.body.name).trim();
+  if (req.body.supportLevel !== undefined) data.supportLevel = req.body.supportLevel === 'support' ? 'support' : 'manager';
+  if (req.body.password) {
+    if (String(req.body.password).length < 6) return res.status(400).json({ error: 'A senha deve ter ao menos 6 caracteres.' });
+    data.password = await bcrypt.hash(String(req.body.password), 10);
+  }
+  if (req.body.active !== undefined) {
+    if (existing.id === req.user.userId && !req.body.active) return res.status(409).json({ error: 'Você não pode desativar sua própria conta.' });
+    if (!req.body.active && (existing.supportLevel || 'manager') === 'manager') {
+      const managers = await prisma.user.count({ where: { role: 'superadmin', active: true, OR: [{ supportLevel: 'manager' }, { supportLevel: null }] } });
+      if (managers <= 1) return res.status(409).json({ error: 'É obrigatório manter ao menos um superadmin gestor ativo.' });
+    }
+    data.active = Boolean(req.body.active);
+  }
+  res.json(await prisma.user.update({ where: { id: existing.id }, data, select: { id: true, name: true, email: true, supportLevel: true, active: true, lastLoginAt: true, createdAt: true } }));
+}
+
 module.exports = {
   listTenants, createTenant, updateTenant,
   listTenantUsers, createTenantUser, updateTenantUser,
   listFirebirdAgents,
+  listSupportUsers, createSupportUser, updateSupportUser,
   startSupportSession, endSupportSession,
 };

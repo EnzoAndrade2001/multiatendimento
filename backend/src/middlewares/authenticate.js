@@ -19,7 +19,7 @@ module.exports = async (req, res, next) => {
       const [actor, session] = await Promise.all([
         prisma.user.findUnique({
           where: { id: decoded.userId },
-          select: { id: true, tenantId: true, role: true, accessProfile: true, permissions: true, active: true },
+          select: { id: true, tenantId: true, role: true, supportLevel: true, accessProfile: true, permissions: true, active: true },
         }),
         prisma.supportAccessSession.findFirst({
           where: {
@@ -40,6 +40,7 @@ module.exports = async (req, res, next) => {
         userId: actor.id,
         tenantId: decoded.supportTenantId,
         role: actor.role,
+        supportLevel: actor.supportLevel || 'manager',
         accessProfile: access.profile,
         permissions: access.permissions,
         supportMode: true,
@@ -56,6 +57,7 @@ module.exports = async (req, res, next) => {
         id: true,
         tenantId: true,
         role: true,
+        supportLevel: true,
         accessProfile: true,
         permissions: true,
         active: true,
@@ -72,6 +74,7 @@ module.exports = async (req, res, next) => {
       userId: user.id,
       tenantId: user.tenantId,
       role: user.role,
+      supportLevel: user.supportLevel || (user.role === 'superadmin' ? 'manager' : null),
       accessProfile: access.profile,
       permissions: access.permissions,
     };

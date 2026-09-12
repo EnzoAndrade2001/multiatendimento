@@ -46,9 +46,15 @@ async function login(req, res) {
     return res.status(401).json({ error: 'Por favor, utilize o link de acesso exclusivo da sua empresa.' });
   }
 
+  if (req.supportOnly && user.role !== 'superadmin') {
+    return res.status(401).json({ error: 'Acesso exclusivo da equipe de suporte.' });
+  }
+
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) auditLogin(req, user, 'AUTH_LOGIN_FAILED', { reason: 'invalid_password' });
   if (!valid) return res.status(401).json({ error: 'Credenciais inválidas' });
+
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   const token = jwt.sign(
     { userId: user.id },
@@ -62,6 +68,7 @@ async function login(req, res) {
     token,
     user: {
       id: user.id, name: user.name, email: user.email, role: user.role,
+      supportLevel: user.supportLevel || (user.role === 'superadmin' ? 'manager' : null),
       avatarUrl: user.avatarUrl,
       accessProfile: access.profile, permissions: access.permissions,
       homePage: resolveHomePage(user.homePage, access),
@@ -70,11 +77,17 @@ async function login(req, res) {
   });
 }
 
+async function supportLogin(req, res) {
+  req.body.slug = undefined;
+  req.supportOnly = true;
+  return login(req, res);
+}
+
 async function me(req, res) {
   const user = await prisma.user.findUnique({
     where: { id: req.user.userId },
     select: {
-      id: true, name: true, email: true, role: true, tenantId: true,
+      id: true, name: true, email: true, role: true, supportLevel: true, lastLoginAt: true, tenantId: true,
       avatarUrl: true,
       accessProfile: true, permissions: true, homePage: true, active: true,
       tenant: {
@@ -120,4 +133,4 @@ async function getTenantBySlug(req, res) {
   res.json(tenant);
 }
 
-module.exports = { login, me, getTenantBySlug, accessOptions };
+module.exports = { login, supportLogin, me, getTenantBySlug, accessOptions };
