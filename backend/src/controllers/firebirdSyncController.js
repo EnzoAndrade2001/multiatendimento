@@ -1066,6 +1066,8 @@ async function pushBatch(req, res) {
           await upsertCrmOsType(tenant, record);
         } else if (entity === 'technicians') {
           await upsertCrmTechnician(tenant, record);
+        } else if (entity === 'defectTypes') {
+          await upsertCrmDefectType(tenant, record);
         } else if (entity === 'serviceOrders') {
           await upsertServiceOrder(tenant, instance, record);
           stats.serviceOrders += 1;
@@ -1170,6 +1172,21 @@ async function upsertCrmTechnician(tenant, data) {
       name,
       isActive,
     },
+  });
+}
+
+async function upsertCrmDefectType(tenant, data) {
+  const code = pick(data.code, data.cdDefeito, data.cddefeito);
+  const name = pick(data.name, data.nmDefeito, data.nmdefeito);
+  if (!code || !name) throw new Error('Tipo de defeito sem código ou descrição.');
+
+  const inactive = ['S', 'SIM', 'TRUE', '1'].includes(
+    String(pick(data.inactive, data.tfinativo) || '').toUpperCase()
+  );
+  return prisma.crmDefectType.upsert({
+    where: { tenantId_code: { tenantId: tenant.id, code } },
+    update: { name, inactive },
+    create: { tenantId: tenant.id, code, name, inactive },
   });
 }
 
@@ -1322,6 +1339,7 @@ async function getPendingCommands(req, res) {
         cdCliente: os.contact.externalId || os.contact.crmCustomer?.externalId || null,
         cdEquipamento: os.equipment.externalId,
         cdOstp: os.cdOstp || '02',
+        cdDefeito: os.cdDefeito || '',
         nmsuportet: os.nmsuportet || '',
         defect: os.defect || '',
         attendantName: os.user?.firebirdSupportName || os.user?.name || '',

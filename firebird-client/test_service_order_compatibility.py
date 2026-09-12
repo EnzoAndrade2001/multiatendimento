@@ -1,6 +1,6 @@
 import unittest
 
-from main import AppConfig, FirebirdRepository
+from main import AppConfig, FirebirdRepository, normalize_defect_type
 
 
 class FakeCursor:
@@ -52,6 +52,13 @@ class FakeConnection:
 
 
 class ServiceOrderCompatibilityTest(unittest.TestCase):
+    def test_normalizes_active_defect_catalog_entry(self):
+        self.assertEqual(normalize_defect_type({
+            "cddefeito": " MAN ",
+            "nmdefeito": " MANUTENCAO ",
+            "tfinativo": "N",
+        }), {"code": "MAN", "name": "MANUTENCAO", "inactive": False})
+
     def create(self, official):
         cursor = FakeCursor(official=official)
         connection = FakeConnection(cursor)

@@ -9,6 +9,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const [equipments, setEquipments] = useState([]);
   const [osTypes, setOsTypes] = useState([]);
   const [technicians, setTechnicians] = useState([]);
+  const [defectTypes, setDefectTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -19,7 +20,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const [requestKey] = useState(() => (
     globalThis.crypto?.randomUUID?.() || `os-${Date.now()}-${Math.random().toString(16).slice(2)}`
   ));
-  const [formData, setFormData] = useState({ equipmentId: '', defect: '', cdOstp: '', nmsuportet: '' });
+  const [formData, setFormData] = useState({ equipmentId: '', defect: '', cdOstp: '', cdDefeito: '', nmsuportet: '' });
   const [openOrders, setOpenOrders] = useState([]);
   const [checkingOpen, setCheckingOpen] = useState(false);
   const formEditedRef = useRef(false);
@@ -96,15 +97,17 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         return;
       }
       
-      const [resEquips, resTypes, resTechs] = await Promise.all([
+      const [resEquips, resTypes, resTechs, resDefectTypes] = await Promise.all([
         getEquipments(contactId),
         api.get('/os/types'),
-        api.get('/os/technicians')
+        api.get('/os/technicians'),
+        api.get('/os/defect-types')
       ]);
 
       setEquipments(resEquips.data);
       setOsTypes(resTypes.data);
       setTechnicians(resTechs.data);
+      setDefectTypes(resDefectTypes.data);
       
       const foundType = resTypes.data.find(t => t.code === '01')
         || resTypes.data.find(t => t.name.toUpperCase().includes('CONTRAT'))
@@ -118,6 +121,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         defect: '',
         equipmentId: resEquips.data.length === 1 ? resEquips.data[0].id : '',
         cdOstp: foundType ? foundType.code : '',
+        cdDefeito: '',
         nmsuportet: foundTech ? foundTech.name : ''
       };
       setFormData(defaultFormData);
@@ -154,6 +158,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   async function handleSave() {
     if (!formData.equipmentId) return toast.error('Selecione um equipamento.');
     if (!formData.cdOstp) return toast.error('Selecione o tipo de O.S.');
+    if (!formData.cdDefeito) return toast.error('Selecione o tipo de defeito.');
     if (!formData.defect) return toast.error('Informe o defeito reportado.');
     setSaving(true);
     setError('');
@@ -165,6 +170,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         requestKey,
         defect: formData.defect,
         cdOstp: formData.cdOstp,
+        cdDefeito: formData.cdDefeito,
         nmsuportet: formData.nmsuportet
       });
       completeOrder(res.data);
@@ -308,6 +314,20 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               {osTypes.map(t => (
                 <option key={t.id} value={t.code} disabled={t.inactive}>
                   {t.name} ({t.code}){t.formulario ? ` — ${t.formulario}` : ''}{t.inactive ? ' — inativo' : ''}
+                </option>
+              ))}
+            </select>
+
+            <label style={s.label}>TIPO DE DEFEITO</label>
+            <select
+              style={s.input}
+              value={formData.cdDefeito}
+              onChange={e => updateFormData({...formData, cdDefeito: e.target.value})}
+            >
+              <option value="">Selecione o tipo de defeito...</option>
+              {defectTypes.map(type => (
+                <option key={type.id} value={type.code}>
+                  {type.code} — {type.name}
                 </option>
               ))}
             </select>

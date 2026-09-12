@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
-const { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, draftOS, getOSTypes, getOSTechnicians } = require('../controllers/osController');
+const { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes } = require('../controllers/osController');
 const { sendManagerCopy } = require('../controllers/serviceOrderManagerController');
 const auditEvent = require('../middlewares/auditEvent');
 
@@ -10,6 +10,7 @@ router.use(authenticate, requirePermission('crm.view'));
 // OS Metadata
 router.get('/types', getOSTypes);
 router.get('/technicians', getOSTechnicians);
+router.get('/defect-types', getOSDefectTypes);
 
 // Equipments (can be managed here or under contacts)
 router.get('/contacts/:contactId/equipments', getEquipments);

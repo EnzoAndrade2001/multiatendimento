@@ -45,6 +45,7 @@ model Tenant {
   crmEquipments              CrmEquipment[]
   crmOsTypes                 CrmOsType[]
   crmTechnicians             CrmTechnician[]
+  crmDefectTypes             CrmDefectType[]
   billingLogs                BillingLog[]
   revenueSnapshots           RevenueSnapshot[]
   userTicketStates           UserTicketState[]
@@ -104,20 +105,20 @@ model TenantSettings {
   ratingMessage                  String? @default("Como você avalia nosso atendimento de 1 a 5?") @db.Text
 
   // Dados da Empresa para PDF/OS
-  companyName    String?
-  companyCnpj    String?
-  companyIE      String?
-  companyAddress String?
-  companyBairro  String?
-  companyCep     String?
-  companyPhone   String?
-  companyCity    String?
-  companyState   String?
+  companyName      String?
+  companyCnpj      String?
+  companyIE        String?
+  companyAddress   String?
+  companyBairro    String?
+  companyCep       String?
+  companyPhone     String?
+  companyCity      String?
+  companyState     String?
   // Cor de destaque do cabecalho/bandas da O.S. (o texto continua preto).
   // Hex #RRGGBB; null = vermelho padrao.
-  osAccentColor     String?  @default("#D62828")
+  osAccentColor    String? @default("#D62828")
   // Exibe o numero da O.S. em Code 128 no cabecalho do documento oficial.
-  osBarcodeEnabled Boolean  @default(true)
+  osBarcodeEnabled Boolean @default(true)
 
   // SerpAPI para Prospecção de Leads
   serpApiKey String?
@@ -830,6 +831,7 @@ model ServiceOrder {
   requestKey           String?
   ticketId             String?
   cdOstp               String?
+  cdDefeito            String?
   nmsuportet           String?
   defect               String? // Descrição do defeito relatado
   status               String    @default("PENDENTE") // PENDENTE, EM_ATENDIMENTO, AGUARDANDO_RETORNO, FINALIZADA
@@ -1026,6 +1028,21 @@ model CrmTechnician {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, name])
+}
+
+model CrmDefectType {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String // IXLOSDEFEITOTP.CDDEFEITO
+  name      String // IXLOSDEFEITOTP.NMDEFEITO
+  inactive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, inactive])
 }
 
 model BillingLog {

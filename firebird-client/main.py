@@ -46,7 +46,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.7"
+DEFAULT_AGENT_VERSION = "1.1.8"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -2297,6 +2297,14 @@ class FirebirdRepository:
         sql = "select NMSUPORTE, TFATIVO from IXLOSSUPORTE"
         yield from self._rows(sql, ())
 
+    def fetch_defect_types(self) -> Iterator[dict[str, Any]]:
+        sql = """
+            select CDDEFEITO, NMDEFEITO, TFINATIVO
+              from IXLOSDEFEITOTP
+             order by CDDEFEITO
+        """
+        yield from self._rows(sql, ())
+
     def fetch_service_order_print_data(self, seq_os: int) -> dict[str, Any]:
         """Read only the small Firebird snapshot required by the A4 form."""
         con = self.connect()
@@ -2540,6 +2548,11 @@ class FirebirdRepository:
                 status = "A" if official_profile else "E"
                 cd_status = "O" if official_profile else "E1"
                 cd_defeito = "1001" if official_profile else "MAN"
+                requested_defect_code = fit_text(data.get("cdDefeito", ""), 10)
+                if requested_defect_code and catalog_has(
+                    "IXLOSDEFEITOTP", "CDDEFEITO", requested_defect_code
+                ):
+                    cd_defeito = requested_defect_code
                 tf_liberado = "N" if official_profile else "S"
                 sql = sql_base.format(
                     tporcatend1_column="TPORCATEND1," if official_profile else "",
@@ -2859,6 +2872,14 @@ def normalize_technician(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def normalize_defect_type(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "code": str(record["cddefeito"]).strip(),
+        "name": str(record["nmdefeito"]).strip(),
+        "inactive": str(record.get("tfinativo") or "").strip().upper() in {"S", "SIM", "1", "TRUE"},
+    }
+
+
 def sync_static_entities(repo: FirebirdRepository, crm: CRMClient) -> None:
     try:
         logging.info("Sincronizando tipos de O.S...")
@@ -2872,8 +2893,14 @@ def sync_static_entities(repo: FirebirdRepository, crm: CRMClient) -> None:
         if techs:
             crm.push("technicians", techs)
             logging.info("Sincronizados %s técnicos.", len(techs))
+
+        logging.info("Sincronizando tipos de defeito...")
+        defect_types = [normalize_defect_type(row) for row in repo.fetch_defect_types()]
+        if defect_types:
+            crm.push("defectTypes", defect_types)
+            logging.info("Sincronizados %s tipos de defeito.", len(defect_types))
     except Exception as e:
-        logging.error("Falha ao sincronizar entidades estáticas (tipos/técnicos): %s", e)
+        logging.error("Falha ao sincronizar entidades estáticas (tipos/técnicos/defeitos): %s", e)
 
 
 def sync_company_profile(repo: FirebirdRepository, crm: CRMClient, config: AppConfig) -> None:

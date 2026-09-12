@@ -360,16 +360,16 @@ async function getOSList(req, res) {
 }
 
 async function createOS(req, res) {
-  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, nmsuportet } = req.body;
+  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet } = req.body;
   const { tenantId } = req.user;
 
   try {
-    if (!contactId || !equipmentId || !ticketId || !requestKey || !cdOstp || !String(defect || '').trim()) {
-      return res.status(400).json({ error: 'Cliente, equipamento, ticket, identificador, tipo e defeito são obrigatórios.' });
+    if (!contactId || !equipmentId || !ticketId || !requestKey || !cdOstp || !cdDefeito || !String(defect || '').trim()) {
+      return res.status(400).json({ error: 'Cliente, equipamento, ticket, identificador, tipo de O.S., tipo de defeito e relato são obrigatórios.' });
     }
     const normalizedRequestKey = String(requestKey).trim().slice(0, 120);
 
-    const [ticket, contact, equipment, osType] = await Promise.all([
+    const [ticket, contact, equipment, osType, defectType] = await Promise.all([
       prisma.ticket.findFirst({ where: { id: ticketId, tenantId } }),
       prisma.contact.findFirst({
         where: { id: contactId, tenantId },
@@ -377,6 +377,7 @@ async function createOS(req, res) {
       }),
       prisma.equipment.findFirst({ where: { id: equipmentId, tenantId } }),
       prisma.crmOsType.findFirst({ where: { tenantId, code: String(cdOstp) } }),
+      prisma.crmDefectType.findFirst({ where: { tenantId, code: String(cdDefeito), inactive: false } }),
     ]);
 
     if (!ticket || ticket.contactId !== contactId) {
@@ -387,6 +388,7 @@ async function createOS(req, res) {
       return res.status(400).json({ error: 'Vincule a conversa a um cliente do iLux antes de abrir a O.S.' });
     }
     if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
+    if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do iLux.' });
     if (equipment.externalSource !== 'firebird' || !equipment.externalId) {
       return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o iLux.' });
     }
@@ -463,6 +465,7 @@ async function createOS(req, res) {
           equipmentId,
           defect: String(defect).trim(),
           cdOstp: String(cdOstp),
+          cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
         },
         include: { contact: true, equipment: true },
@@ -485,6 +488,7 @@ async function createOS(req, res) {
           defect: String(defect).trim(),
           status: 'AGUARDANDO_ILUX',
           cdOstp: String(cdOstp),
+          cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
           externalSource: 'firebird',
           externalId: null,
@@ -564,6 +568,18 @@ async function getOSTechnicians(req, res) {
       orderBy: { name: 'asc' }
     });
     res.json(techs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function getOSDefectTypes(req, res) {
+  try {
+    const types = await prisma.crmDefectType.findMany({
+      where: { tenantId: req.user.tenantId, inactive: false },
+      orderBy: [{ name: 'asc' }, { code: 'asc' }],
+    });
+    res.json(types);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1838,4 +1854,4 @@ async function draftOS(req, res) {
   }
 }
 
-module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians };
+module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes };
