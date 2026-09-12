@@ -46,7 +46,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.6"
+DEFAULT_AGENT_VERSION = "1.1.7"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -2432,9 +2432,6 @@ class FirebirdRepository:
 
         data_prev_entrega = (now + timedelta(days=3)).strftime("%Y-%m-%d")
 
-        status = "E"  # Aberto
-        cd_status = "E1"  # Aberto
-
         defect = str(data.get("defect", "")).strip()
         nmsuportet = fit_text(data.get("nmsuportet", ""), 10)
         attendant_name = fit_text(data.get("attendantName", ""), 10)
@@ -2455,8 +2452,6 @@ class FirebirdRepository:
             cd_ostp,
             dt_inclusao,
             hr_inclusao,
-            status,
-            cd_status,
             defect,
             nmsuportet if nmsuportet else attendant_name,
             attendant_name,
@@ -2481,17 +2476,23 @@ class FirebirdRepository:
             fit_text(f"{now.strftime('%d/%m/%Y %H:%M:%S')} CA I", 25)
         )
 
-        sql = """
+        # Existem ao menos duas geracoes do schema de O.S. do iLux em campo.
+        # A mais nova possui TPORCATEND1 e usa os codigos de integracao
+        # CDSTATUS=O / CDDEFEITO=1001; bases legadas (como a nossa de
+        # homologacao) nao possuem a coluna e usam E1 / MAN. A deteccao e
+        # feita na mesma conexao da gravacao para nunca enviar uma coluna ou
+        # um codigo que nao exista naquela instalacao.
+        sql_base = """
                 insert into IXLOS (
                     SEQOS, CDCLIENTE, CDCLIENTEENT, CDEQUIPAMENTO, CDOSTP, DTINCLUSAO, HRINCLUSAO, STATUS, CDSTATUS, OBSDEFEITOCLI, NMSUPORTET, NMSUPORTEA,
                     NMCLIENTE, ENDERECO, NUM, COMPLEMENTO, BAIRRO, CIDADE, UF, CEP, DDD, FONE, CELULAR, EMAIL, CONTATO,
-                    DEPARTAMENTO, LOCALINSTAL, DTPREVENTREGA, HRPREVENTREGA, CDEMPRESA, TPORCATEND, TPCHAMADO, CDTERRITORIO, EQUIPCLI, STATUSEQUIP,
+                    DEPARTAMENTO, LOCALINSTAL, DTPREVENTREGA, HRPREVENTREGA, CDEMPRESA, TPORCATEND, {tporcatend1_column} TPCHAMADO, CDTERRITORIO, EQUIPCLI, STATUSEQUIP,
                     SEQOSORIGEM, TIPO_OS, TFLIBERADO, CDDEFEITO, PRIORIDADE, ATUALIZADO, FORMULARIOOS, SEQOSCLI, NMSUPORTEL, NR_CAU, NR_RP
                 ) values (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, 1, 'A', '1', 'GERAL', 'E', '0',
-                    -1, '1', 'S', 'MAN', '24', ?, '', '', '', '', ''
+                    ?, ?, ?, ?, 1, 'A', {tporcatend1_value} ?, 'GERAL', 'E', '0',
+                    -1, ?, ?, ?, '24', ?, '', '', '', '', ''
                 )
             """
 
@@ -2502,13 +2503,62 @@ class FirebirdRepository:
             con = self.connect()
             try:
                 cur = con.cursor()
+                cur.execute(
+                    "select count(*) from rdb$relation_fields "
+                    "where rdb$relation_name = 'IXLOS' "
+                    "and rdb$field_name = 'TPORCATEND1'"
+                )
+                supports_official_column = bool(cur.fetchone()[0])
+
+                def catalog_has(table: str, field: str, value: str) -> bool:
+                    cur.execute(f"select count(*) from {table} where {field} = ?", (value,))
+                    return bool(cur.fetchone()[0])
+
+                supports_official_codes = (
+                    catalog_has("IXLOSSTATUS", "CDSTATUS", "O")
+                    and catalog_has("IXLOSDEFEITOTP", "CDDEFEITO", "1001")
+                )
+                official_profile = supports_official_column and supports_official_codes
+                logging.info(
+                    "Perfil de abertura de O.S. detectado: %s (TPORCATEND1=%s, codigos oficiais=%s)",
+                    "oficial" if official_profile else "legado",
+                    "sim" if supports_official_column else "nao",
+                    "sim" if supports_official_codes else "nao",
+                )
+
+                cur.execute(
+                    "select TIPO_OS, TPCHAMADO from IXLOSTP where CDOSTP = ?",
+                    (cd_ostp,),
+                )
+                os_type_row = cur.fetchone()
+                tipo_os = int(os_type_row[0]) if os_type_row and os_type_row[0] is not None else 1
+                tp_chamado = fit_text(
+                    os_type_row[1] if os_type_row and os_type_row[1] is not None else "1",
+                    1,
+                )
+
+                status = "A" if official_profile else "E"
+                cd_status = "O" if official_profile else "E1"
+                cd_defeito = "1001" if official_profile else "MAN"
+                tf_liberado = "N" if official_profile else "S"
+                sql = sql_base.format(
+                    tporcatend1_column="TPORCATEND1," if official_profile else "",
+                    tporcatend1_value="'A'," if official_profile else "",
+                )
+
                 cur.execute("SELECT COALESCE(MAX(SEQOS), 0) + 1 FROM IXLOS")
                 row = cur.fetchone()
                 if not row or row[0] is None:
                     raise RuntimeError("Nao foi possivel consultar o proximo SEQOS.")
                 seq_os = int(row[0])
                 logging.info("Inserindo com o proximo SEQOS livre: %s", seq_os)
-                cur.execute(sql, (seq_os,) + params)
+                dynamic_params = (
+                    params[:6]
+                    + (status, cd_status)
+                    + params[6:-1]
+                    + (tp_chamado, tipo_os, tf_liberado, cd_defeito, params[-1])
+                )
+                cur.execute(sql, (seq_os,) + dynamic_params)
                 con.commit()
                 return seq_os
             except Exception as exc:
