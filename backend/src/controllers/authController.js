@@ -83,6 +83,17 @@ async function me(req, res) {
     },
   });
   if (!user) return res.status(404).json({ error: 'Usuario nao encontrado' });
+  if (req.user.supportMode) {
+    const targetTenant = await prisma.tenant.findUnique({
+      where: { id: req.user.tenantId },
+      select: { id: true, name: true, slug: true, primaryColor: true, logoUrl: true },
+    });
+    if (!targetTenant) return res.status(404).json({ error: 'Empresa de suporte não encontrada' });
+    user.tenantId = targetTenant.id;
+    user.tenant = targetTenant;
+    user.supportMode = true;
+    user.supportSessionId = req.user.supportSessionId;
+  }
   const access = resolveUserAccess(user);
   res.json({
     ...user,

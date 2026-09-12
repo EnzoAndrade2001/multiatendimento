@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Building2, Copy, KeyRound, MessageSquare, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
+import { Activity, Building2, Copy, KeyRound, LogIn, MessageSquare, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   getTenants, createTenant, updateTenant, uploadFile, getMediaUrl,
   getTenantUsers, createTenantUser, updateTenantUser, getFirebirdAgents,
+  startSupportSession,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -51,6 +52,25 @@ export default function SuperAdmin() {
       toast.error(e.response?.data?.error || 'Não foi possível carregar as empresas. Verifique sua conexão ou permissão de acesso.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function accessAsSupport(tenant) {
+    const reason = window.prompt(`Motivo do acesso técnico à empresa ${tenant.name}:`);
+    if (!reason) return;
+    if (reason.trim().length < 5) return toast.error('Informe um motivo com pelo menos 5 caracteres.');
+    try {
+      const masterToken = localStorage.getItem('token');
+      const { data } = await startSupportSession(tenant.id, reason.trim());
+      localStorage.setItem('supportMasterToken', masterToken);
+      localStorage.setItem('supportMasterTenantId', localStorage.getItem('tenantId') || '');
+      localStorage.setItem('supportMasterTenantName', localStorage.getItem('tenantName') || '');
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('tenantId', tenant.id);
+      localStorage.setItem('tenantName', tenant.name);
+      window.location.assign('/dashboard');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível iniciar a sessão de suporte.');
     }
   }
 
@@ -334,6 +354,9 @@ export default function SuperAdmin() {
                   </td>
                   <td style={{ ...s.td, textAlign: 'right' }}>
                     <div style={s.actions}>
+                      <button style={s.iconBtn} onClick={() => accessAsSupport(tenant)} title={`Acessar ${tenant.name} como suporte`}>
+                        <LogIn size={16} />
+                      </button>
                       <button style={s.iconBtn} onClick={() => setUsersModal(tenant)} title={`Logins de ${tenant.name}`}>
                         <KeyRound size={16} />
                       </button>

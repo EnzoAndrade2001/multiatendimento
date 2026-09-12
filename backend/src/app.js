@@ -276,10 +276,28 @@ io.use(async (socket, next) => {
       },
     });
     if (!user || !user.active || !user.tenant?.active) return next(new Error('Usuario inativo'));
+    let effectiveTenantId = user.tenantId;
+    let supportMode = false;
+    if (decoded.supportTenantId && decoded.supportSessionId && user.role === 'superadmin') {
+      const session = await prisma.supportAccessSession.findFirst({
+        where: {
+          id: decoded.supportSessionId,
+          actorUserId: user.id,
+          targetTenantId: decoded.supportTenantId,
+          endedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        include: { targetTenant: { select: { active: true } } },
+      });
+      if (!session?.targetTenant?.active) return next(new Error('Sessão de suporte expirada'));
+      effectiveTenantId = decoded.supportTenantId;
+      supportMode = true;
+    }
     const access = resolveUserAccess(user);
     socket.user = {
-      userId: user.id, tenantId: user.tenantId, role: user.role,
+      userId: user.id, tenantId: effectiveTenantId, role: user.role,
       accessProfile: access.profile, permissions: access.permissions,
+      supportMode,
     };
     next();
   } catch (err) {
@@ -299,9 +317,11 @@ io.on('connection', (socket) => {
     console.warn(`[socket] falha ao carregar salas internas: ${error.message}`);
   });
 
-  if (!onlineUsersByTenant.has(tenantId)) onlineUsersByTenant.set(tenantId, new Map());
-  changeCounter(onlineUsersByTenant.get(tenantId), userId, 1);
-  emitInternalPresence(tenantId);
+  if (!socket.user.supportMode) {
+    if (!onlineUsersByTenant.has(tenantId)) onlineUsersByTenant.set(tenantId, new Map());
+    changeCounter(onlineUsersByTenant.get(tenantId), userId, 1);
+    emitInternalPresence(tenantId);
+  }
 
   socket.on('internal_viewing', ({ peerId } = {}) => {
     if (!hasPermission(socket.user, 'internal_chat.view')) return;
@@ -322,7 +342,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     leaveInternalConversation(socket);
-    const onlineUsers = onlineUsersByTenant.get(tenantId);
+    const onlineUsers = socket.user.supportMode ? null : onlineUsersByTenant.get(tenantId);
     if (onlineUsers) {
       changeCounter(onlineUsers, userId, -1);
       if (!onlineUsers.size) onlineUsersByTenant.delete(tenantId);

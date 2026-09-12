@@ -1,5 +1,7 @@
 const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { queueAuditEvent } = require('../services/auditEventService');
 const { readReleaseManifest } = require('./agentController');
 const { isOutdated } = require('../utils/agentVersion');
 
@@ -8,7 +10,7 @@ const { isOutdated } = require('../utils/agentVersion');
 const AGENT_STALE_AFTER_MS = 10 * 60 * 1000;
 
 function denySuperadmin(req, res) {
-  if (req.user.role !== 'superadmin') {
+  if (req.user.role !== 'superadmin' || req.user.supportMode) {
     res.status(403).json({ error: 'Acesso negado' });
     return true;
   }
@@ -155,6 +157,53 @@ async function updateTenant(req, res) {
   res.json(tenant);
 }
 
+async function startSupportSession(req, res) {
+  if (denySuperadmin(req, res)) return;
+  if (req.user.supportMode) return res.status(409).json({ error: 'Encerre a sessão de suporte atual antes de acessar outra empresa.' });
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 5) return res.status(400).json({ error: 'Informe o motivo do acesso técnico.' });
+  const tenant = await prisma.tenant.findFirst({
+    where: { id: req.params.id, active: true },
+    select: { id: true, name: true, slug: true },
+  });
+  if (!tenant) return res.status(404).json({ error: 'Empresa ativa não encontrada.' });
+
+  const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const session = await prisma.supportAccessSession.create({
+    data: {
+      actorUserId: req.user.userId,
+      targetTenantId: tenant.id,
+      reason: reason.slice(0, 500),
+      expiresAt,
+      ipAddress: req.ip || null,
+      userAgent: String(req.get('user-agent') || '').slice(0, 500) || null,
+    },
+  });
+  queueAuditEvent({ req, user: req.user, tenantId: tenant.id }, {
+    action: 'SUPPORT_SESSION_STARTED', resourceType: 'support_session', resourceId: session.id,
+    metadata: { reason: session.reason, expiresAt: expiresAt.toISOString() },
+  });
+  const token = jwt.sign({
+    userId: req.user.userId,
+    supportTenantId: tenant.id,
+    supportSessionId: session.id,
+  }, process.env.JWT_SECRET, { expiresIn: '2h' });
+  res.json({ token, tenant, expiresAt, supportSessionId: session.id });
+}
+
+async function endSupportSession(req, res) {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Acesso negado' });
+  if (!req.user.supportMode || !req.user.supportSessionId) return res.status(400).json({ error: 'Nenhuma sessão de suporte ativa.' });
+  await prisma.supportAccessSession.updateMany({
+    where: { id: req.user.supportSessionId, actorUserId: req.user.userId, endedAt: null },
+    data: { endedAt: new Date() },
+  });
+  queueAuditEvent({ req, user: req.user }, {
+    action: 'SUPPORT_SESSION_ENDED', resourceType: 'support_session', resourceId: req.user.supportSessionId,
+  });
+  res.json({ ok: true });
+}
+
 async function listTenantUsers(req, res) {
   if (denySuperadmin(req, res)) return;
   const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, slug: true, maxUsers: true } });
@@ -286,4 +335,5 @@ module.exports = {
   listTenants, createTenant, updateTenant,
   listTenantUsers, createTenantUser, updateTenantUser,
   listFirebirdAgents,
+  startSupportSession, endSupportSession,
 };

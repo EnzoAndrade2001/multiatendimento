@@ -30,7 +30,7 @@ import {
   LayoutGrid,
   AlertTriangle,
 } from 'lucide-react';
-import { getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
+import { endSupportSession, getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ToastContainer from './ToastContainer';
@@ -108,6 +108,19 @@ export default function Layout() {
   function logout() {
     localStorage.clear();
     navigate('/login');
+  }
+
+  async function leaveSupportMode() {
+    const masterToken = localStorage.getItem('supportMasterToken');
+    if (!masterToken) return logout();
+    try { await endSupportSession(); } catch { /* a restauração local continua segura */ }
+    localStorage.setItem('token', masterToken);
+    localStorage.setItem('tenantId', localStorage.getItem('supportMasterTenantId') || '');
+    localStorage.setItem('tenantName', localStorage.getItem('supportMasterTenantName') || '');
+    localStorage.removeItem('supportMasterToken');
+    localStorage.removeItem('supportMasterTenantId');
+    localStorage.removeItem('supportMasterTenantName');
+    window.location.assign('/superadmin');
   }
 
   React.useEffect(() => {
@@ -525,6 +538,16 @@ export default function Layout() {
           ) : null}
         </div>
       </nav>
+
+      {currentUser?.supportMode ? (
+        <div style={{ background: '#5b21b6', color: '#fff', padding: '0.55rem 1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', fontWeight: 700, zIndex: 95 }}>
+          <ShieldCheck size={16} />
+          Modo suporte: {tenant?.name}
+          <button type="button" onClick={leaveSupportMode} style={{ border: '1px solid rgba(255,255,255,.7)', borderRadius: 8, background: 'transparent', color: '#fff', padding: '0.3rem 0.65rem', cursor: 'pointer', fontWeight: 700 }}>
+            Encerrar e voltar
+          </button>
+        </div>
+      ) : null}
 
       {(unstableInstances.length > 0 || degradedInstances.length > 0) && (
         <div className="layout-health-banner" style={{

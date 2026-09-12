@@ -240,6 +240,8 @@ export const updateTenant = (id, data) => api.patch(`/superadmin/tenants/${id}`,
 export const getTenantUsers = (id) => api.get(`/superadmin/tenants/${id}/users`);
 export const createTenantUser = (id, data) => api.post(`/superadmin/tenants/${id}/users`, data);
 export const updateTenantUser = (id, userId, data) => api.patch(`/superadmin/tenants/${id}/users/${userId}`, data);
+export const startSupportSession = (id, reason) => api.post(`/superadmin/tenants/${id}/support-session`, { reason });
+export const endSupportSession = () => api.post('/superadmin/support-session/end');
 
 // Quick Responses
 export const getQuickResponses = (params = {}) => api.get('/quick-responses', { params });

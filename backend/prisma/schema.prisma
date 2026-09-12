@@ -46,6 +46,7 @@ model Tenant {
   crmOsTypes                 CrmOsType[]
   crmTechnicians             CrmTechnician[]
   crmDefectTypes             CrmDefectType[]
+  supportAccessSessions      SupportAccessSession[]
   billingLogs                BillingLog[]
   revenueSnapshots           RevenueSnapshot[]
   userTicketStates           UserTicketState[]
@@ -228,6 +229,7 @@ model User {
   quickResponses             QuickResponse[]             @relation("QuickResponseOwner")
   quickResponseAudits        QuickResponseAudit[]
   auditEvents                AuditEvent[]                @relation("AuditEventActor")
+  supportAccessSessions      SupportAccessSession[]      @relation("SupportAccessActor")
 
   @@unique([tenantId, email])
 }
@@ -1111,6 +1113,25 @@ model AuditEvent {
   @@index([tenantId, action, createdAt])
   @@index([tenantId, resourceType, resourceId, createdAt])
   @@index([tenantId, requestId])
+}
+
+model SupportAccessSession {
+  id             String    @id @default(cuid())
+  actorUserId    String
+  targetTenantId String
+  reason         String
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  endedAt        DateTime?
+
+  actor        User   @relation("SupportAccessActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  targetTenant Tenant @relation(fields: [targetTenantId], references: [id], onDelete: Cascade)
+
+  @@index([actorUserId, createdAt])
+  @@index([targetTenantId, createdAt])
+  @@index([expiresAt, endedAt])
 }
 
 model PrivacyRetentionPolicy {
