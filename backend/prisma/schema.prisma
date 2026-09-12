@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Tenant {
+  maxConcurrentSessions      Int?
   id                         String                      @id @default(cuid())
   name                       String
   slug                       String                      @unique
@@ -17,6 +18,16 @@ model Tenant {
   maxUsers                   Int                         @default(5)
   primaryColor               String?                     @default("#D4AF37")
   logoUrl                    String?
+  lifecycleStatus            String                      @default("active") // implementation, trial, active, suspended, cancelled
+  financialStatus            String                      @default("current") // current, overdue, blocked, cancelled
+  contractNumber             String?
+  contractStartedAt          DateTime?
+  contractEndsAt             DateTime?
+  trialEndsAt                DateTime?
+  nextBillingAt              DateTime?
+  customMonthlyPriceCents    Int?
+  discountPercent            Float?
+  commercialNotes            String?                     @db.Text
   createdAt                  DateTime                    @default(now())
   contacts                   Contact[]
   quickResponses             QuickResponse[]
@@ -71,6 +82,11 @@ model Tenant {
   waInstanceHealthEvents     WaInstanceHealthEvent[]
   firebirdAgents             FirebirdAgent[]
   featureOverrides           TenantFeatureOverride[]
+  deploymentChecklistItems   DeploymentChecklistItem[]
+  agentVersionActions        AgentVersionAction[]
+
+  @@index([lifecycleStatus])
+  @@index([financialStatus])
 }
 
 model Feature {
@@ -232,7 +248,7 @@ model TenantSettings {
 // aqui isso deixa de ser descartado. Alimenta a visão de frota e o alerta de
 // "agente desatualizado" comparando `version` com o release.json publicado.
 model FirebirdAgent {
-  id              String   @id @default(cuid())
+  id              String               @id @default(cuid())
   tenantId        String
   installId       String
   hostname        String?
@@ -243,15 +259,58 @@ model FirebirdAgent {
   processId       Int?
   healthStatus    String? // health.status reportado pelo agente (ex.: "online")
   lastPingIp      String?
-  firstSeenAt     DateTime @default(now())
-  lastSeenAt      DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @default(now()) @updatedAt
+  firstSeenAt     DateTime             @default(now())
+  lastSeenAt      DateTime             @default(now())
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @default(now()) @updatedAt
+  releaseChannel  String               @default("stable")
+  compatibility   Json?
+  desiredVersion  String?
+  versionActions  AgentVersionAction[]
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, installId])
   @@index([tenantId, lastSeenAt])
+}
+
+model AgentVersionAction {
+  id              String        @id @default(cuid())
+  tenantId        String
+  firebirdAgentId String
+  action          String
+  channel         String        @default("stable")
+  fromVersion     String?
+  targetVersion   String
+  status          String        @default("pending")
+  requestedById   String
+  reason          String?
+  error           String?
+  createdAt       DateTime      @default(now())
+  completedAt     DateTime?
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent           FirebirdAgent @relation(fields: [firebirdAgentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([firebirdAgentId, createdAt])
+}
+
+model DeploymentChecklistItem {
+  id          String    @id @default(cuid())
+  tenantId    String
+  itemKey     String
+  label       String
+  category    String
+  status      String    @default("pending")
+  notes       String?
+  updatedById String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, itemKey])
+  @@index([tenantId, category, status])
 }
 
 model User {
@@ -270,6 +329,11 @@ model User {
   firebirdSupportName        String?
   avatarUrl                  String?
   active                     Boolean                     @default(true)
+  maxConcurrentSessions      Int?
+  totpSecretCipher           String?
+  totpPendingSecretCipher    String?
+  totpEnabledAt              DateTime?
+  totpRecoveryCodes          Json?
   createdAt                  DateTime                    @default(now())
   messages                   Message[]
   sentInternalMessages       InternalMessage[]           @relation("InternalSender")
@@ -289,8 +353,28 @@ model User {
   quickResponseAudits        QuickResponseAudit[]
   auditEvents                AuditEvent[]                @relation("AuditEventActor")
   supportAccessSessions      SupportAccessSession[]      @relation("SupportAccessActor")
+  authSessions               AuthSession[]
 
   @@unique([tenantId, email])
+}
+
+model AuthSession {
+  id           String    @id @default(cuid())
+  userId       String
+  tenantId     String
+  deviceName   String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  revokeReason String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([tenantId, createdAt])
 }
 
 // Técnicos de campo podem usar o assistente técnico pelo WhatsApp sem possuir

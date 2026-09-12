@@ -3,6 +3,7 @@ const evolution = require('../services/evolutionService');
 const metaCloudApi = require('../services/metaCloudApiService');
 const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
 const { syncMissedMessages } = require('../services/syncMissedMessagesService');
+const { assertTenantLimit } = require('../services/tenantLimitService');
 
 async function getSettings(tenantId) {
   const s = await prisma.tenantSettings.findUnique({ where: { tenantId } });
@@ -143,8 +144,9 @@ async function create(req, res) {
     // Verifica limite do plano
     const tenant = await prisma.tenant.findUnique({ where: { id: req.user.tenantId } });
     const count = await prisma.waInstance.count({ where: { tenantId: req.user.tenantId } });
+    const connectionLimit = await assertTenantLimit({ tenantId: req.user.tenantId, limitKey: 'maxConnections', currentUsage: count });
     
-    if (count >= tenant.maxConnections) {
+    if (!connectionLimit.allowed) {
       return res.status(403).json({ 
         error: `Limite de conexões atingido (${tenant.maxConnections}). Faça um upgrade para adicionar mais números.` 
       });

@@ -80,8 +80,8 @@ api.interceptors.request.use((config) => {
 });
 
 // Auth
-export const login = (email, password, slug) => api.post('/auth/login', { email, password, slug });
-export const supportLogin = (email, password) => api.post('/auth/support-login', { email, password });
+export const login = (email, password, slug, secondFactor = '') => api.post('/auth/login', { email, password, slug, totpCode: secondFactor, recoveryCode: secondFactor });
+export const supportLogin = (email, password, secondFactor = '') => api.post('/auth/support-login', { email, password, totpCode: secondFactor, recoveryCode: secondFactor });
 export const getMe = () => api.get('/auth/me');
 export const updateProfile = (data) => api.patch('/auth/profile', data);
 export const uploadProfileAvatar = (file) => {
@@ -236,6 +236,9 @@ export const getStats = () => api.get('/dashboard/stats');
 // SuperAdmin
 export const getTenants = () => api.get('/superadmin/tenants');
 export const getFirebirdAgents = () => api.get('/superadmin/firebird-agents');
+export const requestAgentVersion = (agentId, data) => api.post(`/superadmin/agent-operations/${agentId}/version`, data);
+export const getDeploymentChecklist = (tenantId) => api.get(`/superadmin/tenants/${tenantId}/deployment-checklist`);
+export const updateDeploymentChecklistItem = (tenantId, itemId, data) => api.patch(`/superadmin/tenants/${tenantId}/deployment-checklist/${itemId}`, data);
 export const createTenant = (data) => api.post('/superadmin/tenants', data);
 export const updateTenant = (id, data) => api.patch(`/superadmin/tenants/${id}`, data);
 export const getTenantUsers = (id) => api.get(`/superadmin/tenants/${id}/users`);
@@ -250,6 +253,14 @@ export const updateProductPlanFeatures = (planId, features) => api.put(`/superad
 export const getSupportUsers = () => api.get('/superadmin/support-users');
 export const createSupportUser = (data) => api.post('/superadmin/support-users', data);
 export const updateSupportUser = (id, data) => api.patch(`/superadmin/support-users/${id}`, data);
+export const getSupportAudit = (params = {}) => api.get('/superadmin/support-sessions', { params });
+export const revokeSupportAccess = (id) => api.delete(`/superadmin/support-sessions/${id}`);
+export const getAuthSessions = () => api.get('/auth/sessions');
+export const revokeAuthSession = (id) => api.delete(`/auth/sessions/${id}`);
+export const setupTwoFactor = () => api.post('/auth/2fa/setup');
+export const confirmTwoFactor = (code) => api.post('/auth/2fa/confirm', { code });
+export const disableTwoFactor = (password) => api.delete('/auth/2fa', { data: { password } });
+export const updateTenantCommercial = (id, data) => api.patch(`/superadmin/tenants/${id}/commercial`, data);
 export const getCurrentEntitlements = () => api.get('/entitlements/me');
 export const endSupportSession = () => api.post('/superadmin/support-session/end');
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Building2, Copy, KeyRound, LogIn, MessageSquare, PackageCheck, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
+import { Activity, Building2, ClipboardCheck, Copy, KeyRound, LogIn, MessageSquare, PackageCheck, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   getTenants, createTenant, updateTenant, uploadFile, getMediaUrl,
@@ -8,6 +8,9 @@ import {
   getFeatureCatalog, getTenantEntitlements, updateTenantEntitlements,
   updateProductPlan, updateProductPlanFeatures,
   getSupportUsers, createSupportUser, updateSupportUser,
+  getDeploymentChecklist, updateDeploymentChecklistItem, requestAgentVersion,
+  getSupportAudit, revokeSupportAccess, getAuthSessions, revokeAuthSession, setupTwoFactor, confirmTwoFactor,
+  updateTenantCommercial,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -37,9 +40,12 @@ export default function SuperAdmin() {
   const [fbAgents, setFbAgents] = useState(null);
   const [featureCatalog, setFeatureCatalog] = useState({ features: [], plans: [] });
   const [entitlementsModal, setEntitlementsModal] = useState(null);
+  const [checklistModal, setChecklistModal] = useState(null);
   const [plansModal, setPlansModal] = useState(false);
   const [supportUsers, setSupportUsers] = useState([]);
   const [supportModal, setSupportModal] = useState(false);
+  const [auditModal, setAuditModal] = useState(false);
+  const [securityModal, setSecurityModal] = useState(false);
   const isManager = (localStorage.getItem('supportLevel') || 'manager') === 'manager';
 
   useEffect(() => {
@@ -102,9 +108,12 @@ export default function SuperAdmin() {
         logoUrl: tenant.logoUrl || '',
         maxConnections: tenant.maxConnections || 1,
         maxUsers: tenant.maxUsers || 5,
+        maxConcurrentSessions: tenant.maxConcurrentSessions ?? '',
         adminName: '',
         adminEmail: '',
         adminPassword: '',
+        lifecycleStatus: tenant.lifecycleStatus || 'active', financialStatus: tenant.financialStatus || 'current',
+        contractNumber: tenant.contractNumber || '', customMonthlyPriceCents: tenant.customMonthlyPriceCents || '', discountPercent: tenant.discountPercent || 0,
       });
       return;
     }
@@ -118,6 +127,7 @@ export default function SuperAdmin() {
       logoUrl: '',
       maxConnections: 1,
       maxUsers: 5,
+      maxConcurrentSessions: '',
       adminName: '',
       adminEmail: '',
       adminPassword: '',
@@ -139,6 +149,7 @@ export default function SuperAdmin() {
         toast.success(`Empresa criada. Login em /${form.slug}/login com ${form.adminEmail.trim().toLowerCase()}.`);
       } else {
         await updateTenant(modal.id, form);
+        await updateTenantCommercial(modal.id, { lifecycleStatus: form.lifecycleStatus, financialStatus: form.financialStatus, contractNumber: form.contractNumber || null, customMonthlyPriceCents: form.customMonthlyPriceCents === '' ? null : Number(form.customMonthlyPriceCents), discountPercent: Number(form.discountPercent || 0) });
       }
       setModal(null);
       load();
@@ -211,6 +222,21 @@ export default function SuperAdmin() {
     }),
     [tenants, featureCatalog.plans]
   );
+  const operationalAlerts = useMemo(() => {
+    const alerts = [];
+    for (const agent of fbAgents?.agents || []) {
+      if (!agent.online) alerts.push({ key: `agent-offline-${agent.id}`, severity: 'critical', title: 'Agente iLux offline', detail: `${agent.tenantName || 'Empresa'} · ${agent.hostname || agent.installId}` });
+      else if (agent.updateAvailable) alerts.push({ key: `agent-version-${agent.id}`, severity: 'warning', title: 'Agente desatualizado', detail: `${agent.tenantName || 'Empresa'} · versão ${agent.version || 'desconhecida'}` });
+    }
+    for (const tenant of tenants) {
+      const usedUsers = tenant.metrics?.activeUsers || 0;
+      const usedConnections = tenant._count?.instances || 0;
+      if (tenant.maxUsers && usedUsers >= tenant.maxUsers) alerts.push({ key: `users-${tenant.id}`, severity: 'warning', title: 'Limite de usuários atingido', detail: `${tenant.name} · ${usedUsers}/${tenant.maxUsers}` });
+      if (tenant.maxConnections && usedConnections >= tenant.maxConnections) alerts.push({ key: `connections-${tenant.id}`, severity: 'warning', title: 'Limite de conexões atingido', detail: `${tenant.name} · ${usedConnections}/${tenant.maxConnections}` });
+      if ((tenant.metrics?.connectedInstances || 0) < usedConnections) alerts.push({ key: `whatsapp-${tenant.id}`, severity: 'critical', title: 'Conexão WhatsApp indisponível', detail: `${tenant.name} · ${tenant.metrics?.connectedInstances || 0}/${usedConnections} conectadas` });
+    }
+    return alerts;
+  }, [tenants, fbAgents]);
 
   // "há 2h", "há 5 dias"... usado tanto na coluna de atividade quanto na
   // idade da empresa (createdAt), sem depender de nenhuma lib de datas.
@@ -238,6 +264,8 @@ export default function SuperAdmin() {
         title="Gestao SaaS"
         subtitle="Gerencie empresas, planos e limites da plataforma a partir de uma camada administrativa unica."
         actions={<div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <ActionButton variant="secondary" onClick={() => setSecurityModal(true)}><KeyRound size={18} /> Segurança</ActionButton>
+          <ActionButton variant="secondary" onClick={() => setAuditModal(true)}><ClipboardCheck size={18} /> Auditoria</ActionButton>
           {isManager && <ActionButton variant="secondary" onClick={() => setSupportModal(true)}><Users size={18} /> Equipe de suporte</ActionButton>}
           {isManager && <ActionButton variant="secondary" onClick={() => setPlansModal(true)}><PackageCheck size={18} /> Editar planos</ActionButton>}
           {isManager && <ActionButton onClick={() => openModal()}><Plus size={18} /> Nova empresa</ActionButton>}
@@ -286,6 +314,11 @@ export default function SuperAdmin() {
           <div style={s.statLabel}>Conversas abertas agora</div>
         </SurfaceCard>
       </div>
+
+      <SurfaceCard style={{ ...s.tableCard, marginBottom: 'var(--space-5)' }}>
+        <div style={s.agentFleetHeader}><div><div style={s.agentFleetTitle}><Activity size={16} /> Central de alertas</div><div style={s.agentFleetMeta}>{operationalAlerts.length ? `${operationalAlerts.length} ponto(s) exigem atenção` : 'Nenhum alerta operacional agora'}</div></div></div>
+        {operationalAlerts.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--space-2)', padding: 'var(--space-4)' }}>{operationalAlerts.map((alert) => <div key={alert.key} style={{ ...s.entitlementItem, borderColor: alert.severity === 'critical' ? 'var(--danger)' : 'var(--warning)' }}><span><strong>{alert.title}</strong><small style={s.entitlementDescription}>{alert.detail}</small></span><span style={{ ...s.badge, color: alert.severity === 'critical' ? 'var(--danger)' : 'var(--warning-text)' }}>{alert.severity === 'critical' ? 'Crítico' : 'Atenção'}</span></div>)}</div>}
+      </SurfaceCard>
 
       <SurfaceCard style={s.tableCard}>
         {loading ? (
@@ -393,6 +426,7 @@ export default function SuperAdmin() {
                       {isManager && <button style={s.iconBtn} onClick={() => setEntitlementsModal(tenant)} title={`Plano e recursos de ${tenant.name}`}>
                         <PackageCheck size={16} />
                       </button>}
+                      <button style={s.iconBtn} onClick={() => setChecklistModal(tenant)} title={`Checklist de implantação de ${tenant.name}`}><ClipboardCheck size={16} /></button>
                       {isManager && <button style={s.iconBtn} onClick={() => openModal(tenant)} title="Editar empresa">
                         <Pencil size={16} />
                       </button>}
@@ -490,6 +524,12 @@ export default function SuperAdmin() {
                           ⚠ desatualizado
                         </span>
                       )}
+                      {isManager && agent.identified ? <button style={s.inlineIconBtn} title="Solicitar atualização controlada" onClick={async () => {
+                        const targetVersion = window.prompt('Versão de destino:', fbAgents.latestVersion || '');
+                        if (!targetVersion) return;
+                        try { await requestAgentVersion(agent.id, { action: 'update', channel: 'stable', targetVersion, reason: 'Atualização pela Central de Suporte' }); toast.success('Atualização registrada na fila controlada.'); }
+                        catch (error) { toast.error(error.response?.data?.error || 'Falha ao solicitar atualização.'); }
+                      }}><RotateCw size={14} /></button> : null}
                     </div>
                   </td>
                 </tr>
@@ -570,6 +610,19 @@ export default function SuperAdmin() {
               </div>
             </div>
 
+            {modal !== 'new' && <>
+              <div style={s.twoCols}>
+                <div style={s.field}><label style={s.label}>Ciclo da empresa</label><select style={s.input} value={form.lifecycleStatus} onChange={(e) => setForm({ ...form, lifecycleStatus: e.target.value })}><option value="implementation">Implantação</option><option value="trial">Teste</option><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="cancelled">Cancelada</option></select></div>
+                <div style={s.field}><label style={s.label}>Situação financeira</label><select style={s.input} value={form.financialStatus} onChange={(e) => setForm({ ...form, financialStatus: e.target.value })}><option value="current">Regular</option><option value="overdue">Vencida</option><option value="blocked">Bloqueada</option><option value="cancelled">Cancelada</option></select></div>
+              </div>
+              <div style={s.twoCols}>
+                <div style={s.field}><label style={s.label}>Número do contrato</label><input style={s.input} value={form.contractNumber} onChange={(e) => setForm({ ...form, contractNumber: e.target.value })} /></div>
+                <div style={s.field}><label style={s.label}>Valor personalizado (centavos)</label><input type="number" min="0" style={s.input} value={form.customMonthlyPriceCents} onChange={(e) => setForm({ ...form, customMonthlyPriceCents: e.target.value })} /></div>
+              </div>
+              <div style={s.field}><label style={s.label}>Desconto (%)</label><input type="number" min="0" max="100" step="0.01" style={s.input} value={form.discountPercent} onChange={(e) => setForm({ ...form, discountPercent: e.target.value })} /></div>
+              <div style={s.field}><label style={s.label}>Acessos simultâneos por usuário</label><input type="number" min="1" style={s.input} value={form.maxConcurrentSessions} onChange={(e) => setForm({ ...form, maxConcurrentSessions: e.target.value })} placeholder="Sem limite" /><span style={s.companyMeta}>Vazio mantém acesso ilimitado. Use 1 para impedir compartilhamento simultâneo.</span></div>
+            </>}
+
             <div style={s.field}>
               <label style={s.label}>Logotipo (URL ou upload)</label>
               <div style={s.logoRow}>
@@ -612,8 +665,56 @@ export default function SuperAdmin() {
       ) : null}
       {plansModal ? <PlansModal catalog={featureCatalog} onClose={() => setPlansModal(false)} onChanged={load} /> : null}
       {supportModal ? <SupportUsersModal users={supportUsers} onClose={() => setSupportModal(false)} onChanged={load} /> : null}
+      {checklistModal ? <DeploymentChecklistModal tenant={checklistModal} onClose={() => setChecklistModal(null)} /> : null}
+      {auditModal ? <SupportAuditModal onClose={() => setAuditModal(false)} /> : null}
+      {securityModal ? <SecurityModal onClose={() => setSecurityModal(false)} /> : null}
     </div>
   );
+}
+
+function SupportAuditModal({ onClose }) {
+  const [rows, setRows] = useState(null);
+  const loadRows = () => getSupportAudit().then(({ data }) => setRows(data || [])).catch(() => toast.error('Falha ao carregar auditoria.'));
+  useEffect(loadRows, []);
+  async function revoke(row) { try { await revokeSupportAccess(row.id); await loadRows(); } catch (error) { toast.error(error.response?.data?.error || 'Falha ao encerrar acesso.'); } }
+  return <ModalShell kicker="Rastreabilidade" title="Auditoria de acessos do suporte" onClose={onClose} maxWidth="60rem"><div style={s.form}>{!rows ? <div style={s.empty}>Carregando...</div> : rows.map((row) => <div key={row.id} style={s.loginRow}><div><strong>{row.actor?.name} → {row.targetTenant?.name}</strong><div style={s.companyMeta}>{new Date(row.createdAt).toLocaleString('pt-BR')} · {row.reason} · {row.actions?.length || 0} ação(ões)</div></div>{!row.endedAt && new Date(row.expiresAt) > new Date() && <ActionButton variant="secondary" onClick={() => revoke(row)}>Encerrar</ActionButton>}</div>)}<div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton></div></div></ModalShell>;
+}
+
+function SecurityModal({ onClose }) {
+  const [sessions, setSessions] = useState(null);
+  const [setup, setSetup] = useState(null);
+  const [code, setCode] = useState('');
+  const [recovery, setRecovery] = useState(null);
+  const reload = () => getAuthSessions().then(({ data }) => setSessions(data || [])).catch(() => toast.error('Falha ao carregar dispositivos.'));
+  useEffect(reload, []);
+  async function begin() { try { const { data } = await setupTwoFactor(); setSetup(data); } catch { toast.error('Falha ao iniciar o 2FA.'); } }
+  async function confirm() { try { const { data } = await confirmTwoFactor(code); setRecovery(data.recoveryCodes); setSetup(null); toast.success('Autenticação em dois fatores ativada.'); } catch (error) { toast.error(error.response?.data?.error || 'Código inválido.'); } }
+  async function revoke(session) { try { await revokeAuthSession(session.id); if (session.current) { localStorage.clear(); window.location.assign('/suporte/login'); return; } await reload(); } catch { toast.error('Falha ao revogar sessão.'); } }
+  return <ModalShell kicker="Proteção da conta" title="Segurança e dispositivos" onClose={onClose} maxWidth="52rem"><div style={s.form}>
+    <div style={s.formCard}><strong>Autenticação em dois fatores</strong><p style={s.companyMeta}>Use Google Authenticator, Microsoft Authenticator ou aplicativo compatível.</p>{!setup && !recovery && <ActionButton onClick={begin}>Configurar 2FA</ActionButton>}{setup && <div style={s.field}><label style={s.label}>Chave para o autenticador</label><code style={s.code}>{setup.secret}</code><input style={s.input} value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código de 6 dígitos" /><ActionButton onClick={confirm}>Confirmar ativação</ActionButton></div>}{recovery && <div><strong>Guarde estes códigos de recuperação:</strong><pre style={{ whiteSpace: 'pre-wrap' }}>{recovery.join('\n')}</pre></div>}</div>
+    <div><strong>Dispositivos e sessões</strong>{(sessions || []).map((session) => <div key={session.id} style={s.loginRow}><div><strong>{session.deviceName || 'Dispositivo'}</strong><div style={s.companyMeta}>{session.ipAddress || 'IP não informado'} · {session.current ? 'sessão atual' : new Date(session.lastSeenAt || session.createdAt).toLocaleString('pt-BR')}</div></div>{!session.revokedAt && <ActionButton variant="secondary" onClick={() => revoke(session)}>Revogar</ActionButton>}</div>)}</div>
+    <div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton></div>
+  </div></ModalShell>;
+}
+
+function DeploymentChecklistModal({ tenant, onClose }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const reload = () => getDeploymentChecklist(tenant.id).then(({ data: result }) => setData(result)).catch((error) => toast.error(error.response?.data?.error || 'Falha ao carregar checklist.'));
+  useEffect(() => { reload(); }, [tenant.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function change(item, status) {
+    setBusy(item.id);
+    try { await updateDeploymentChecklistItem(tenant.id, item.id, { status, notes: item.notes }); await reload(); }
+    catch (error) { toast.error(error.response?.data?.error || 'Falha ao atualizar checklist.'); }
+    finally { setBusy(null); }
+  }
+  return <ModalShell kicker={`Implantação · ${tenant.name}`} title="Checklist de entrega" onClose={onClose} maxWidth="48rem">
+    {!data ? <div style={s.empty}>Carregando checklist...</div> : <div style={s.form}>
+      <div style={s.companyMeta}>{data.completed} de {data.total} itens concluídos</div>
+      {(data.items || []).map((item) => <div key={item.id} style={s.loginRow}><div style={{ minWidth: 0, flex: 1 }}><strong>{item.label}</strong><div style={s.companyMeta}>{item.category}</div></div><select disabled={busy === item.id} style={{ ...s.input, padding: '8px 10px' }} value={item.status} onChange={(event) => change(item, event.target.value)}><option value="pending">Pendente</option><option value="in_progress">Em andamento</option><option value="blocked">Bloqueado</option><option value="completed">Concluído</option></select></div>)}
+      <div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton></div>
+    </div>}
+  </ModalShell>;
 }
 
 function SupportUsersModal({ users, onClose, onChanged }) {

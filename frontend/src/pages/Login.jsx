@@ -23,6 +23,8 @@ export default function Login({ supportPortal = false }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [secondFactor, setSecondFactor] = useState('');
+  const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [tenantInfo, setTenantInfo] = useState(null);
@@ -64,7 +66,7 @@ export default function Login({ supportPortal = false }) {
     setLoading(true);
     setError('');
     try {
-      const { data } = supportPortal ? await supportLogin(email, password) : await login(email, password, routeSlug);
+      const { data } = supportPortal ? await supportLogin(email, password, secondFactor) : await login(email, password, routeSlug, secondFactor);
       localStorage.setItem('token', data.token);
       localStorage.setItem('tenantId', data.tenant?.id || '');
       localStorage.setItem('userId', data.user.id);
@@ -72,6 +74,11 @@ export default function Login({ supportPortal = false }) {
       if (data.user.supportLevel) localStorage.setItem('supportLevel', data.user.supportLevel);
       navigate(data.user.role === 'superadmin' ? '/suporte' : (data.user.homePage || '/dashboard'));
     } catch (err) {
+      if (err.response?.data?.requiresTwoFactor) {
+        setRequiresTwoFactor(true);
+        setError('Informe o código do autenticador ou um código de recuperação.');
+        return;
+      }
       if (!err?.response) {
         setError('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.');
       } else if (err.response.status >= 500) {
@@ -253,6 +260,11 @@ export default function Login({ supportPortal = false }) {
                 </button>
               </div>
             </div>
+
+            {requiresTwoFactor && <div style={s.inputGroup}>
+              <label htmlFor="login-2fa" style={s.label}>Código de segurança</label>
+              <input id="login-2fa" className="login-input" style={s.input} value={secondFactor} onChange={(event) => setSecondFactor(event.target.value)} placeholder="000000 ou código de recuperação" autoComplete="one-time-code" autoFocus required />
+            </div>}
 
             {error ? <div role="alert" style={s.error}>{error}</div> : null}
 

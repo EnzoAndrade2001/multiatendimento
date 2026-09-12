@@ -1730,6 +1730,7 @@ function agentIdentityFromPing(req) {
     processId: Number.isInteger(processIdNumber) ? processIdNumber : null,
     healthStatus: pick(health.status),
     hostname: pick(health.hostname, body.hostname),
+    compatibility: body.compatibility && typeof body.compatibility === 'object' ? body.compatibility : null,
     ip: String(req.ip || req.socket?.remoteAddress || '').trim() || null,
   };
 }
@@ -1757,6 +1758,7 @@ async function recordAgentInventory(tenantId, identity) {
     processId: identity.processId,
     healthStatus: identity.healthStatus,
     hostname: identity.hostname,
+    compatibility: identity.compatibility ?? undefined,
     lastPingIp: identity.ip,
     lastSeenAt: new Date(),
   };

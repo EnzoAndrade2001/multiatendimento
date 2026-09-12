@@ -3,6 +3,12 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { PERMISSIONS, PROFILE_PERMISSIONS, resolveUserAccess, resolveHomePage } = require('../auth/permissions');
 const { queueAuditEvent } = require('../services/auditEventService');
+const totp = require('../services/totpService');
+
+function requestMeta(req) {
+  const userAgent = String(req.get?.('user-agent') || '').slice(0, 500) || null;
+  return { ipAddress: req.ip || null, userAgent, deviceName: String(req.body?.deviceName || userAgent || 'Dispositivo').slice(0, 120) };
+}
 
 function auditLogin(req, user, action, metadata = {}) {
   if (!user?.tenantId) return;
@@ -20,7 +26,7 @@ function auditLogin(req, user, action, metadata = {}) {
 }
 
 async function login(req, res) {
-  const { email, password, slug } = req.body;
+  const { email, password, slug, totpCode, recoveryCode } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email e senha obrigatórios' });
 
   // O e-mail só é único por tenant (@@unique([tenantId, email])). Quando o
@@ -54,10 +60,32 @@ async function login(req, res) {
   if (!valid) auditLogin(req, user, 'AUTH_LOGIN_FAILED', { reason: 'invalid_password' });
   if (!valid) return res.status(401).json({ error: 'Credenciais inválidas' });
 
+  if (user.totpEnabledAt && user.totpSecretCipher) {
+    let verified = Boolean(totpCode) && totp.verifyCode(totp.decryptSecret(user.totpSecretCipher), totpCode);
+    if (!verified && recoveryCode && Array.isArray(user.totpRecoveryCodes)) {
+      const normalized = String(recoveryCode).replace(/-/g, '').toUpperCase();
+      for (let index = 0; index < user.totpRecoveryCodes.length; index += 1) {
+        if (await bcrypt.compare(normalized, user.totpRecoveryCodes[index])) {
+          verified = true;
+          await prisma.user.update({ where: { id: user.id }, data: { totpRecoveryCodes: user.totpRecoveryCodes.filter((_, i) => i !== index) } });
+          break;
+        }
+      }
+    }
+    if (!verified) return res.status(401).json({ error: 'Codigo de verificacao obrigatorio ou invalido', requiresTwoFactor: true });
+  }
+
+  const sessionLimit = user.maxConcurrentSessions || user.tenant.maxConcurrentSessions || null;
+  if (sessionLimit) {
+    const active = await prisma.authSession.findMany({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'asc' } });
+    const overflow = active.length - sessionLimit + 1;
+    if (overflow > 0) await prisma.authSession.updateMany({ where: { id: { in: active.slice(0, overflow).map(({ id }) => id) } }, data: { revokedAt: new Date(), revokeReason: 'concurrent_limit' } });
+  }
+  const authSession = await prisma.authSession.create({ data: { userId: user.id, tenantId: user.tenantId, expiresAt: new Date(Date.now() + 7 * 86400000), ...requestMeta(req) } });
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   const token = jwt.sign(
-    { userId: user.id },
+    { userId: user.id, sessionId: authSession.id },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -81,6 +109,41 @@ async function supportLogin(req, res) {
   req.body.slug = undefined;
   req.supportOnly = true;
   return login(req, res);
+}
+
+async function listSessions(req, res) {
+  const sessions = await prisma.authSession.findMany({ where: { userId: req.user.userId }, orderBy: { createdAt: 'desc' } });
+  res.json(sessions.map((item) => ({ ...item, current: item.id === req.user.sessionId })));
+}
+
+async function revokeSession(req, res) {
+  const result = await prisma.authSession.updateMany({ where: { id: req.params.id, userId: req.user.userId, revokedAt: null }, data: { revokedAt: new Date(), revokeReason: 'user_revoked' } });
+  if (!result.count) return res.status(404).json({ error: 'Sessao nao encontrada ou ja encerrada' });
+  res.json({ ok: true });
+}
+
+async function beginTotp(req, res) {
+  const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { email: true } });
+  const secret = totp.generateSecret();
+  await prisma.user.update({ where: { id: req.user.userId }, data: { totpPendingSecretCipher: totp.encryptSecret(secret) } });
+  res.json({ secret, otpauthUrl: `otpauth://totp/Multiatendimento:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Multiatendimento` });
+}
+
+async function confirmTotp(req, res) {
+  const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { totpPendingSecretCipher: true } });
+  if (!user?.totpPendingSecretCipher) return res.status(409).json({ error: 'Ativacao 2FA nao iniciada' });
+  const secret = totp.decryptSecret(user.totpPendingSecretCipher);
+  if (!totp.verifyCode(secret, req.body?.code)) return res.status(400).json({ error: 'Codigo de verificacao invalido' });
+  const recoveryCodes = totp.generateRecoveryCodes();
+  await prisma.user.update({ where: { id: req.user.userId }, data: { totpSecretCipher: totp.encryptSecret(secret), totpPendingSecretCipher: null, totpEnabledAt: new Date(), totpRecoveryCodes: await totp.hashRecoveryCodes(recoveryCodes) } });
+  res.json({ ok: true, recoveryCodes });
+}
+
+async function disableTotp(req, res) {
+  const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { password: true } });
+  if (!user || !await bcrypt.compare(String(req.body?.password || ''), user.password)) return res.status(401).json({ error: 'Senha invalida' });
+  await prisma.user.update({ where: { id: req.user.userId }, data: { totpSecretCipher: null, totpPendingSecretCipher: null, totpEnabledAt: null, totpRecoveryCodes: null } });
+  res.json({ ok: true });
 }
 
 async function me(req, res) {
@@ -133,4 +196,4 @@ async function getTenantBySlug(req, res) {
   res.json(tenant);
 }
 
-module.exports = { login, supportLogin, me, getTenantBySlug, accessOptions };
+module.exports = { login, supportLogin, me, getTenantBySlug, accessOptions, listSessions, revokeSession, beginTotp, confirmTotp, disableTotp };

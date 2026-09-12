@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { queueAuditEvent } = require('../services/auditEventService');
 const { readReleaseManifest } = require('./agentController');
 const { isOutdated } = require('../utils/agentVersion');
+const { assertTenantLimit } = require('../services/tenantLimitService');
 
 // Mesma regra de "offline" usada na tela do tenant: sem ping ha mais que 2x o
 // SYNC_INTERVAL padrao (5 min).
@@ -149,7 +150,7 @@ async function createTenant(req, res) {
 async function updateTenant(req, res) {
   if (denySupportManager(req, res)) return;
   const { id } = req.params;
-  const { name, plan, active, maxConnections, maxUsers, primaryColor, logoUrl } = req.body;
+  const { name, plan, active, maxConnections, maxUsers, maxConcurrentSessions, primaryColor, logoUrl } = req.body;
 
   const tenant = await prisma.tenant.update({
     where: { id },
@@ -159,10 +160,44 @@ async function updateTenant(req, res) {
       ...(active !== undefined && { active }),
       ...(maxConnections !== undefined && { maxConnections: Number(maxConnections) }),
       ...(maxUsers !== undefined && { maxUsers: Number(maxUsers) }),
+      ...(maxConcurrentSessions !== undefined && { maxConcurrentSessions: maxConcurrentSessions === null || maxConcurrentSessions === '' ? null : Math.max(1, Number(maxConcurrentSessions)) }),
       ...(primaryColor !== undefined && { primaryColor }),
       ...(logoUrl !== undefined && { logoUrl }),
     },
   });
+  res.json(tenant);
+}
+
+const LIFECYCLE_STATUSES = new Set(['implementation', 'trial', 'active', 'suspended', 'cancelled']);
+const FINANCIAL_STATUSES = new Set(['current', 'overdue', 'blocked', 'cancelled']);
+
+async function updateTenantCommercial(req, res) {
+  if (denySupportManager(req, res)) return;
+  const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!existing) return res.status(404).json({ error: 'Empresa não encontrada.' });
+  const { lifecycleStatus, financialStatus } = req.body;
+  if (lifecycleStatus != null && !LIFECYCLE_STATUSES.has(lifecycleStatus)) return res.status(400).json({ error: 'Status de ciclo de vida inválido.' });
+  if (financialStatus != null && !FINANCIAL_STATUSES.has(financialStatus)) return res.status(400).json({ error: 'Status financeiro inválido.' });
+  const price = req.body.customMonthlyPriceCents;
+  const discount = req.body.discountPercent;
+  if (price != null && (!Number.isInteger(Number(price)) || Number(price) < 0)) return res.status(400).json({ error: 'Valor mensal inválido.' });
+  if (discount != null && (!Number.isFinite(Number(discount)) || Number(discount) < 0 || Number(discount) > 100)) return res.status(400).json({ error: 'Desconto deve estar entre 0 e 100.' });
+  const data = {};
+  for (const field of ['contractStartedAt', 'contractEndsAt', 'trialEndsAt', 'nextBillingAt']) {
+    if (!Object.hasOwn(req.body, field)) continue;
+    data[field] = req.body[field] ? new Date(req.body[field]) : null;
+    if (data[field] && Number.isNaN(data[field].getTime())) return res.status(400).json({ error: `Data inválida: ${field}.` });
+  }
+  Object.assign(data, {
+    ...(lifecycleStatus != null && { lifecycleStatus }), ...(financialStatus != null && { financialStatus }),
+    ...(Object.hasOwn(req.body, 'contractNumber') && { contractNumber: String(req.body.contractNumber || '').trim() || null }),
+    ...(Object.hasOwn(req.body, 'customMonthlyPriceCents') && { customMonthlyPriceCents: price == null ? null : Number(price) }),
+    ...(Object.hasOwn(req.body, 'discountPercent') && { discountPercent: discount == null ? null : Number(discount) }),
+    ...(Object.hasOwn(req.body, 'commercialNotes') && { commercialNotes: String(req.body.commercialNotes || '').slice(0, 5000) || null }),
+  });
+  if (lifecycleStatus != null) data.active = !['suspended', 'cancelled'].includes(lifecycleStatus);
+  const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data });
+  queueAuditEvent({ req, user: req.user, tenantId: tenant.id }, { action: 'TENANT_COMMERCIAL_UPDATED', resourceType: 'tenant', resourceId: tenant.id, metadata: { lifecycleStatus: tenant.lifecycleStatus, financialStatus: tenant.financialStatus } });
   res.json(tenant);
 }
 
@@ -172,7 +207,7 @@ async function startSupportSession(req, res) {
   const reason = String(req.body?.reason || '').trim();
   if (reason.length < 5) return res.status(400).json({ error: 'Informe o motivo do acesso técnico.' });
   const tenant = await prisma.tenant.findFirst({
-    where: { id: req.params.id, active: true },
+    where: { id: req.params.id, lifecycleStatus: { not: 'cancelled' } },
     select: { id: true, name: true, slug: true },
   });
   if (!tenant) return res.status(404).json({ error: 'Empresa ativa não encontrada.' });
@@ -194,6 +229,7 @@ async function startSupportSession(req, res) {
   });
   const token = jwt.sign({
     userId: req.user.userId,
+    sessionId: req.user.sessionId || undefined,
     supportTenantId: tenant.id,
     supportSessionId: session.id,
   }, process.env.JWT_SECRET, { expiresIn: '2h' });
@@ -210,6 +246,38 @@ async function endSupportSession(req, res) {
   queueAuditEvent({ req, user: req.user }, {
     action: 'SUPPORT_SESSION_ENDED', resourceType: 'support_session', resourceId: req.user.supportSessionId,
   });
+  res.json({ ok: true });
+}
+
+async function listSupportSessions(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const from = req.query.from ? new Date(req.query.from) : null;
+  const to = req.query.to ? new Date(req.query.to) : null;
+  if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) return res.status(400).json({ error: 'Periodo invalido' });
+  const where = {
+    ...(req.query.actorId ? { actorUserId: req.query.actorId } : {}),
+    ...(req.query.tenantId ? { targetTenantId: req.query.tenantId } : {}),
+    ...((from || to) ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+  };
+  const sessions = await prisma.supportAccessSession.findMany({
+    where, orderBy: { createdAt: 'desc' }, take: Math.min(200, Math.max(1, Number(req.query.limit) || 50)),
+    include: { actor: { select: { id: true, name: true, email: true } }, targetTenant: { select: { id: true, name: true, slug: true } } },
+  });
+  const rows = await Promise.all(sessions.map(async (session) => {
+    const until = session.endedAt || (session.expiresAt < new Date() ? session.expiresAt : new Date());
+    const actions = await prisma.auditEvent.findMany({
+      where: { tenantId: session.targetTenantId, actorId: session.actorUserId, createdAt: { gte: session.createdAt, lte: until } },
+      orderBy: { createdAt: 'asc' }, select: { id: true, action: true, resourceType: true, resourceId: true, status: true, createdAt: true },
+    });
+    return { ...session, actions };
+  }));
+  res.json(rows);
+}
+
+async function revokeSupportSession(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const result = await prisma.supportAccessSession.updateMany({ where: { id: req.params.id, endedAt: null }, data: { endedAt: new Date() } });
+  if (!result.count) return res.status(404).json({ error: 'Sessao nao encontrada ou ja encerrada' });
   res.json({ ok: true });
 }
 
@@ -235,9 +303,10 @@ async function createTenantUser(req, res) {
 
   const role = req.body.role === 'agent' ? 'agent' : 'admin';
 
-  const count = await prisma.user.count({ where: { tenantId: tenant.id } });
-  if (tenant.maxUsers && count >= tenant.maxUsers) {
-    return res.status(409).json({ error: `Limite de ${tenant.maxUsers} usuário(s) do plano já foi atingido.` });
+  const count = await prisma.user.count({ where: { tenantId: tenant.id, active: true } });
+  const userLimit = await assertTenantLimit({ tenantId: tenant.id, limitKey: 'maxUsers', currentUsage: count });
+  if (!userLimit.allowed) {
+    return res.status(409).json({ error: `Limite de ${userLimit.limit} usuário(s) do plano já foi atingido.` });
   }
   const clash = await prisma.user.findFirst({ where: { tenantId: tenant.id, email: cred.email }, select: { id: true } });
   if (clash) return res.status(409).json({ error: 'Já existe um usuário com esse e-mail nesta empresa.' });
@@ -260,7 +329,7 @@ async function createTenantUser(req, res) {
 async function updateTenantUser(req, res) {
   if (denySuperadmin(req, res)) return;
   const { id, userId } = req.params;
-  const existing = await prisma.user.findFirst({ where: { id: userId, tenantId: id }, select: { id: true, role: true } });
+  const existing = await prisma.user.findFirst({ where: { id: userId, tenantId: id }, select: { id: true, role: true, active: true } });
   if (!existing) return res.status(404).json({ error: 'Usuário não encontrado nesta empresa.' });
 
   const data = {};
@@ -268,7 +337,14 @@ async function updateTenantUser(req, res) {
     if (String(req.body.password).length < 6) return res.status(400).json({ error: 'A nova senha deve ter ao menos 6 caracteres.' });
     data.password = await bcrypt.hash(String(req.body.password), 10);
   }
-  if (req.body.active !== undefined) data.active = Boolean(req.body.active);
+  if (req.body.active !== undefined) {
+    data.active = Boolean(req.body.active);
+    if (data.active && !existing.active) {
+      const activeUsers = await prisma.user.count({ where: { tenantId: id, active: true } });
+      const userLimit = await assertTenantLimit({ tenantId: id, limitKey: 'maxUsers', currentUsage: activeUsers });
+      if (!userLimit.allowed) return res.status(409).json({ error: `Limite de ${userLimit.limit} usuário(s) do plano já foi atingido.` });
+    }
+  }
   if (req.body.name !== undefined && String(req.body.name).trim()) data.name = String(req.body.name).trim();
   if (req.body.role !== undefined) {
     const role = req.body.role === 'agent' ? 'agent' : 'admin';
@@ -374,6 +450,9 @@ async function updateSupportUser(req, res) {
     if (String(req.body.password).length < 6) return res.status(400).json({ error: 'A senha deve ter ao menos 6 caracteres.' });
     data.password = await bcrypt.hash(String(req.body.password), 10);
   }
+  if (req.body.maxConcurrentSessions !== undefined) {
+    data.maxConcurrentSessions = req.body.maxConcurrentSessions === null || req.body.maxConcurrentSessions === '' ? null : Math.max(1, Number(req.body.maxConcurrentSessions));
+  }
   if (req.body.active !== undefined) {
     if (existing.id === req.user.userId && !req.body.active) return res.status(409).json({ error: 'Você não pode desativar sua própria conta.' });
     if (!req.body.active && (existing.supportLevel || 'manager') === 'manager') {
@@ -386,9 +465,10 @@ async function updateSupportUser(req, res) {
 }
 
 module.exports = {
-  listTenants, createTenant, updateTenant,
+  listTenants, createTenant, updateTenant, updateTenantCommercial,
   listTenantUsers, createTenantUser, updateTenantUser,
   listFirebirdAgents,
   listSupportUsers, createSupportUser, updateSupportUser,
   startSupportSession, endSupportSession,
+  listSupportSessions, revokeSupportSession,
 };

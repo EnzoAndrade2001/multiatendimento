@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { login, supportLogin, me, getTenantBySlug, accessOptions } = require('../controllers/authController');
+const { login, supportLogin, me, getTenantBySlug, accessOptions, listSessions, revokeSession, beginTotp, confirmTotp, disableTotp } = require('../controllers/authController');
 const { updateProfile } = require('../controllers/profileController');
 const authenticate = require('../middlewares/authenticate');
 const { parseUserAvatarUpload } = require('../middlewares/userAvatarUpload');
@@ -35,6 +35,11 @@ router.post('/login', loginRateLimit, login);
 router.post('/support-login', loginRateLimit, supportLogin);
 router.get('/me', authenticate, me);
 router.get('/access-options', authenticate, accessOptions);
+router.get('/sessions', authenticate, listSessions);
+router.delete('/sessions/:id', authenticate, revokeSession);
+router.post('/2fa/setup', authenticate, beginTotp);
+router.post('/2fa/confirm', authenticate, confirmTotp);
+router.delete('/2fa', authenticate, disableTotp);
 router.patch('/profile', authenticate, auditEvent('PROFILE_UPDATE', 'profile'), updateProfile);
 router.post('/profile/avatar', authenticate, parseUserAvatarUpload, auditEvent('PROFILE_AVATAR_UPDATE', 'profile'), uploadProfileAvatar);
 router.delete('/profile/avatar', authenticate, auditEvent('PROFILE_AVATAR_DELETE', 'profile'), removeProfileAvatar);
