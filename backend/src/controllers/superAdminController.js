@@ -431,7 +431,10 @@ async function createSupportUser(req, res) {
   if (denySupportManager(req, res)) return;
   const cred = normalizeCredential(req.body);
   if (cred.error) return res.status(400).json({ error: cred.error });
-  const clash = await prisma.user.findFirst({ where: { email: cred.email }, select: { id: true } });
+  const clash = await prisma.user.findFirst({
+    where: { tenantId: req.user.tenantId, email: cred.email },
+    select: { id: true },
+  });
   if (clash) return res.status(409).json({ error: 'Este e-mail já está sendo utilizado.' });
   const user = await prisma.user.create({
     data: { tenantId: req.user.tenantId, name: cred.name, email: cred.email, password: await bcrypt.hash(cred.password, 10), role: 'superadmin', accessProfile: 'admin', supportLevel: req.body.supportLevel === 'support' ? 'support' : 'manager' },

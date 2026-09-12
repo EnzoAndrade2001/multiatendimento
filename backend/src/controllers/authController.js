@@ -34,7 +34,11 @@ async function login(req, res) {
   // a esse tenant — senão um e-mail repetido em outra empresa "sequestra" o
   // login e derruba com tenant_mismatch mesmo existindo o usuário certo.
   const user = await prisma.user.findFirst({
-    where: { email, ...(slug ? { tenant: { slug } } : {}) },
+    where: {
+      email,
+      ...(req.supportOnly ? { role: 'superadmin' } : {}),
+      ...(slug ? { tenant: { slug } } : {}),
+    },
     include: { tenant: true },
   });
 

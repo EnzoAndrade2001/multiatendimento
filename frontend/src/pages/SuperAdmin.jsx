@@ -777,10 +777,11 @@ function DeploymentChecklistModal({ tenant, onClose }) {
 function SupportUsersModal({ users, onClose, onChanged }) {
   const [form, setForm] = useState({ name: '', email: '', password: '', supportLevel: 'support' });
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState('');
   async function create(event) {
-    event.preventDefault(); setBusy(true);
+    event.preventDefault(); setBusy(true); setFormError('');
     try { await createSupportUser(form); toast.success('Usuário de suporte criado.'); setForm({ name: '', email: '', password: '', supportLevel: 'support' }); await onChanged?.(); }
-    catch (error) { toast.error(error.response?.data?.error || 'Não foi possível criar o usuário.'); }
+    catch (error) { const message = error.response?.data?.error || 'Não foi possível criar o usuário.'; setFormError(message); toast.error(message); }
     finally { setBusy(false); }
   }
   async function toggle(user) {
@@ -792,6 +793,7 @@ function SupportUsersModal({ users, onClose, onChanged }) {
       <form onSubmit={create} style={s.formCard}>
         <div style={s.twoCols}><div style={s.field}><label style={s.label}>Nome</label><input required style={s.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div><div style={s.field}><label style={s.label}>E-mail</label><input required type="email" style={s.input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div></div>
         <div style={s.twoCols}><div style={s.field}><label style={s.label}>Senha inicial</label><input required minLength={6} type="password" style={s.input} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div><div style={s.field}><label style={s.label}>Nível</label><select style={s.input} value={form.supportLevel} onChange={(e) => setForm({ ...form, supportLevel: e.target.value })}><option value="support">Técnico de suporte</option><option value="manager">Gestor superadmin</option></select></div></div>
+        {formError ? <div role="alert" style={{ color: 'var(--danger-text)', fontSize: 'var(--text-sm)' }}>{formError}</div> : null}
         <ActionButton type="submit" disabled={busy}>{busy ? 'Criando...' : 'Criar acesso'}</ActionButton>
       </form>
       <div style={{ display: 'grid', gap: 'var(--space-2)' }}>{users.map((user) => <div key={user.id} style={s.loginRow}><div><strong>{user.name}</strong><div style={s.companyMeta}>{user.email} · {user.supportLevel === 'manager' ? 'Gestor' : 'Suporte'} · último acesso {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</div></div><ActionButton variant="secondary" onClick={() => toggle(user)}>{user.active ? 'Desativar' : 'Ativar'}</ActionButton></div>)}</div>
