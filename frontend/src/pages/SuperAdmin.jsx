@@ -675,7 +675,10 @@ export default function SuperAdmin() {
 function SupportAuditModal({ onClose }) {
   const [rows, setRows] = useState(null);
   const loadRows = () => getSupportAudit().then(({ data }) => setRows(data || [])).catch(() => toast.error('Falha ao carregar auditoria.'));
-  useEffect(loadRows, []);
+  // O callback de um effect pode retornar apenas uma funcao de limpeza. Nao
+  // devolva a Promise de loadRows: na desmontagem do modal o React tentaria
+  // executa-la como cleanup e derrubaria a pagina no ErrorBoundary.
+  useEffect(() => { loadRows(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function revoke(row) { try { await revokeSupportAccess(row.id); await loadRows(); } catch (error) { toast.error(error.response?.data?.error || 'Falha ao encerrar acesso.'); } }
   return <ModalShell kicker="Rastreabilidade" title="Auditoria de acessos do suporte" onClose={onClose} maxWidth="60rem"><div style={s.form}>{!rows ? <div style={s.empty}>Carregando...</div> : rows.map((row) => <div key={row.id} style={s.loginRow}><div><strong>{row.actor?.name} → {row.targetTenant?.name}</strong><div style={s.companyMeta}>{new Date(row.createdAt).toLocaleString('pt-BR')} · {row.reason} · {row.actions?.length || 0} ação(ões)</div></div>{!row.endedAt && new Date(row.expiresAt) > new Date() && <ActionButton variant="secondary" onClick={() => revoke(row)}>Encerrar</ActionButton>}</div>)}<div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton></div></div></ModalShell>;
 }
@@ -686,7 +689,7 @@ function SecurityModal({ onClose }) {
   const [code, setCode] = useState('');
   const [recovery, setRecovery] = useState(null);
   const reload = () => getAuthSessions().then(({ data }) => setSessions(data || [])).catch(() => toast.error('Falha ao carregar dispositivos.'));
-  useEffect(reload, []);
+  useEffect(() => { reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function begin() { try { const { data } = await setupTwoFactor(); setSetup(data); } catch { toast.error('Falha ao iniciar o 2FA.'); } }
   async function confirm() { try { const { data } = await confirmTwoFactor(code); setRecovery(data.recoveryCodes); setSetup(null); toast.success('Autenticação em dois fatores ativada.'); } catch (error) { toast.error(error.response?.data?.error || 'Código inválido.'); } }
   async function revoke(session) { try { await revokeAuthSession(session.id); if (session.current) { localStorage.clear(); window.location.assign('/suporte/login'); return; } await reload(); } catch { toast.error('Falha ao revogar sessão.'); } }
