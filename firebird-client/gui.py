@@ -761,6 +761,14 @@ class AgentGUI(ctk.CTk):
 
 
 if __name__ == "__main__":
+    if "--apply-update" in sys.argv:
+        import main as agent_main
+        job_index = sys.argv.index("--apply-update") + 1
+        if job_index >= len(sys.argv):
+            raise SystemExit(2)
+        raise SystemExit(agent_main.apply_update_job(Path(sys.argv[job_index])))
+    import main as agent_main
+    agent_main.cleanup_update_artifacts()
     app = AgentGUI()
     if "--minimized" in sys.argv:
         app.hide_window()

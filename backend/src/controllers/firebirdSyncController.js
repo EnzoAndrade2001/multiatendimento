@@ -1202,6 +1202,7 @@ async function getPendingCommands(req, res) {
     let pendingBillingPdf = null;
     let pendingBillingDocument = null;
     let pendingCompanyProfile = null;
+    let pendingAgentVersion = null;
 
     do {
       const leaseExpiredAt = new Date(Date.now() - 45_000);
@@ -1317,7 +1318,24 @@ async function getPendingCommands(req, res) {
         });
       }
 
-      if (pendingOS.length > 0 || pendingBillingPdf || pendingBillingDocument || pendingCompanyProfile || tenant.settings?.firebirdQueueBillingProcess || Date.now() >= deadline) break;
+      const installId = String(req.header('x-ilux-agent-id') || '').trim();
+      if (installId) {
+        const agent = await prisma.firebirdAgent.findUnique({
+          where: { tenantId_installId: { tenantId: tenant.id, installId } },
+          select: { id: true },
+        });
+        if (agent) {
+          const candidate = await prisma.agentVersionAction.findFirst({
+            where: { tenantId: tenant.id, firebirdAgentId: agent.id, status: 'pending' },
+            orderBy: { createdAt: 'asc' },
+          });
+          // Mantem pendente ate o callback do atualizador externo. Se a rede
+          // cair durante o download, o mesmo agente recebe o comando de novo.
+          if (candidate) pendingAgentVersion = candidate;
+        }
+      }
+
+      if (pendingOS.length > 0 || pendingBillingPdf || pendingBillingDocument || pendingCompanyProfile || pendingAgentVersion || tenant.settings?.firebirdQueueBillingProcess || Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, 350));
     } while (true);
 
@@ -1402,6 +1420,28 @@ async function getPendingCommands(req, res) {
       });
     }
 
+
+    if (pendingAgentVersion) {
+      const release = agentController.findRelease(pendingAgentVersion.targetVersion);
+      if (release?.sha256) {
+        commands.push({
+          id: pendingAgentVersion.id,
+          type: 'AGENT_VERSION',
+          payload: {
+            action: pendingAgentVersion.action,
+            version: pendingAgentVersion.targetVersion,
+            sha256: release.sha256,
+            downloadUrl: `/api/integrations/firebird/agent-releases/${encodeURIComponent(pendingAgentVersion.targetVersion)}/download`,
+          },
+        });
+      } else {
+        await prisma.agentVersionAction.update({
+          where: { id: pendingAgentVersion.id },
+          data: { status: 'failed', error: 'Versao nao encontrada no repositorio de agentes.', completedAt: new Date() },
+        });
+      }
+    }
+
     res.json(commands);
   } catch (err) {
     logPendingCommandError(req, err);
@@ -1416,6 +1456,25 @@ async function commandCallback(req, res) {
 
     const { tenant } = await resolveTenantContext(tenantSlug, req, { requireInstance: false });
     assertToken(req, tenant);
+
+    const versionAction = await prisma.agentVersionAction.findFirst({ where: { id, tenantId: tenant.id } });
+    if (versionAction) {
+      await prisma.agentVersionAction.update({
+        where: { id },
+        data: {
+          status: success ? 'completed' : 'failed',
+          error: success ? null : String(error || 'Falha nao informada').slice(0, 2000),
+          completedAt: new Date(),
+        },
+      });
+      if (success) {
+        await prisma.firebirdAgent.update({
+          where: { id: versionAction.firebirdAgentId },
+          data: { desiredVersion: null },
+        });
+      }
+      return res.json({ ok: true });
+    }
 
     if (id === 'PROCESS_BILLING') {
       await prisma.tenantSettings.update({
@@ -1815,6 +1874,16 @@ async function agentPing(req, res) {
   }
 }
 
+async function downloadAgentRelease(req, res) {
+  try {
+    const { tenant } = await resolveTenantContext(req.query.tenantSlug, req, { requireInstance: false });
+    assertToken(req, tenant);
+    return agentController.downloadAgentRelease(req, res);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+}
+
 module.exports = {
   pushBatch,
   reconcileReceivablesSnapshot,
@@ -1822,6 +1891,7 @@ module.exports = {
   getPendingCommands,
   commandCallback,
   agentPing,
+  downloadAgentRelease,
   agentIdentityFromPing,
   agentInventoryKey,
   recordAgentInventory,

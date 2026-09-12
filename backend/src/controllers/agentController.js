@@ -28,6 +28,21 @@ function readReleaseManifest() {
   }
 }
 
+function findRelease(version) {
+  const manifest = readReleaseManifest();
+  if (!manifest) return null;
+  const candidates = [manifest, ...(Array.isArray(manifest.releases) ? manifest.releases : [])];
+  return candidates.find((item) => String(item?.version || '') === String(version || '')) || null;
+}
+
+function getReleasePath(release) {
+  if (!release) return null;
+  const releaseDir = getReleaseDir();
+  const filePath = path.resolve(releaseDir, path.basename(release.fileName || ''));
+  if (!filePath.startsWith(`${releaseDir}${path.sep}`)) return null;
+  return filePath;
+}
+
 function getAgentFileName(manifest = null) {
   return path.basename(manifest?.fileName || process.env.FIREBIRD_AGENT_FILE_NAME || 'FirebirdCRMClient.exe');
 }
@@ -80,6 +95,20 @@ function downloadAgent(req, res) {
   });
 }
 
+function downloadAgentRelease(req, res) {
+  const release = findRelease(req.params.version);
+  const filePath = getReleasePath(release);
+  if (!release || !filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Versao do agente nao encontrada.' });
+  }
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Agent-Version', String(release.version));
+  if (release.sha256) res.setHeader('X-Checksum-Sha256', String(release.sha256));
+  return res.download(filePath, path.basename(release.fileName), (error) => {
+    if (error && !res.headersSent) res.status(500).json({ error: 'Nao foi possivel baixar esta versao.' });
+  });
+}
+
 // Inventario das instalacoes do agente Firebird DESTE tenant (uma linha por
 // installId, alimentada pelos pings). Cruza a versao que cada uma roda com o
 // release.json publicado para marcar "desatualizado" sem depender de o agente
@@ -129,4 +158,4 @@ async function getAgentStatus(req, res) {
   });
 }
 
-module.exports = { getAgentInfo, downloadAgent, getAgentStatus, readReleaseManifest };
+module.exports = { getAgentInfo, downloadAgent, downloadAgentRelease, getAgentStatus, readReleaseManifest, findRelease };

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
+import hashlib
 from io import BytesIO
 import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
 import re
+import shutil
+import subprocess
 from decimal import Decimal
 import sys
 import time
@@ -46,7 +50,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.1.8"
+DEFAULT_AGENT_VERSION = "1.2.0"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -62,6 +66,7 @@ AGENT_CAPABILITIES = (
     "commands.process-billing",
     "commands.fetch-billing-document",
     "commands.fetch-company-profile",
+    "commands.agent-update-v1",
     "sync.plugboleto-config",
     "sync.billing-statements",
 )
@@ -78,6 +83,98 @@ COMMAND_AUTH_PAUSE_SECONDS = 300
 # Sem uma trava compartilhada, a sincronizacao pode importar a O.S. recem-criada
 # antes de o callback associar o SEQOS ao registro original do CRM.
 SERVICE_ORDER_SYNC_LOCK = threading.RLock()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def _wait_for_process_exit(process_id: int, timeout_seconds: int = 90) -> None:
+    """Wait for the original Windows process without requiring extra packages."""
+    if os.name != "nt":
+        time.sleep(2)
+        return
+    synchronize = 0x00100000
+    handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, int(process_id))
+    if not handle:
+        return
+    try:
+        ctypes.windll.kernel32.WaitForSingleObject(handle, int(timeout_seconds * 1000))
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def apply_update_job(job_path: Path) -> int:
+    """Runs from a temporary copy, so Windows releases the installed EXE."""
+    job = json.loads(job_path.read_text(encoding="utf-8"))
+    target = Path(job["target"]).resolve()
+    staged = Path(job["staged"]).resolve()
+    backup = Path(job["backup"]).resolve()
+    expected = str(job["sha256"]).upper()
+    action_id = str(job["actionId"])
+    _wait_for_process_exit(int(job["parentPid"]))
+
+    env_file = target.parent / ".env"
+    load_dotenv(env_file)
+    base_url = normalize_crm_base_url(os.getenv("CRM_BASE_URL"))
+    token = str(os.getenv("CRM_SYNC_TOKEN") or "").strip()
+    tenant_slug = str(os.getenv("CRM_TENANT_SLUG") or "").strip()
+    callback_url = f"{base_url}/api/integrations/firebird/pending-commands/{action_id}/callback"
+
+    success = False
+    error = None
+    try:
+        if sha256_file(staged) != expected:
+            raise RuntimeError("Checksum SHA-256 do pacote mudou antes da instalacao.")
+        backup.unlink(missing_ok=True)
+        if target.exists():
+            shutil.copy2(target, backup)
+        os.replace(staged, target)
+        if sha256_file(target) != expected:
+            raise RuntimeError("Checksum SHA-256 invalido depois da instalacao.")
+        success = True
+    except Exception as exc:
+        error = str(exc)
+        try:
+            if backup.exists():
+                shutil.copy2(backup, target)
+        except Exception as restore_error:
+            error = f"{error}; rollback local falhou: {restore_error}"
+
+    try:
+        requests.post(
+            callback_url,
+            headers={"x-firebird-token": token, "Content-Type": "application/json"},
+            json={
+                "tenantSlug": tenant_slug,
+                "success": success,
+                "result": {"version": job.get("version"), "backup": str(backup)} if success else None,
+                "error": error,
+            },
+            timeout=30,
+        ).raise_for_status()
+    except Exception:
+        pass
+
+    executable = target if target.exists() else backup
+    if executable.exists():
+        subprocess.Popen([str(executable), "--minimized"], cwd=str(target.parent), close_fds=True)
+    job_path.unlink(missing_ok=True)
+    return 0 if success else 1
+
+
+def cleanup_update_artifacts() -> None:
+    cutoff = time.time() - (7 * 24 * 60 * 60)
+    for candidate in ROOT.glob(".FirebirdCRMUpdater-*.exe"):
+        try:
+            if candidate.stat().st_mtime < cutoff:
+                candidate.unlink()
+        except OSError:
+            pass
 
 
 def digits(value: Any) -> str | None:
@@ -648,6 +745,59 @@ class CRMClient:
         self._raise_for_status(response)
         return response.json()
 
+    def schedule_agent_update(self, command_id: str, payload: dict[str, Any]) -> None:
+        if not getattr(sys, "frozen", False):
+            raise RuntimeError("Atualizacao remota so e permitida no agente executavel.")
+        version = str(payload.get("version") or "").strip()
+        expected = str(payload.get("sha256") or "").strip().upper()
+        relative_url = str(payload.get("downloadUrl") or "").strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{64}", expected):
+            raise RuntimeError("Comando de atualizacao sem checksum SHA-256 valido.")
+        if not relative_url.startswith("/api/integrations/firebird/agent-releases/"):
+            raise RuntimeError("Endereco de atualizacao nao autorizado.")
+
+        update_dir = ROOT / ".agent-updates"
+        update_dir.mkdir(parents=True, exist_ok=True)
+        staged = update_dir / f"FirebirdCRMClient-{version}.download"
+        response = self.session.get(
+            f"{self.config.crm_base_url}{relative_url}",
+            params={"tenantSlug": self.config.crm_tenant_slug},
+            stream=True,
+            timeout=180,
+        )
+        self._raise_for_status(response)
+        with staged.open("wb") as output:
+            for chunk in response.iter_content(1024 * 1024):
+                if chunk:
+                    output.write(chunk)
+        actual = sha256_file(staged)
+        if actual != expected:
+            staged.unlink(missing_ok=True)
+            raise RuntimeError(f"Checksum SHA-256 invalido (esperado {expected}, recebido {actual}).")
+
+        helper = ROOT / f".FirebirdCRMUpdater-{uuid.uuid4().hex}.exe"
+        shutil.copy2(Path(sys.executable).resolve(), helper)
+        job_path = update_dir / f"job-{command_id}.json"
+        job_path.write_text(json.dumps({
+            "actionId": command_id,
+            "action": payload.get("action") or "update",
+            "version": version,
+            "sha256": expected,
+            "target": str(Path(sys.executable).resolve()),
+            "staged": str(staged.resolve()),
+            "backup": str((ROOT / "FirebirdCRMClient.backup.exe").resolve()),
+            "parentPid": os.getpid(),
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        subprocess.Popen(
+            [str(helper), "--apply-update", str(job_path)],
+            cwd=str(ROOT),
+            close_fds=True,
+            creationflags=creation_flags,
+        )
+        logging.info("Atualizacao do agente para %s validada e agendada; reiniciando.", version)
+        os._exit(0)
+
     def process_pending_commands(
         self,
         repo: FirebirdRepository,
@@ -744,6 +894,9 @@ class CRMClient:
                             "Cadastro da empresa sincronizado: %s.",
                             company.get("name") or company.get("companyCode") or "sem nome",
                         )
+                    elif cmd_type == "AGENT_VERSION":
+                        logging.info("Comando remoto para instalar o agente %s recebido.", payload.get("version"))
+                        self.schedule_agent_update(cmd_id, payload)
                     else:
                         logging.warning("Tipo de comando desconhecido: %s", cmd_type)
                 except Exception as e:
@@ -3952,10 +4105,15 @@ def validate_firebird_config(config: AppConfig) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Firebird to CRM sync client")
+    parser.add_argument("--apply-update", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--once", action="store_true", help="Executa apenas um ciclo de sincronização")
     parser.add_argument("--full", action="store_true", help="Força ressincronização completa")
     parser.add_argument("--inspect-schema", action="store_true", help="Gera schema-report.json com tabelas, colunas e amostras")
     args = parser.parse_args()
+
+    if args.apply_update:
+        raise SystemExit(apply_update_job(args.apply_update))
+    cleanup_update_artifacts()
 
     config = AppConfig.from_env()
     configure_logging(config)

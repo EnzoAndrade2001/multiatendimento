@@ -1,6 +1,14 @@
 {
-  "version": "1.1.8",
+  "version": "1.2.0",
   "fileName": "FirebirdCRMClient.exe",
-  "sha256": "87C2D4720505408FB15159ED9ED8FD8FA9B300D801538EDB5B24D4174C4D3BD4",
-  "releasedAt": "2026-09-11T22:58:56-03:00"
+  "sha256": "12F3A2A116545C8863A2DEC35653200B3D1A2C8924D129E66D98682BF44E0D47",
+  "releasedAt": "2026-09-12T01:18:01-03:00",
+  "releases": [
+    {
+      "version": "1.1.8",
+      "fileName": "FirebirdCRMClient-1.1.8.exe",
+      "sha256": "87C2D4720505408FB15159ED9ED8FD8FA9B300D801538EDB5B24D4174C4D3BD4",
+      "releasedAt": "2026-09-11T22:58:56-03:00"
+    }
+  ]
 }

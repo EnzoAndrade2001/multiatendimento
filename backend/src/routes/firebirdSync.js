@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { pushBatch, getPendingCommands, commandCallback } = require('../controllers/firebirdSyncController');
+const { pushBatch, getPendingCommands, commandCallback, downloadAgentRelease } = require('../controllers/firebirdSyncController');
 const { sendBilling, autoSendBilling, logTestBilling, triggerBillingProcess, getBillingLogs, saveBillingSettings, getBillingDashboardStats } = require('../controllers/billingController');
 const upload = require('../middlewares/upload');
 const authenticate = require('../middlewares/authenticate');
@@ -10,6 +10,7 @@ const { firebirdPendingRateLimit } = require('../middlewares/firebirdPendingRate
 router.post('/push', pushBatch);
 router.get('/pending-commands', firebirdPendingRateLimit, getPendingCommands);
 router.post('/pending-commands/:id/callback', commandCallback);
+router.get('/agent-releases/:version/download', firebirdPendingRateLimit, downloadAgentRelease);
 router.post('/ping', require('../controllers/firebirdSyncController').agentPing);
 
 // Rotas de Faturamento/Cobrança

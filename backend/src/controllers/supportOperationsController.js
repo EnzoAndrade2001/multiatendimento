@@ -1,6 +1,6 @@
 const prisma = require('../lib/prisma');
 const { queueAuditEvent } = require('../services/auditEventService');
-const { readReleaseManifest } = require('./agentController');
+const { readReleaseManifest, findRelease } = require('./agentController');
 
 const CHECKLIST = [
   ['access', 'Acessos da empresa conferidos', 'Conta e acesso'],
@@ -37,6 +37,8 @@ async function requestAgentVersion(req, res) {
   const targetVersion = String(req.body.targetVersion || '').trim();
   if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(targetVersion)) return res.status(400).json({ error: 'Informe uma versão válida.' });
   const action = req.body.action === 'rollback' ? 'rollback' : 'update';
+  const release = findRelease(targetVersion);
+  if (!release?.sha256) return res.status(400).json({ error: 'Esta versao nao esta publicada no repositorio de agentes.' });
   const record = await prisma.$transaction(async (tx) => {
     await tx.firebirdAgent.update({ where: { id: agent.id }, data: { releaseChannel: channel, desiredVersion: targetVersion } });
     return tx.agentVersionAction.create({ data: { tenantId: agent.tenantId, firebirdAgentId: agent.id, action, channel, fromVersion: agent.version, targetVersion, requestedById: req.user.userId, reason: String(req.body.reason || '').trim() || null } });
