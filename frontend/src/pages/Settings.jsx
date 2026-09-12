@@ -57,6 +57,16 @@ const TAB_GROUPS = [
 // interno 5 para compatibilidade com links antigos, mas não o exibimos no
 // menu de Configurações para evitar duas entradas para a mesma função.
 const HIDDEN_TAB_INDEXES = new Set([5]);
+const SUPPORT_ONLY_TAB_INDEXES = new Set([7, 9, 10]);
+const SUPPORT_ONLY_FORM_FIELDS = [
+  'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog', 'geminiKey', 'openaiKey', 'anthropicKey',
+  'evolutionUrl', 'evolutionKey', 'webhookUrl', 'serpApiKey',
+  'firebirdClientToken', 'firebirdApiUrl', 'firebirdApiKey', 'firebirdAuthMode', 'firebirdHealthPath',
+  'firebirdContactsPath', 'firebirdSyncEnabled', 'firebirdLastSyncAt', 'firebirdLastSyncStatus', 'firebirdLastSyncError',
+  'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath', 'plugBoletoCedenteCnpj', 'plugBoletoToken',
+  'plugBoletoTokenSet', 'plugBoletoConfigSyncedAt', 'statementRerenderEnabled',
+  'kpiContractValue', 'kpiServiceValue', 'kpiSlaLimitHours', 'kpiReincidentThreshold',
+];
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const MASKED_SECRET_PATTERN = /^\*{4,}$/;
 
@@ -90,7 +100,8 @@ export default function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
   const isMobile = window.innerWidth <= 768;
-  const isAdmin = localStorage.getItem('role') === 'admin' || localStorage.getItem('role') === 'superadmin';
+  const [currentUser, setCurrentUser] = useState(null);
+  const isSupport = (currentUser?.role || localStorage.getItem('role')) === 'superadmin';
   const [tab, setTab] = useState(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
     if (requestedTab === 'account') return 8;
@@ -197,7 +208,11 @@ export default function Settings() {
   const [technicalContactBusy, setTechnicalContactBusy] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [showAgentStartupGuide, setShowAgentStartupGuide] = useState(false);
-  const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => !HIDDEN_TAB_INDEXES.has(index) && (!TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index])));
+  const visibleTabIndexes = TABS.map((_, index) => index).filter((index) => (
+    !HIDDEN_TAB_INDEXES.has(index)
+    && (isSupport || !SUPPORT_ONLY_TAB_INDEXES.has(index))
+    && (!TAB_PERMISSIONS[index] || can(TAB_PERMISSIONS[index]))
+  ));
 
   useEffect(() => {
     if (!visibleTabIndexes.includes(tab)) setTab(visibleTabIndexes[0] ?? 8);
@@ -251,6 +266,7 @@ export default function Settings() {
     }
 
     if (meResult.status === 'fulfilled') {
+      setCurrentUser(meResult.value.data);
       setProfile({ name: meResult.value.data.name, email: meResult.value.data.email, password: '', avatarUrl: meResult.value.data.avatarUrl || '' });
       setTenant(meResult.value.data.tenant);
     }
@@ -293,6 +309,7 @@ export default function Settings() {
 
     try {
       const settingsToSave = { ...form };
+      if (!isSupport) SUPPORT_ONLY_FORM_FIELDS.forEach((field) => delete settingsToSave[field]);
       // The API masks stored secrets in read responses. Never send that visual
       // placeholder back as if it were a real agent token.
       if (isMaskedSecret(settingsToSave.firebirdClientToken)) {
@@ -849,7 +866,7 @@ export default function Settings() {
           <div style={s.card}>
             <h2 style={s.cardTitle}>Configurações gerais</h2>
             <form onSubmit={handleSave} style={s.form}>
-              {isAdmin && (
+              {isSupport && (
                 <>
                   <div style={s.field}>
                     <label style={s.label}>URL da API (Evolution)</label>
@@ -903,7 +920,7 @@ export default function Settings() {
                 <p style={s.hint}>Este nome aparece para a equipe no chat interno.</p>
               </div>
 
-              <div style={s.field}>
+              <div style={isSupport ? s.field : { display: 'none' }}>
                 <label style={s.label}>Provedor da IA de atendimento</label>
                 <select style={s.input} value={form.aiProvider || 'gemini'} onChange={(e) => setForm({ ...form, aiProvider: e.target.value })}>
                   <option value="gemini">Google Gemini (padrão atual)</option>
@@ -913,7 +930,7 @@ export default function Settings() {
                 <p style={s.hint}>A escolha vale para respostas, resumos e classificações. Pode ser alterada sem afetar o histórico.</p>
               </div>
 
-              <div style={s.field}>
+              <div style={isSupport ? s.field : { display: 'none' }}>
                 <label style={s.label}>{form.aiProvider === 'openai' ? 'Chave da OpenAI' : form.aiProvider === 'anthropic' ? 'Chave da Anthropic' : 'Chave Gemini'}</label>
                 <input
                   style={s.input}
@@ -926,11 +943,11 @@ export default function Settings() {
                 <p style={s.hint}>Cole a chave e clique em <strong>Validar e listar modelos</strong> abaixo.</p>
               </div>
 
-              <button type="button" style={{ ...s.saveBtn, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={handleTestAi} disabled={testingAi}>
+              {isSupport && <button type="button" style={{ ...s.saveBtn, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={handleTestAi} disabled={testingAi}>
                 {testingAi ? 'Validando...' : 'Validar e listar modelos'}
-              </button>
+              </button>}
 
-              {form.aiProvider !== 'gemini' && (() => {
+              {isSupport && form.aiProvider !== 'gemini' && (() => {
                 const catalog = form.aiModelCatalog?.[form.aiProvider]?.models || [];
                 const known = catalog.some((m) => (typeof m === 'string' ? m : m.id) === form.aiModel);
                 return (
@@ -962,7 +979,7 @@ export default function Settings() {
                 );
               })()}
 
-              {form.aiProvider === 'anthropic' && (
+              {isSupport && form.aiProvider === 'anthropic' && (
                 <div style={s.field}>
                   <label style={s.label}>Motor auxiliar (embeddings e áudio)</label>
                   <select style={s.input} value={form.aiAuxProvider || ''} onChange={(e) => setForm({ ...form, aiAuxProvider: e.target.value || null })}>
@@ -988,7 +1005,7 @@ export default function Settings() {
                 </div>
               )}
 
-              <div style={s.field}>
+              <div style={isSupport ? s.field : { display: 'none' }}>
                 <label style={s.label}>Chave SerpAPI (Prospecção de Leads)</label>
                 <input
                   style={s.input}
@@ -1000,7 +1017,7 @@ export default function Settings() {
                 <p style={s.hint}>Cadastre-se grátis em serpapi.com — 250 buscas/mês gratuitas.</p>
               </div>
 
-              <div style={s.field}>
+              <div style={isSupport ? s.field : { display: 'none' }}>
                 <label style={s.label}>URL do webhook externo</label>
                 <input
                   style={s.input}

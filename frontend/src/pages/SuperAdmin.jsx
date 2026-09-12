@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Building2, Copy, KeyRound, LogIn, MessageSquare, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
+import { Activity, Building2, Copy, KeyRound, LogIn, MessageSquare, PackageCheck, Pencil, Plus, Power, RotateCw, Server, Upload, Users, Wifi } from 'lucide-react';
 import { toast } from '../utils/toast';
 import {
   getTenants, createTenant, updateTenant, uploadFile, getMediaUrl,
   getTenantUsers, createTenantUser, updateTenantUser, getFirebirdAgents,
   startSupportSession,
+  getFeatureCatalog, getTenantEntitlements, updateTenantEntitlements,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -32,6 +33,8 @@ export default function SuperAdmin() {
   const [pendingId, setPendingId] = useState(null);
   const [usersModal, setUsersModal] = useState(null);
   const [fbAgents, setFbAgents] = useState(null);
+  const [featureCatalog, setFeatureCatalog] = useState({ features: [], plans: [] });
+  const [entitlementsModal, setEntitlementsModal] = useState(null);
 
   useEffect(() => {
     load();
@@ -40,7 +43,7 @@ export default function SuperAdmin() {
   async function load() {
     setLoading(true);
     try {
-      const [tenantsResult, agentsResult] = await Promise.allSettled([getTenants(), getFirebirdAgents()]);
+      const [tenantsResult, agentsResult, featuresResult] = await Promise.allSettled([getTenants(), getFirebirdAgents(), getFeatureCatalog()]);
       if (tenantsResult.status === 'fulfilled') {
         setTenants(tenantsResult.value.data);
       } else {
@@ -48,6 +51,13 @@ export default function SuperAdmin() {
       }
       // O inventário do agente é secundário: uma falha aqui não derruba a tela.
       if (agentsResult.status === 'fulfilled') setFbAgents(agentsResult.value.data);
+      if (featuresResult.status === 'fulfilled') {
+        const payload = featuresResult.value.data || {};
+        setFeatureCatalog({
+          features: Array.isArray(payload) ? payload : (payload.features || []),
+          plans: payload.plans || payload.productPlans || [],
+        });
+      }
     } catch (e) {
       toast.error(e.response?.data?.error || 'Não foi possível carregar as empresas. Verifique sua conexão ou permissão de acesso.');
     } finally {
@@ -360,6 +370,9 @@ export default function SuperAdmin() {
                       <button style={s.iconBtn} onClick={() => setUsersModal(tenant)} title={`Logins de ${tenant.name}`}>
                         <KeyRound size={16} />
                       </button>
+                      <button style={s.iconBtn} onClick={() => setEntitlementsModal(tenant)} title={`Plano e recursos de ${tenant.name}`}>
+                        <PackageCheck size={16} />
+                      </button>
                       <button style={s.iconBtn} onClick={() => openModal(tenant)} title="Editar empresa">
                         <Pencil size={16} />
                       </button>
@@ -569,7 +582,132 @@ export default function SuperAdmin() {
       {usersModal ? (
         <LoginsModal tenant={usersModal} onClose={() => setUsersModal(null)} onChanged={load} />
       ) : null}
+      {entitlementsModal ? (
+        <EntitlementsModal
+          tenant={entitlementsModal}
+          catalog={featureCatalog}
+          onClose={() => setEntitlementsModal(null)}
+          onChanged={load}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function EntitlementsModal({ tenant, catalog, onClose, onChanged }) {
+  const [model, setModel] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getTenantEntitlements(tenant.id)
+      .then(({ data }) => {
+        if (!active) return;
+        const value = data?.entitlements || data || {};
+        const overrides = value.featureOverrides || value.overrides || Object.fromEntries(
+          (value.features || []).filter((feature) => feature.source === 'override').map((feature) => [feature.key, feature.enabled])
+        );
+        setModel({
+          planKey: value.planKey || value.planCode || value.plan?.code || value.plan?.key || tenant.plan || 'starter',
+          featureOverrides: Array.isArray(overrides)
+            ? Object.fromEntries(overrides.filter((item) => item.enabled != null).map((item) => [item.featureKey || item.key, item.enabled]))
+            : overrides,
+          limits: { ...(value.limits || {}), maxUsers: tenant.maxUsers, maxConnections: tenant.maxConnections },
+        });
+      })
+      .catch((error) => {
+        toast.error(error.response?.data?.error || 'Não foi possível carregar os recursos da empresa.');
+        onClose();
+      });
+    return () => { active = false; };
+  }, [tenant.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const features = catalog.features || [];
+  const plans = catalog.plans || [];
+  const selectedPlan = plans.find((plan) => String(plan.code || plan.key || plan.id) === String(model?.planKey));
+  const planFeatures = new Set((selectedPlan?.features || []).filter((item) => item.enabled !== false).map((item) => String(item.feature?.key || item.key || item.featureKey || item)));
+  const effectiveEnabled = (key) => Object.prototype.hasOwnProperty.call(model?.featureOverrides || {}, key)
+    ? Boolean(model.featureOverrides[key])
+    : planFeatures.has(key);
+
+  function cycleOverride(key) {
+    setModel((current) => {
+      const overrides = { ...current.featureOverrides };
+      const inherited = planFeatures.has(key);
+      if (!Object.prototype.hasOwnProperty.call(overrides, key)) overrides[key] = !inherited;
+      else if (overrides[key] === !inherited) delete overrides[key];
+      else overrides[key] = !inherited;
+      return { ...current, featureOverrides: overrides };
+    });
+  }
+
+  async function save() {
+    setBusy(true);
+    try {
+      if (model.planKey !== tenant.plan) await updateTenant(tenant.id, { plan: model.planKey });
+      await updateTenantEntitlements(tenant.id, {
+        overrides: features.map((feature) => ({
+          featureId: feature.id,
+          enabled: Object.prototype.hasOwnProperty.call(model.featureOverrides, feature.key)
+            ? model.featureOverrides[feature.key]
+            : null,
+          reason: 'Configuração comercial pelo painel mestre',
+        })).filter((item) => item.featureId),
+      });
+      const tenantLimits = {};
+      if (model.limits?.maxUsers != null) tenantLimits.maxUsers = model.limits.maxUsers;
+      if (model.limits?.maxConnections != null) tenantLimits.maxConnections = model.limits.maxConnections;
+      if (Object.keys(tenantLimits).length) await updateTenant(tenant.id, tenantLimits);
+      toast.success(`Plano e recursos de ${tenant.name} atualizados.`);
+      onChanged?.();
+      onClose();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Não foi possível salvar o pacote da empresa.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <ModalShell kicker={`Pacote · ${tenant.name}`} title="Plano, adicionais e limites" onClose={onClose} maxWidth="48rem">
+      {!model ? <div style={s.empty}>Carregando pacote contratado...</div> : (
+        <div style={s.form}>
+          <div style={s.field}>
+            <label style={s.label}>Plano base</label>
+            <select style={s.input} value={model.planKey} onChange={(event) => setModel({ ...model, planKey: event.target.value, featureOverrides: {} })}>
+              {(plans.length ? plans : [{ code: 'starter', name: 'Essencial' }, { code: 'pro', name: 'Profissional' }, { code: 'enterprise', name: 'Enterprise' }]).map((plan) => (
+                <option key={plan.code || plan.key || plan.id} value={plan.code || plan.key || plan.id}>{plan.name || plan.label || plan.code || plan.key}</option>
+              ))}
+            </select>
+            <span style={s.companyMeta}>Trocar o plano restaura os recursos padrão; depois aplique exceções individuais abaixo.</span>
+          </div>
+
+          <div style={s.entitlementGrid}>
+            {features.map((feature) => {
+              const key = String(feature.key || feature.id);
+              const overridden = Object.prototype.hasOwnProperty.call(model.featureOverrides, key);
+              return (
+                <button key={key} type="button" style={{ ...s.entitlementItem, ...(effectiveEnabled(key) ? s.entitlementEnabled : {}) }} onClick={() => cycleOverride(key)}>
+                  <span style={{ textAlign: 'left' }}><strong>{feature.name || feature.label || key}</strong><small style={s.entitlementDescription}>{feature.description || key}</small></span>
+                  <span style={{ ...s.badge, ...(overridden ? s.badgeAccent : s.badgeMuted) }}>{overridden ? (effectiveEnabled(key) ? 'Adicional' : 'Bloqueado') : 'Do plano'}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={s.twoCols}>
+            {Object.entries(model.limits || {}).map(([key, value]) => (
+              <div style={s.field} key={key}>
+                <label style={s.label}>{key.replace(/([A-Z])/g, ' $1').replace(/^max /i, 'Máximo de ')}</label>
+                <input style={s.input} type="number" min="0" value={value ?? ''} onChange={(event) => setModel({ ...model, limits: { ...model.limits, [key]: event.target.value === '' ? null : Number(event.target.value) } })} />
+              </div>
+            ))}
+          </div>
+          <div style={s.modalFooter}>
+            <ActionButton variant="secondary" onClick={onClose}>Cancelar</ActionButton>
+            <ActionButton onClick={save} disabled={busy}>{busy ? 'Salvando...' : 'Aplicar pacote'}</ActionButton>
+          </div>
+        </div>
+      )}
+    </ModalShell>
   );
 }
 
@@ -774,6 +912,10 @@ const s = {
   },
   empty: { padding: 'var(--space-10) var(--space-6)', textAlign: 'center', color: 'var(--text-muted)' },
   loginRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-base)' },
+  entitlementGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 'var(--space-2)' },
+  entitlementItem: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', padding: 'var(--space-3)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-muted)', background: 'var(--bg-base)', cursor: 'pointer' },
+  entitlementEnabled: { borderColor: 'var(--accent-border)', background: 'var(--accent-light)', color: 'var(--text-main)' },
+  entitlementDescription: { display: 'block', marginTop: '4px', color: 'var(--text-dim)', fontSize: 'var(--text-xs)', fontWeight: 500 },
   roleTag: { fontSize: 'var(--text-xs)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '1px 6px', marginLeft: '6px' },
   form: { padding: 'var(--space-8)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' },
   field: { display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' },

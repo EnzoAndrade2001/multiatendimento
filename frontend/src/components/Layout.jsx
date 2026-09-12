@@ -43,9 +43,9 @@ const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm', '/revenue'];
 const NAV_SECTION_ORDER = ['Clientes & conversas', 'Aquisição', 'Inteligência & gestão', 'Sistema'];
 
 const MOBILE_LINKS = [
-  { to: '/dashboard', icon: <LayoutDashboard size={22} />, label: 'Dash', permission: 'dashboard.view' },
-  { to: '/inbox', icon: <MessageSquare size={22} />, label: 'Chat', permission: 'inbox.view' },
-  { to: '/crm', icon: <Database size={22} />, label: 'CRM', permission: 'crm.view' },
+  { to: '/dashboard', icon: <LayoutDashboard size={22} />, label: 'Dash', permission: 'dashboard.view', feature: 'dashboard' },
+  { to: '/inbox', icon: <MessageSquare size={22} />, label: 'Chat', permission: 'inbox.view', feature: 'inbox' },
+  { to: '/crm', icon: <Database size={22} />, label: 'CRM', permission: 'crm.view', feature: 'crm' },
   { to: '/settings', icon: <Settings size={22} />, label: 'Ajustes' },
 ];
 
@@ -59,7 +59,7 @@ function getInstanceHealth(instance) {
 }
 
 export default function Layout() {
-  const { can } = usePermissions();
+  const { can, hasFeature } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const [notification, setNotification] = useState(null);
@@ -88,7 +88,7 @@ export default function Layout() {
   const [instances, setInstances] = useState([]);
   const [realtimeConnected, setRealtimeConnected] = useState(true);
   const isMobile = useIsMobile();
-  const canUseInternalChat = can('internal_chat.view');
+  const canUseInternalChat = can('internal_chat.view') && hasFeature('internal_chat');
 
   function getNotificationBody(message) {
     const text = message?.body?.trim();
@@ -358,31 +358,31 @@ export default function Layout() {
 
   const desktopLinks = React.useMemo(() => [
     // Barra principal
-    { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard', permission: 'dashboard.view', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/inbox', icon: <MessageSquare size={18} />, label: 'Chat', permission: 'inbox.view', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/crm', icon: <Database size={18} />, label: 'CRM', permission: 'crm.view', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/revenue', icon: <Coins size={18} />, label: 'iLux Sentinela', permission: 'revenue.view', roles: ['admin', 'superadmin'] },
+    { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard', permission: 'dashboard.view', feature: 'dashboard', roles: ['admin', 'agent', 'superadmin'] },
+    { to: '/inbox', icon: <MessageSquare size={18} />, label: 'Chat', permission: 'inbox.view', feature: 'inbox', roles: ['admin', 'agent', 'superadmin'] },
+    { to: '/crm', icon: <Database size={18} />, label: 'CRM', permission: 'crm.view', feature: 'crm', roles: ['admin', 'agent', 'superadmin'] },
+    { to: '/revenue', icon: <Coins size={18} />, label: 'iLux Sentinela', permission: 'revenue.view', feature: 'ilux_sentinel', roles: ['admin', 'superadmin'] },
     // Operação › Clientes & conversas
-    { section: 'Clientes & conversas', action: () => setIsChatOpen(true), icon: <MessageCircle size={18} />, label: 'Chat Interno', permission: 'internal_chat.view', roles: ['admin', 'agent', 'superadmin'] },
-    { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Clientes & conversas', action: () => setIsChatOpen(true), icon: <MessageCircle size={18} />, label: 'Chat Interno', permission: 'internal_chat.view', feature: 'internal_chat', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', feature: 'contacts', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Clientes & conversas', to: '/quick-responses', icon: <Zap size={18} />, label: 'Respostas Rápidas', permission: 'quick_responses.manage', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Aquisição
-    { section: 'Aquisição', to: '/campaigns', icon: <Megaphone size={18} />, label: 'Campanhas', permission: 'campaigns.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Aquisição', to: '/campaigns', icon: <Megaphone size={18} />, label: 'Campanhas', permission: 'campaigns.manage', feature: 'campaigns', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', feature: 'lead_generation', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Inteligência & gestão
-    { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
-    { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', roles: ['admin', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', feature: 'ai_knowledge', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', feature: 'telemetry', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', feature: 'billing_reports', roles: ['admin', 'superadmin'] },
     // Operação › Sistema
     { section: 'Sistema', to: '/connections', icon: <LinkIcon size={18} />, label: 'Conexões', permission: 'connections.manage', roles: ['admin', 'agent', 'superadmin'] },
-    { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', roles: ['admin', 'superadmin'] },
+    { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', feature: 'audit', roles: ['admin', 'superadmin'] },
     { section: 'Sistema', to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Sistema', to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Sistema', to: '/superadmin', icon: <ShieldCheck size={18} />, label: 'Painel Admin', roles: ['superadmin'] },
   ], [setIsChatOpen]);
 
   const visibleDesktopLinks = desktopLinks.filter((link) => (
-    link.to === '/superadmin' ? role === 'superadmin' : (!link.permission || can(link.permission))
+    link.to === '/superadmin' ? role === 'superadmin' : ((!link.permission || can(link.permission)) && (!link.feature || hasFeature(link.feature)))
   ));
   const primaryDesktopLinks = visibleDesktopLinks.filter((link) => PRIMARY_NAV_PATHS.includes(link.to));
   const secondaryDesktopLinks = visibleDesktopLinks.filter((link) => !PRIMARY_NAV_PATHS.includes(link.to));
@@ -595,7 +595,7 @@ export default function Layout() {
 
       {isMobile ? (
         <div style={styles.bottomNav}>
-          {MOBILE_LINKS.filter((link) => !link.permission || can(link.permission)).map((link) => (
+          {MOBILE_LINKS.filter((link) => (!link.permission || can(link.permission)) && (!link.feature || hasFeature(link.feature))).map((link) => (
             <NavLink key={link.to} to={link.to} style={({ isActive }) => ({ ...styles.bottomLink, ...(isActive ? styles.bottomLinkActive : {}) })}>
               {link.icon}
               <span style={styles.bottomLabel}>{link.label}</span>

@@ -3,11 +3,12 @@ const router = express.Router();
 const knowledgeController = require('../controllers/knowledgeController');
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const documentController = require('../controllers/knowledgeDocumentController');
 const { handleKnowledgeUpload } = require('../middlewares/knowledgeUpload');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('settings.bot.manage'));
+router.use(authenticate, requirePermission('settings.bot.manage'), requireEntitlement('ai_knowledge'));
 
 router.get('/', knowledgeController.list);
 router.get('/stats', knowledgeController.stats);

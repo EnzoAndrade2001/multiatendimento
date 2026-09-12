@@ -70,6 +70,62 @@ model Tenant {
   crmBillingStatementLines   CrmBillingStatementLine[]
   waInstanceHealthEvents     WaInstanceHealthEvent[]
   firebirdAgents             FirebirdAgent[]
+  featureOverrides           TenantFeatureOverride[]
+}
+
+model Feature {
+  id          String                  @id @default(cuid())
+  key         String                  @unique
+  name        String
+  description String?
+  category    String?
+  active      Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  plans       PlanFeature[]
+  overrides   TenantFeatureOverride[]
+}
+
+model ProductPlan {
+  id          String        @id @default(cuid())
+  code        String        @unique
+  name        String
+  description String?
+  active      Boolean       @default(true)
+  position    Int           @default(0)
+  limits      Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  features    PlanFeature[]
+}
+
+model PlanFeature {
+  id        String      @id @default(cuid())
+  planId    String
+  featureId String
+  enabled   Boolean     @default(true)
+  limits    Json?
+  plan      ProductPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature   Feature     @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, featureId])
+  @@index([featureId])
+}
+
+model TenantFeatureOverride {
+  id        String   @id @default(cuid())
+  tenantId  String
+  featureId String
+  enabled   Boolean?
+  limits    Json?
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feature   Feature  @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, featureId])
+  @@index([featureId])
 }
 
 model TenantSettings {

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const {
   queue, action, parkQueue, parkCoverage, parkRanking, parkTimeline, parkConsolidate,
   parkBindingCandidates, parkResolveBinding, parkAssign, parkNotify, parkManagementMetrics, parkBulk, parkDecisionHistory,
@@ -8,10 +9,11 @@ const {
 const auditEvent = require('../middlewares/auditEvent');
 
 router.use(authenticate);
-router.get('/queue', requirePermission('telemetry.view'), queue);
-router.post('/events/:eventId/:action', auditEvent((req) => `PRINTGUARD_EVENT_${String(req.params.action || '').toUpperCase()}`, 'printguard_event'), requirePermission('telemetry.manage'), action);
+router.get('/queue', requirePermission('telemetry.view'), requireEntitlement('telemetry'), queue);
+router.post('/events/:eventId/:action', auditEvent((req) => `PRINTGUARD_EVENT_${String(req.params.action || '').toUpperCase()}`, 'printguard_event'), requirePermission('telemetry.manage'), requireEntitlement('telemetry'), action);
 
 // Cockpit "Saude do Parque"
+router.use('/park', requireEntitlement('park_health'));
 router.get('/park/queue', requirePermission('telemetry.view'), parkQueue);
 router.get('/park/coverage', requirePermission('telemetry.view'), parkCoverage);
 router.get('/park/ranking', requirePermission('telemetry.view'), parkRanking);

@@ -20,7 +20,7 @@ function requestWithHeaders(headers = {}) {
 }
 
 test('settings mascara secrets autorizados e nao os entrega ao navegador', () => {
-  const user = { role: 'agent', permissions: ['connections.manage', 'settings.bot.manage', 'settings.agent.manage', 'leads.manage'] };
+  const user = { role: 'superadmin', permissions: ['connections.manage', 'settings.bot.manage', 'settings.agent.manage', 'leads.manage'] };
   assert.deepEqual(filterSettingsOutput(user, {
     evolutionKey: 'evolution-secret', geminiKey: 'gemini-secret', serpApiKey: 'serp-secret',
     firebirdApiKey: 'firebird-secret', firebirdClientToken: 'sync-secret',
@@ -31,7 +31,7 @@ test('settings mascara secrets autorizados e nao os entrega ao navegador', () =>
 });
 
 test('settings ignora secrets vazios ou mascarados para preservar valores atuais', () => {
-  const user = { role: 'agent', permissions: ['connections.manage', 'settings.bot.manage', 'settings.agent.manage', 'leads.manage'] };
+  const user = { role: 'superadmin', permissions: ['connections.manage', 'settings.bot.manage', 'settings.agent.manage', 'leads.manage'] };
   assert.deepEqual(filterSettingsInput(user, {
     evolutionUrl: 'https://evolution.example', evolutionKey: '', geminiKey: '   ',
     serpApiKey: SECRET_PLACEHOLDER, firebirdApiKey: null, firebirdClientToken: 'novo-token',

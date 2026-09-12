@@ -1,10 +1,11 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const controller = require('../controllers/campaignController');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('campaigns.manage'));
+router.use(authenticate, requirePermission('campaigns.manage'), requireEntitlement('campaigns'));
 router.get('/instances', controller.listInstances);
 router.get('/templates', controller.templates);
 router.post('/templates', auditEvent('CAMPAIGN_TEMPLATE_CREATE', 'campaign_template'), controller.createTemplate);

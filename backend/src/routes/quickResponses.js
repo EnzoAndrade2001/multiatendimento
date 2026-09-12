@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const {
   listQuickResponses,
   createQuickResponse,
@@ -14,7 +15,7 @@ const {
 } = require('../controllers/quickResponseController');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('quick_responses.manage'));
+router.use(authenticate, requirePermission('quick_responses.manage'), requireEntitlement('quick_responses'));
 router.get('/', listQuickResponses);
 router.get('/stats', stats);
 router.get('/audit', listQuickResponseAudit);

@@ -1,11 +1,12 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const controller = require('../controllers/internalMessageController');
 const { internalChatUpload } = require('../middlewares/internalChatUpload');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('internal_chat.view'));
+router.use(authenticate, requirePermission('internal_chat.view'), requireEntitlement('internal_chat'));
 router.get('/conversations', controller.listConversations);
 router.get('/conversations/:key/messages', controller.listConversationMessages);
 router.patch('/conversations/:key/read', auditEvent('INTERNAL_CONVERSATION_READ', 'internal_conversation', { resourceId: (req) => req.params.key }), controller.markRead);

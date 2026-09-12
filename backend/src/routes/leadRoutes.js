@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const auth = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const leadController = require('../controllers/leadController');
 const { uploadsPath } = require('../utils/uploads');
 const auditEvent = require('../middlewares/auditEvent');
@@ -20,7 +21,7 @@ const leadUpload = multer({
   },
 });
 
-router.use(auth, requirePermission('leads.manage'));
+router.use(auth, requirePermission('leads.manage'), requireEntitlement('lead_generation'));
 
 router.get('/', leadController.getLeads);
 router.get('/instances', leadController.getLeadInstances);

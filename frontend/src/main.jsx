@@ -57,6 +57,16 @@ function RequireRole({ role, children }) {
   return currentRole === role ? children : <Forbidden />;
 }
 
+function RequireFeature({ feature, children }) {
+  const { hasFeature, loading } = usePermissions();
+  if (loading) return <RouteFallback />;
+  return hasFeature(feature) ? children : <Forbidden />;
+}
+
+function RequireAccess({ permission, feature, children }) {
+  return <RequirePermission permission={permission}><RequireFeature feature={feature}>{children}</RequireFeature></RequirePermission>;
+}
+
 function LocalMockRoute() {
   const enabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_MOCK_UI === 'true';
   return enabled ? <MockInbox /> : <Navigate to="/login" replace />;
@@ -177,25 +187,25 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               </PrivateRoute>
             )}
           >
-            <Route path="/dashboard" element={<RequirePermission permission="dashboard.view"><Dashboard /></RequirePermission>} />
-            <Route index element={<RequirePermission permission="dashboard.view"><Dashboard /></RequirePermission>} />
-            <Route path="/inbox" element={<RequirePermission permission="inbox.view"><Inbox /></RequirePermission>} />
-            <Route path="/contacts" element={<RequirePermission permission="crm.view"><Contacts /></RequirePermission>} />
-            <Route path="/crm" element={<RequirePermission permission="crm.view"><CRM /></RequirePermission>} />
+            <Route path="/dashboard" element={<RequireAccess permission="dashboard.view" feature="dashboard"><Dashboard /></RequireAccess>} />
+            <Route index element={<RequireAccess permission="dashboard.view" feature="dashboard"><Dashboard /></RequireAccess>} />
+            <Route path="/inbox" element={<RequireAccess permission="inbox.view" feature="inbox"><Inbox /></RequireAccess>} />
+            <Route path="/contacts" element={<RequireAccess permission="crm.view" feature="contacts"><Contacts /></RequireAccess>} />
+            <Route path="/crm" element={<RequireAccess permission="crm.view" feature="crm"><CRM /></RequireAccess>} />
             <Route path="/users" element={<RequirePermission permission="users.manage"><Users /></RequirePermission>} />
             <Route path="/teams" element={<RequirePermission permission="teams.manage"><Teams /></RequirePermission>} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/connections" element={<RequirePermission permission="connections.manage"><Connections /></RequirePermission>} />
-            <Route path="/knowledge" element={<RequirePermission permission="settings.bot.manage"><KnowledgeBase /></RequirePermission>} />
-            <Route path="/campaigns" element={<RequirePermission permission="campaigns.manage"><Campaigns /></RequirePermission>} />
+              <Route path="/settings" element={<RequireFeature feature="settings"><Settings /></RequireFeature>} />
+              <Route path="/connections" element={<RequireAccess permission="connections.manage" feature="connections"><Connections /></RequireAccess>} />
+            <Route path="/knowledge" element={<RequireAccess permission="settings.bot.manage" feature="ai_knowledge"><KnowledgeBase /></RequireAccess>} />
+            <Route path="/campaigns" element={<RequireAccess permission="campaigns.manage" feature="campaigns"><Campaigns /></RequireAccess>} />
             <Route path="/os" element={<Navigate to="/inbox" replace />} />
-            <Route path="/quick-responses" element={<RequirePermission permission="quick_responses.manage"><QuickResponses /></RequirePermission>} />
+              <Route path="/quick-responses" element={<RequireAccess permission="quick_responses.manage" feature="quick_responses"><QuickResponses /></RequireAccess>} />
             <Route path="/superadmin" element={<RequireRole role="superadmin"><SuperAdmin /></RequireRole>} />
-            <Route path="/leads" element={<RequirePermission permission="leads.manage"><LeadScraper /></RequirePermission>} />
-            <Route path="/revenue" element={<RequirePermission permission="revenue.view"><RevGuard /></RequirePermission>} />
-            <Route path="/billing-reports" element={<RequirePermission permission="billing.view"><BillingReports /></RequirePermission>} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/audit" element={<RequirePermission permission="audit.view"><Audit /></RequirePermission>} />
+            <Route path="/leads" element={<RequireAccess permission="leads.manage" feature="lead_generation"><LeadScraper /></RequireAccess>} />
+            <Route path="/revenue" element={<RequireAccess permission="revenue.view" feature="ilux_sentinel"><RevGuard /></RequireAccess>} />
+            <Route path="/billing-reports" element={<RequireAccess permission="billing.view" feature="billing_reports"><BillingReports /></RequireAccess>} />
+              <Route path="/privacy" element={<RequireFeature feature="privacy"><Privacy /></RequireFeature>} />
+            <Route path="/audit" element={<RequireAccess permission="audit.view" feature="audit"><Audit /></RequireAccess>} />
             <Route path="/telemetry" element={<Navigate to="/revenue?area=parque&section=fila" replace />} />
           </Route>
 

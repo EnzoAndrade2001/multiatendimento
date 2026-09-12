@@ -44,6 +44,7 @@ const mediaRoutes = require('./routes/media');
 const auditEventRoutes = require('./routes/auditEvents');
 const printGuardRoutes = require('./routes/printGuard');
 const telemetryRoutes = require('./routes/telemetry');
+const entitlementRoutes = require('./routes/entitlements');
 const { setIo: setIoPrintGuard } = require('./services/printGuardService');
 const instanceHealthService = require('./services/instanceHealthService');
 
@@ -198,6 +199,7 @@ app.use('/api/technical-contacts', require('./routes/technicalContacts'));
 app.use('/api/teams', teamRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/superadmin', superadminRoutes);
+app.use('/api/entitlements', entitlementRoutes);
 app.use('/api/quick-responses', quickResponseRoutes);
 app.use('/api/internal-messages', internalMessageRoutes);
 app.use('/api/scheduled-messages', scheduledMessageRoutes);

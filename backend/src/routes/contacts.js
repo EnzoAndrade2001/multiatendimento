@@ -1,12 +1,13 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const upload = require('../middlewares/upload');
 const { list, getHistory, updateContact, linkCrm, getMedia, create, getTags, importExcel, deleteContact } = require('../controllers/contactController');
 const auditSensitiveAction = require('../middlewares/auditSensitiveAction');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('inbox.view', 'crm.view'));
+router.use(authenticate, requirePermission('inbox.view', 'crm.view'), requireEntitlement('contacts'));
 router.get('/', list);
 router.post('/', auditEvent('CONTACT_CREATE', 'contact'), create);
 router.post('/import', upload.single('file'), auditEvent('CONTACT_IMPORT', 'contact'), importExcel);

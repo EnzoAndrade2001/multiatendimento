@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const {
   getSummary,
@@ -22,6 +23,7 @@ const auditEvent = require('../middlewares/auditEvent');
 
 router.use(authenticate);
 router.use(requirePermission('crm.view'));
+router.use(requireEntitlement('crm'));
 
 router.get('/summary', asyncRoute(getSummary));
 // Keep export before /customers/:id so the literal path is not interpreted as an id.

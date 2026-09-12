@@ -241,6 +241,10 @@ export const getTenantUsers = (id) => api.get(`/superadmin/tenants/${id}/users`)
 export const createTenantUser = (id, data) => api.post(`/superadmin/tenants/${id}/users`, data);
 export const updateTenantUser = (id, userId, data) => api.patch(`/superadmin/tenants/${id}/users/${userId}`, data);
 export const startSupportSession = (id, reason) => api.post(`/superadmin/tenants/${id}/support-session`, { reason });
+export const getFeatureCatalog = () => api.get('/superadmin/product-catalog');
+export const getTenantEntitlements = (id) => api.get(`/superadmin/tenants/${id}/entitlements`);
+export const updateTenantEntitlements = (id, data) => api.put(`/superadmin/tenants/${id}/entitlements`, data);
+export const getCurrentEntitlements = () => api.get('/entitlements/me');
 export const endSupportSession = () => api.post('/superadmin/support-session/end');
 
 // Quick Responses

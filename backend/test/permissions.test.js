@@ -14,6 +14,8 @@ const authenticate = require('../src/middlewares/authenticate');
 const requireTicketAccess = require('../src/middlewares/requireTicketAccess');
 const prisma = require('../src/lib/prisma');
 const { filterSettingsInput, filterSettingsOutput } = require('../src/auth/settingsAccess');
+const filterSettingsAccess = require('../src/middlewares/filterSettingsAccess');
+const requireSupportAccess = require('../src/middlewares/requireSupportAccess');
 
 function responseRecorder() {
   return {
@@ -84,6 +86,35 @@ test('configuracoes sao filtradas por campo, inclusive segredos', () => {
     outOfOfficeMessage: 'fora do horario',
     evolutionKey: 'segredo',
   }), { tenantId: 'tenant', outOfOfficeMessage: 'fora do horario' });
+});
+
+test('configuracoes tecnicas ficam restritas ao superadmin de suporte', () => {
+  const admin = { role: 'admin', permissions: ['settings.bot.manage', 'settings.agent.manage', 'connections.manage', 'revenue.view'] };
+  assert.deepEqual(filterSettingsInput(admin, {
+    botEnabled: true,
+    evolutionKey: 'secret',
+    firebirdApiKey: 'secret',
+    kpiContractValue: 100,
+  }), { botEnabled: true });
+  assert.deepEqual(filterSettingsOutput(admin, {
+    tenantId: 'tenant', botEnabled: true, evolutionKey: 'secret', firebirdApiKey: 'secret',
+  }), { tenantId: 'tenant', botEnabled: true });
+
+  const support = { role: 'superadmin', permissions: [] };
+  assert.deepEqual(filterSettingsInput(support, { evolutionKey: 'new-secret' }), { evolutionKey: 'new-secret' });
+  assert.deepEqual(filterSettingsOutput(support, { evolutionKey: 'stored-secret' }), { evolutionKey: '********' });
+});
+
+test('tentativa direta de gravar campo tecnico retorna 403', () => {
+  const req = { user: { role: 'admin', permissions: ['settings.bot.manage'] }, body: { botEnabled: true, geminiKey: 'secret' } };
+  const res = responseRecorder();
+  filterSettingsAccess(req, res, () => assert.fail('nao deveria autorizar'));
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body.fields, ['geminiKey']);
+
+  let called = false;
+  requireSupportAccess({ user: { role: 'superadmin', supportMode: true } }, responseRecorder(), () => { called = true; });
+  assert.equal(called, true);
 });
 
 test('acesso direto ao ticket respeita responsavel e equipe', { concurrency: false }, async () => {

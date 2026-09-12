@@ -1,12 +1,13 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const requireTicketAccess = require('../middlewares/requireTicketAccess');
 const upload = require('../middlewares/upload');
 const { list, detail, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, reopen, summarize, deleteMessage, linkContact, forwardMessage, createNote } = require('../controllers/ticketController');
 const { updatePreferences } = require('../controllers/ticketPreferencesController');
 const auditEvent = require('../middlewares/auditEvent');
-router.use(authenticate, requirePermission('inbox.view'));
+router.use(authenticate, requirePermission('inbox.view'), requireEntitlement('inbox'));
 router.get('/', list);
 router.post('/', requirePermission('inbox.reopen'), auditEvent('TICKET_REOPEN', 'ticket'), reopen);
 router.get('/:id', requireTicketAccess, detail);

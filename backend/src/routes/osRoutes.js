@@ -1,11 +1,12 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes } = require('../controllers/osController');
 const { sendManagerCopy } = require('../controllers/serviceOrderManagerController');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('crm.view'));
+router.use(authenticate, requirePermission('crm.view'), requireEntitlement('service_orders'));
 
 // OS Metadata
 router.get('/types', getOSTypes);

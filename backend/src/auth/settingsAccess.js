@@ -6,9 +6,29 @@ const SECRET_SETTINGS_FIELDS = new Set([
   'plugBoletoToken',
 ]);
 
+// Infraestrutura e credenciais sao administradas pela equipe que opera o SaaS.
+// Uma permissao de tenant (inclusive o papel admin) nunca deve liberar estes
+// campos; o acesso ocorre apenas pelo superadmin, normalmente em supportMode.
+const SUPPORT_ONLY_SETTINGS_FIELDS = new Set([
+  'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog',
+  'geminiKey', 'openaiKey', 'anthropicKey',
+  'evolutionUrl', 'evolutionKey', 'webhookUrl', 'serpApiKey',
+  'firebirdClientToken', 'firebirdApiUrl', 'firebirdApiKey', 'firebirdAuthMode',
+  'firebirdHealthPath', 'firebirdContactsPath', 'firebirdSyncEnabled',
+  'firebirdLastSyncAt', 'firebirdLastSyncStatus', 'firebirdLastSyncError',
+  'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath',
+  'plugBoletoCedenteCnpj', 'plugBoletoToken', 'plugBoletoTokenSet',
+  'plugBoletoConfigSyncedAt', 'statementRerenderEnabled',
+  'kpiContractValue', 'kpiServiceValue', 'kpiSlaLimitHours', 'kpiReincidentThreshold',
+]);
+
+function hasSupportSettingsAccess(user) {
+  return user?.role === 'superadmin';
+}
+
 const SETTINGS_FIELDS = Object.freeze({
   'settings.bot.manage': [
-    'botEnabled', 'aiProvider', 'aiModel', 'geminiKey', 'openaiKey', 'anthropicKey',
+    'botEnabled', 'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog', 'geminiKey', 'openaiKey', 'anthropicKey',
     'botName', 'systemPrompt', 'transferKeyword',
   ],
   'settings.attendance.manage': [
@@ -37,9 +57,13 @@ const SETTINGS_FIELDS = Object.freeze({
 });
 
 function allowedSettingsFields(user) {
-  return new Set(Object.entries(SETTINGS_FIELDS)
+  const fields = new Set(Object.entries(SETTINGS_FIELDS)
     .filter(([permission]) => hasPermission(user, permission))
     .flatMap(([, fields]) => fields));
+  if (!hasSupportSettingsAccess(user)) {
+    SUPPORT_ONLY_SETTINGS_FIELDS.forEach((field) => fields.delete(field));
+  }
+  return fields;
 }
 
 function filterSettingsInput(user, input = {}) {
@@ -62,5 +86,6 @@ function filterSettingsOutput(user, output = {}) {
 
 module.exports = {
   SETTINGS_FIELDS, SECRET_PLACEHOLDER, SECRET_SETTINGS_FIELDS,
+  SUPPORT_ONLY_SETTINGS_FIELDS, hasSupportSettingsAccess,
   allowedSettingsFields, filterSettingsInput, filterSettingsOutput,
 };

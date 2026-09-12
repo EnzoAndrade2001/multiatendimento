@@ -1,10 +1,11 @@
 const router = require('express').Router();
 const authenticate = require('../middlewares/authenticate');
 const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
 const { list, create, getQrCode, repair, recoverMessages, remove, healthEvents } = require('../controllers/instanceController');
 const auditEvent = require('../middlewares/auditEvent');
 
-router.use(authenticate, requirePermission('connections.manage'));
+router.use(authenticate, requirePermission('connections.manage'), requireEntitlement('connections'));
 router.get('/list', list);
 router.post('/create', auditEvent('INSTANCE_CREATE', 'instance'), create);
 router.post('/:id/repair', auditEvent('INSTANCE_REPAIR', 'instance'), repair);
