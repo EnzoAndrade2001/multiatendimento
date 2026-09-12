@@ -4,7 +4,7 @@
   "main": "src/app.js",
   "scripts": {
     "dev": "nodemon src/app.js",
-    "start": "prisma db push --accept-data-loss && node src/app.js",
+    "start": "prisma migrate deploy && node src/app.js",
     "build": "prisma generate",
     "test": "node --test test/*.test.js",
     "dedupe:contacts": "node scripts/dedupeContacts.js",
