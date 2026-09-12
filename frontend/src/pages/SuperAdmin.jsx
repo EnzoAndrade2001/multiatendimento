@@ -268,7 +268,7 @@ export default function SuperAdmin() {
         actions={<div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <ActionButton variant="secondary" onClick={() => setSecurityModal(true)}><KeyRound size={18} /> Segurança</ActionButton>
           <ActionButton variant="secondary" onClick={() => setAuditModal(true)}><ClipboardCheck size={18} /> Auditoria</ActionButton>
-          {isManager && <ActionButton variant="secondary" onClick={() => setReleasesModal(true)}><Download size={18} /> VersÃµes do agente</ActionButton>}
+          {isManager && <ActionButton variant="secondary" onClick={() => setReleasesModal(true)}><Download size={18} /> Versões do agente</ActionButton>}
           {isManager && <ActionButton variant="secondary" onClick={() => setSupportModal(true)}><Users size={18} /> Equipe de suporte</ActionButton>}
           {isManager && <ActionButton variant="secondary" onClick={() => setPlansModal(true)}><PackageCheck size={18} /> Editar planos</ActionButton>}
           {isManager && <ActionButton onClick={() => openModal()}><Plus size={18} /> Nova empresa</ActionButton>}
@@ -681,7 +681,7 @@ function AgentReleasesModal({ onClose }) {
   const [busy, setBusy] = useState(null);
   const loadReleases = () => getAgentReleases()
     .then(({ data }) => setCatalog(data))
-    .catch((error) => toast.error(error.response?.data?.error || 'Falha ao carregar as versÃµes do agente.'));
+    .catch((error) => toast.error(error.response?.data?.error || 'Falha ao carregar as versões do agente.'));
   useEffect(() => { loadReleases(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function downloadRelease(release) {
@@ -698,26 +698,26 @@ function AgentReleasesModal({ onClose }) {
       URL.revokeObjectURL(url);
       toast.success(`Agente ${release.version} preparado para download.`);
     } catch (error) {
-      toast.error(error.response?.data?.error || 'NÃ£o foi possÃ­vel baixar esta versÃ£o.');
+      toast.error(error.response?.data?.error || 'Não foi possível baixar esta versão.');
     } finally {
       setBusy(null);
     }
   }
 
-  const formatSize = (bytes) => bytes == null ? 'Tamanho indisponÃ­vel' : `${(bytes / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
-  return <ModalShell kicker="DistribuiÃ§Ã£o controlada" title="VersÃµes do agente iLux" onClose={onClose} maxWidth="58rem">
+  const formatSize = (bytes) => bytes == null ? 'Tamanho indisponível' : `${(bytes / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+  return <ModalShell kicker="Distribuição controlada" title="Versões do agente iLux" onClose={onClose} maxWidth="58rem">
     <div style={s.form}>
-      <div style={s.companyMeta}>Use o download manual para a primeira instalaÃ§Ã£o da versÃ£o 1.2.0. Depois disso, as atualizaÃ§Ãµes podem ser enviadas pela Central de Agentes.</div>
-      {!catalog ? <div style={s.empty}>Carregando versÃµes...</div> : (catalog.releases || []).map((release) => <div key={release.version} style={s.loginRow}>
+      <div style={s.companyMeta}>Use o download manual para a primeira instalação da versão 1.2.0. Depois disso, as atualizações podem ser enviadas pela Central de Agentes.</div>
+      {!catalog ? <div style={s.empty}>Carregando versões...</div> : (catalog.releases || []).map((release) => <div key={release.version} style={s.loginRow}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><strong>VersÃ£o {release.version}</strong>{release.stable && <span style={{ ...s.badge, ...s.badgeAccent }}>EstÃ¡vel atual</span>}{!release.remoteUpdateCapable && <span style={s.badge}>Legada</span>}</div>
-          <div style={s.companyMeta}>{release.releasedAt ? new Date(release.releasedAt).toLocaleString('pt-BR') : 'Data nÃ£o informada'} Â· {formatSize(release.sizeBytes)}</div>
-          <code style={{ ...s.code, display: 'block', marginTop: 6, overflowWrap: 'anywhere' }}>SHA-256: {release.sha256 || 'nÃ£o informado'}</code>
-          {!release.remoteUpdateCapable && <div style={{ ...s.companyMeta, marginTop: 6 }}>Esta versÃ£o exige atualizaÃ§Ã£o manual para voltar ao ciclo remoto.</div>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><strong>Versão {release.version}</strong>{release.stable && <span style={{ ...s.badge, ...s.badgeAccent }}>Estável atual</span>}{!release.remoteUpdateCapable && <span style={s.badge}>Legada</span>}</div>
+          <div style={s.companyMeta}>{release.releasedAt ? new Date(release.releasedAt).toLocaleString('pt-BR') : 'Data não informada'} · {formatSize(release.sizeBytes)}</div>
+          <code style={{ ...s.code, display: 'block', marginTop: 6, overflowWrap: 'anywhere' }}>SHA-256: {release.sha256 || 'não informado'}</code>
+          {!release.remoteUpdateCapable && <div style={{ ...s.companyMeta, marginTop: 6 }}>Esta versão exige atualização manual para voltar ao ciclo remoto.</div>}
         </div>
         <ActionButton disabled={!release.available || busy === release.version} onClick={() => downloadRelease(release)}><Download size={16} /> {busy === release.version ? 'Baixando...' : 'Baixar'}</ActionButton>
       </div>)}
-      {catalog && !(catalog.releases || []).length && <div style={s.empty}>Nenhuma versÃ£o publicada.</div>}
+      {catalog && !(catalog.releases || []).length && <div style={s.empty}>Nenhuma versão publicada.</div>}
       <div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton></div>
     </div>
   </ModalShell>;
