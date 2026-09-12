@@ -35,7 +35,9 @@ async function upsertPlan(req, res) {
   const code = cleanCode(req.body.code);
   if (!FEATURE_KEY_RE.test(code) || !String(req.body.name || '').trim()) return res.status(400).json({ error: 'Código e nome válidos são obrigatórios.' });
   let limits; try { limits = normalizeLimits(req.body.limits); } catch (e) { return res.status(400).json({ error: e.message }); }
-  const plan = await prisma.productPlan.upsert({ where: { code }, create: { code, name: String(req.body.name).trim(), description: req.body.description || null, active: req.body.active !== false, position: Number(req.body.position) || 0, limits }, update: { name: String(req.body.name).trim(), description: req.body.description ?? undefined, active: req.body.active ?? undefined, position: req.body.position === undefined ? undefined : Number(req.body.position) || 0, limits } });
+  const monthlyPrice = Number(req.body.monthlyPrice ?? 0);
+  if (!Number.isFinite(monthlyPrice) || monthlyPrice < 0) return res.status(400).json({ error: 'Valor mensal inválido.' });
+  const plan = await prisma.productPlan.upsert({ where: { code }, create: { code, name: String(req.body.name).trim(), description: req.body.description || null, active: req.body.active !== false, position: Number(req.body.position) || 0, monthlyPrice, limits }, update: { name: String(req.body.name).trim(), description: req.body.description ?? undefined, active: req.body.active ?? undefined, position: req.body.position === undefined ? undefined : Number(req.body.position) || 0, monthlyPrice, limits } });
   res.json(plan);
 }
 

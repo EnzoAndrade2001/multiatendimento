@@ -29,7 +29,7 @@ async function ensureProductCatalog(prisma) {
   for (const [code, name, description, position, limits, enabledKeys] of PLANS) {
     const plan = await prisma.productPlan.upsert({
       where: { code }, create: { code, name, description, position, limits },
-      update: { name, description, position, limits },
+      update: {},
     });
     for (const key of enabledKeys) {
       const featureId = featureIds.get(key);

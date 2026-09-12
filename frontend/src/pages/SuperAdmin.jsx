@@ -6,6 +6,7 @@ import {
   getTenantUsers, createTenantUser, updateTenantUser, getFirebirdAgents,
   startSupportSession,
   getFeatureCatalog, getTenantEntitlements, updateTenantEntitlements,
+  updateProductPlan, updateProductPlanFeatures,
 } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -35,6 +36,7 @@ export default function SuperAdmin() {
   const [fbAgents, setFbAgents] = useState(null);
   const [featureCatalog, setFeatureCatalog] = useState({ features: [], plans: [] });
   const [entitlementsModal, setEntitlementsModal] = useState(null);
+  const [plansModal, setPlansModal] = useState(false);
 
   useEffect(() => {
     load();
@@ -226,12 +228,10 @@ export default function SuperAdmin() {
         kicker="Operacao global"
         title="Gestao SaaS"
         subtitle="Gerencie empresas, planos e limites da plataforma a partir de uma camada administrativa unica."
-        actions={
-          <ActionButton onClick={() => openModal()}>
-            <Plus size={18} />
-            Nova empresa
-          </ActionButton>
-        }
+        actions={<div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <ActionButton variant="secondary" onClick={() => setPlansModal(true)}><PackageCheck size={18} /> Editar planos</ActionButton>
+          <ActionButton onClick={() => openModal()}><Plus size={18} /> Nova empresa</ActionButton>
+        </div>}
       />
 
       <div style={s.statsRow}>
@@ -590,8 +590,53 @@ export default function SuperAdmin() {
           onChanged={load}
         />
       ) : null}
+      {plansModal ? <PlansModal catalog={featureCatalog} onClose={() => setPlansModal(false)} onChanged={load} /> : null}
     </div>
   );
+}
+
+function PlansModal({ catalog, onClose, onChanged }) {
+  const [plans, setPlans] = useState(() => (catalog.plans || []).map((plan) => ({
+    ...plan, monthlyPrice: Number(plan.monthlyPrice || 0),
+    enabledKeys: new Set((plan.features || []).filter((item) => item.enabled !== false).map((item) => item.feature?.key || item.key || item.featureKey)),
+  })));
+  const [selectedId, setSelectedId] = useState(() => plans[0]?.id || null);
+  const [busy, setBusy] = useState(false);
+  const selected = plans.find((plan) => plan.id === selectedId);
+  const change = (field, value) => setPlans((current) => current.map((plan) => plan.id === selectedId ? { ...plan, [field]: value } : plan));
+  const toggleFeature = (key) => {
+    const next = new Set(selected.enabledKeys);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    change('enabledKeys', next);
+  };
+  async function save() {
+    if (!selected?.name?.trim()) return toast.error('Informe o nome do plano.');
+    setBusy(true);
+    try {
+      const { data: saved } = await updateProductPlan({ code: selected.code, name: selected.name.trim(), description: selected.description || null, monthlyPrice: Number(selected.monthlyPrice || 0), position: selected.position, active: selected.active !== false, limits: selected.limits || {} });
+      await updateProductPlanFeatures(saved.id || selected.id, (catalog.features || []).map((feature) => ({ featureId: feature.id, enabled: selected.enabledKeys.has(feature.key) })));
+      toast.success(`Plano ${selected.name} atualizado.`);
+      await onChanged?.();
+    } catch (error) { toast.error(error.response?.data?.error || 'Não foi possível atualizar o plano.'); }
+    finally { setBusy(false); }
+  }
+  return <ModalShell kicker="Configuração comercial" title="Planos e recursos padrão" onClose={onClose} maxWidth="58rem">
+    <div style={s.form}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>{plans.map((plan) => <ActionButton key={plan.id} variant={plan.id === selectedId ? 'primary' : 'secondary'} onClick={() => setSelectedId(plan.id)}>{plan.name}</ActionButton>)}</div>
+      {selected ? <>
+        <div style={s.twoCols}>
+          <div style={s.field}><label style={s.label}>Nome do plano</label><input style={s.input} value={selected.name} onChange={(e) => change('name', e.target.value)} /></div>
+          <div style={s.field}><label style={s.label}>Valor mensal interno (R$)</label><input style={s.input} type="number" min="0" step="0.01" value={selected.monthlyPrice} onChange={(e) => change('monthlyPrice', e.target.value)} /></div>
+        </div>
+        <div style={s.field}><label style={s.label}>Descrição</label><input style={s.input} value={selected.description || ''} onChange={(e) => change('description', e.target.value)} /></div>
+        <div style={s.entitlementGrid}>{(catalog.features || []).map((feature) => {
+          const enabled = selected.enabledKeys.has(feature.key);
+          return <button key={feature.id} type="button" onClick={() => toggleFeature(feature.key)} style={{ ...s.entitlementItem, ...(enabled ? s.entitlementEnabled : {}) }}><span style={{ textAlign: 'left' }}><strong>{feature.name}</strong><small style={s.entitlementDescription}>{feature.key}</small></span><span style={{ ...s.badge, ...(enabled ? s.badgeAccent : s.badgeMuted) }}>{enabled ? 'Incluído' : 'Não incluído'}</span></button>;
+        })}</div>
+        <div style={s.modalFooter}><ActionButton variant="secondary" onClick={onClose}>Fechar</ActionButton><ActionButton onClick={save} disabled={busy}>{busy ? 'Salvando...' : 'Salvar plano'}</ActionButton></div>
+      </> : <div style={s.empty}>Nenhum plano cadastrado.</div>}
+    </div>
+  </ModalShell>;
 }
 
 function EntitlementsModal({ tenant, catalog, onClose, onChanged }) {

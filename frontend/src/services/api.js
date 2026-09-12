@@ -244,6 +244,8 @@ export const startSupportSession = (id, reason) => api.post(`/superadmin/tenants
 export const getFeatureCatalog = () => api.get('/superadmin/product-catalog');
 export const getTenantEntitlements = (id) => api.get(`/superadmin/tenants/${id}/entitlements`);
 export const updateTenantEntitlements = (id, data) => api.put(`/superadmin/tenants/${id}/entitlements`, data);
+export const updateProductPlan = (data) => api.put('/superadmin/plans', data);
+export const updateProductPlanFeatures = (planId, features) => api.put(`/superadmin/plans/${planId}/features`, { features });
 export const getCurrentEntitlements = () => api.get('/entitlements/me');
 export const endSupportSession = () => api.post('/superadmin/support-session/end');
 

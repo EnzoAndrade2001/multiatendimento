@@ -10,7 +10,7 @@ CREATE UNIQUE INDEX "Feature_key_key" ON "Feature"("key");
 CREATE TABLE "ProductPlan" (
   "id" TEXT NOT NULL, "code" TEXT NOT NULL, "name" TEXT NOT NULL,
   "description" TEXT, "active" BOOLEAN NOT NULL DEFAULT true,
-  "position" INTEGER NOT NULL DEFAULT 0, "limits" JSONB,
+  "position" INTEGER NOT NULL DEFAULT 0, "monthlyPrice" DECIMAL(12,2) NOT NULL DEFAULT 0, "limits" JSONB,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "ProductPlan_pkey" PRIMARY KEY ("id")

@@ -2138,7 +2138,7 @@ export default function Settings() {
                 </ol>
               </div>
 
-              {isAdmin && (
+              {isSupport && (
                 <div style={s.agentStartupGuide}>
                   <div style={s.agentStartupHeader}>
                     <div>
@@ -2184,7 +2184,7 @@ export default function Settings() {
 
       {tab === 10 && <PrintGuardSettings />}
 
-      {isAdmin && showAgentStartupGuide && (
+      {isSupport && showAgentStartupGuide && (
         <ModalShell
           kicker="Agente Local"
           title="Inicialização automática no Windows Server"

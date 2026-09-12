@@ -87,16 +87,17 @@ model Feature {
 }
 
 model ProductPlan {
-  id          String        @id @default(cuid())
-  code        String        @unique
-  name        String
-  description String?
-  active      Boolean       @default(true)
-  position    Int           @default(0)
-  limits      Json?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  features    PlanFeature[]
+  id           String        @id @default(cuid())
+  code         String        @unique
+  name         String
+  description  String?
+  active       Boolean       @default(true)
+  position     Int           @default(0)
+  monthlyPrice Decimal       @default(0) @db.Decimal(12, 2)
+  limits       Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  features     PlanFeature[]
 }
 
 model PlanFeature {
