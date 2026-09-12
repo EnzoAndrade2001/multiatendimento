@@ -52,7 +52,7 @@ async function startTicketSession({ tenantId, ticketId, startedAt = new Date(), 
     const session = await tx.ticketSession.create({
       data: { tenantId, ticketId, agentId: ticket?.agentId || null, startedAt: normalizedStart, trigger, status: 'OPEN' },
     });
-    await tx.ticket.update({ where: { id: ticketId }, data: { sessionStartedAt: normalizedStart } });
+    await tx.ticket.update({ where: { id: ticketId }, data: { sessionStartedAt: normalizedStart, firstResponseAt: null, slaDueAt: null, slaPolicyKey: null, slaWarnedAt: null, slaBreachedAt: null } });
     return { session, startedNew: true };
   });
 }

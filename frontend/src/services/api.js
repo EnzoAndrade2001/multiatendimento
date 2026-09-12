@@ -46,6 +46,9 @@ export const getScheduledMessages = () => api.get('/scheduled-messages');
 export const scheduleMessage = (data) => api.post('/scheduled-messages', data);
 export const deleteScheduledMessage = (id) => api.delete(`/scheduled-messages/${id}`);
 
+// Assistente IA (leitura, Fase 1)
+export const queryAiAssistant = (data) => api.post('/ai-assistant/query', data);
+
 // Chat Interno
 export const getInternalMessages = (receiverId) => api.get(`/internal-messages?receiverId=${receiverId}`);
 export const getInternalConversations = () => api.get('/internal-messages/conversations');

@@ -31,6 +31,9 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import CreateOsModal from '../components/CreateOsModal';
 import LinkContactModal from '../components/LinkContactModal';
 import InstanceSelectionModal from '../components/InstanceSelectionModal';
+import TicketPresence from '../components/TicketPresence';
+import ScheduledMessagesPanel from '../components/ScheduledMessagesPanel';
+import AiAssistantDrawer from '../components/AiAssistantDrawer';
 import { CrmCustomerProfileModal } from './CRM';
 import { ChatHeader, ContactPanel, ForwardModal, MessageComposer, MessageList, TicketSidebar, TransferModal } from './inbox/components';
 import { Empty } from './inbox/helpers.jsx';
@@ -85,10 +88,11 @@ class InboxSectionErrorBoundary extends React.Component {
 }
 
 export default function Inbox() {
-  const { can } = usePermissions();
+  const { can, hasFeature } = usePermissions();
   const MESSAGE_PAGE_SIZE = 60;
   const [selectedId, setSelectedId] = useState(null);
   const [directTicket, setDirectTicket] = useState(null);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [text, setText] = useState('');
   const [me, setMe] = useState(null);
   const [users, setUsers] = useState([]);
@@ -702,8 +706,11 @@ export default function Inbox() {
   async function handleSchedule() {
     if (!scheduleData.body || !scheduleData.sendAt) return toast.error('Preencha a mensagem e o horario');
     try {
-      const ticket = tickets.find(t => t.id === selectedId);
-      await scheduleMessage({ ...scheduleData, contactId: ticket.contactId });
+      const selectedTicket = tickets.find(t => t.id === selectedId) || directTicket;
+      if (!selectedTicket?.contactId) return toast.error('Selecione um atendimento.');
+      const instanceId = scheduleData.instanceId || outboundInstanceId || selectedTicket.instanceId;
+      if (!instanceId) return toast.error('Escolha a conexão de envio.');
+      await scheduleMessage({ body: scheduleData.body, sendAt: new Date(scheduleData.sendAt).toISOString(), instanceId, contactId: selectedTicket.contactId });
       toast.success('Mensagem agendada com sucesso!');
       setShowScheduling(false);
       setScheduleData({ body: '', sendAt: '' });
@@ -1008,11 +1015,13 @@ export default function Inbox() {
               </div>
             ) : null}
             <InboxSectionErrorBoundary key={`header-${selectedTicket.id}`} label="cabecalho da conversa">
+              <TicketPresence ticketId={selectedId} text={isNote ? '' : text} sending={sendingMessage && !isNote} />
               <ChatHeader
                 canCreateOs={can('inbox.create_os')}
                 canResolve={can('inbox.resolve')}
                 canReopen={can('inbox.reopen')}
                 canTransfer={can('inbox.assign') || can('inbox.transfer')}
+                canUseAiAssistant={can('ai.assistant.query') && hasFeature('crm')}
                 botName={botName}
                 handleReopen={handleReopen}
                 handleResolve={handleResolve}
@@ -1020,6 +1029,7 @@ export default function Inbox() {
                 isMobile={isMobile}
                 isCompactDesktop={isCompactDesktop}
                 onImageClick={openPreviewImage}
+                onOpenAiAssistant={() => setAiAssistantOpen(true)}
                 selectedTicket={selectedTicket}
                 setShowInfo={setShowInfo}
                 setShowOsModal={setShowOsModal}
@@ -1179,9 +1189,16 @@ export default function Inbox() {
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <div style={s.modalHeader}><h3>Agendar Mensagem</h3><button onClick={() => setShowScheduling(false)}>X</button></div>
             <div style={s.modalBody}>
+              <label>Enviar pela conexão
+                <select aria-label="Conexão do agendamento" style={s.modalInput} value={scheduleData.instanceId || outboundInstanceId || ticket?.instanceId || ''} onChange={e => setScheduleData({ ...scheduleData, instanceId: e.target.value })}>
+                  <option value="">Selecione uma conexão</option>
+                  {instances.filter(i => !String(i.instanceName).startsWith('DELETED_')).map(i => <option key={i.id} value={i.id}>{i.name || i.instanceName}{i.status !== 'connected' ? ' (desconectada)' : ''}</option>)}
+                </select>
+              </label>
               <textarea style={s.modalInput} placeholder="Texto da mensagem..." value={scheduleData.body} onChange={e => setScheduleData({...scheduleData, body: e.target.value})} />
               <input style={s.modalInput} type="datetime-local" value={scheduleData.sendAt} onChange={e => setScheduleData({...scheduleData, sendAt: e.target.value})} />
               <button style={s.saveBtn} onClick={handleSchedule}>Confirmar Agendamento</button>
+              <ScheduledMessagesPanel contactId={ticket?.contactId} />
             </div>
           </div>
         </div>
@@ -1241,8 +1258,16 @@ export default function Inbox() {
         />
       )}
 
+      <AiAssistantDrawer
+        isOpen={aiAssistantOpen}
+        onClose={() => setAiAssistantOpen(false)}
+        crmCustomerId={selectedTicket?.contact?.crmCustomer?.id || null}
+        customerName={selectedTicket?.contact?.crmCustomer?.fantasyName || selectedTicket?.contact?.crmCustomer?.name || null}
+        isMobile={isMobile}
+      />
+
       {forwardingMessage && (
-        <ForwardModal 
+        <ForwardModal
           onClose={() => setForwardingMessage(null)}
           styles={s}
           onForward={async (contact) => {

@@ -30,12 +30,14 @@ const PERMISSIONS = Object.freeze([
   'audit.view',
   'telemetry.view',
   'telemetry.manage',
+  'ai.assistant.query',
 ]);
 
 const ATTENDANT = [
   'dashboard.view', 'inbox.view', 'inbox.assign', 'inbox.transfer',
   'inbox.resolve', 'inbox.reopen', 'inbox.create_os', 'crm.view',
   'quick_responses.manage', 'tags.manage', 'internal_chat.view', 'telemetry.view',
+  'ai.assistant.query',
 ];
 
 const PROFILE_PERMISSIONS = Object.freeze({
@@ -51,12 +53,12 @@ const PROFILE_PERMISSIONS = Object.freeze({
     'dashboard.view', 'inbox.view', 'inbox.resolve', 'crm.view',
     'crm.financial.view', 'crm.financial.send', 'billing.view',
     'billing.reprocess', 'internal_chat.view',
-    'telemetry.view',
+    'telemetry.view', 'ai.assistant.query',
   ],
   tecnico: [
     'dashboard.view', 'inbox.view', 'inbox.assign', 'inbox.resolve',
     'inbox.reopen', 'inbox.create_os', 'crm.view', 'internal_chat.view',
-    'telemetry.view',
+    'telemetry.view', 'ai.assistant.query',
   ],
   personalizado: [],
 });

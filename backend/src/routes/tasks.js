@@ -1,0 +1,13 @@
+const router = require('express').Router();
+const authenticate = require('../middlewares/authenticate');
+const requirePermission = require('../middlewares/requirePermission');
+const requireEntitlement = require('../middlewares/requireEntitlement');
+const auditEvent = require('../middlewares/auditEvent');
+const controller = require('../controllers/attendanceTaskController');
+router.use(authenticate, requirePermission('inbox.view'), requireEntitlement('inbox'));
+router.get('/', controller.list);
+router.get('/options', controller.options);
+router.get('/waiting', controller.waiting);
+router.post('/', auditEvent('TASK_CREATE', 'attendance_task'), controller.create);
+router.patch('/:id', auditEvent('TASK_UPDATE', 'attendance_task'), controller.update);
+module.exports = router;

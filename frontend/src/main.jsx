@@ -13,6 +13,7 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Inbox = lazy(() => import('./pages/Inbox'));
+const MyTasks = lazy(() => import('./pages/MyTasks'));
 const MockInbox = lazy(() => import('./pages/MockInbox'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const CRM = lazy(() => import('./pages/CRM'));
@@ -200,6 +201,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/dashboard" element={<RequireAccess permission="dashboard.view" feature="dashboard"><Dashboard /></RequireAccess>} />
             <Route index element={<RequireAccess permission="dashboard.view" feature="dashboard"><Dashboard /></RequireAccess>} />
             <Route path="/inbox" element={<RequireAccess permission="inbox.view" feature="inbox"><Inbox /></RequireAccess>} />
+            <Route path="/tasks" element={<RequireAccess permission="inbox.view" feature="inbox"><MyTasks /></RequireAccess>} />
             <Route path="/contacts" element={<RequireAccess permission="crm.view" feature="contacts"><Contacts /></RequireAccess>} />
             <Route path="/crm" element={<RequireAccess permission="crm.view" feature="crm"><CRM /></RequireAccess>} />
             <Route path="/users" element={<RequirePermission permission="users.manage"><Users /></RequirePermission>} />

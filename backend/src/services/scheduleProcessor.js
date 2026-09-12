@@ -6,77 +6,13 @@ const evolutionService = require('./evolutionService');
 const whatsappComplianceService = require('./whatsappComplianceService');
 const billingDocuments = require('./billingDocumentService');
 
+const { createScheduledDeliveryService } = require('./scheduledDeliveryService');
+const scheduledDelivery = createScheduledDeliveryService({
+  prisma, compliance: whatsappComplianceService, sendText: evolutionService.sendText,
+});
 async function processScheduledMessages() {
-  const now = new Date();
-  
-  try {
-    const messages = await prisma.scheduledMessage.findMany({
-      where: {
-        processed: false,
-        sendAt: { lte: now }
-      },
-      include: {
-        tenant: { include: { settings: true, instances: true } },
-        contact: true
-      }
-    });
-
-    if (messages.length === 0) return;
-
-    console.log(`[schedule] processando ${messages.length} mensagens agendadas...`);
-
-    for (const msg of messages) {
-      try {
-        const settings = msg.tenant.settings;
-        const instance = msg.tenant.instances[0]; // Pega a primeira instância ativa
-
-        if (settings && instance && settings.evolutionUrl && settings.evolutionKey) {
-          const gate = await whatsappComplianceService.canAutomatedSend({
-            tenantId: msg.tenant.id,
-            contactId: msg.contactId,
-            instance,
-          });
-          if (!gate.allowed) {
-            console.warn(`[schedule] mensagem ${msg.id} não enviada (${gate.code}).`);
-            await prisma.scheduledMessage.update({ where: { id: msg.id }, data: { processed: true } });
-            continue;
-          }
-          await evolutionService.sendText(
-            settings.evolutionUrl,
-            settings.evolutionKey,
-            instance.instanceName,
-            msg.contact.phone,
-            msg.body
-          );
-
-          // Cria a mensagem no histórico do ticket
-          const ticket = await prisma.ticket.findFirst({
-            where: { contactId: msg.contactId, status: { in: ['pending', 'open', 'bot'] } }
-          });
-
-          if (ticket) {
-            await prisma.message.create({
-              data: {
-                ticketId: ticket.id,
-                body: msg.body,
-                fromMe: true,
-                fromBot: false
-              }
-            });
-          }
-
-          await prisma.scheduledMessage.update({
-            where: { id: msg.id },
-            data: { processed: true }
-          });
-        }
-      } catch (err) {
-        console.error(`[schedule] erro ao processar mensagem ${msg.id}:`, err.message);
-      }
-    }
-  } catch (err) {
-    console.error('[schedule] erro geral:', err.message);
-  }
+  try { await scheduledDelivery.process(); }
+  catch (error) { console.error('[schedule] erro geral:', error.message); }
 }
 
 // Limpeza de Mídias (Fotos, Vídeos, Áudios) - DESATIVADA por solicitação do usuário

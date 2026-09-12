@@ -40,6 +40,7 @@ import ModalShell from '../components/ui/ModalShell';
 import { usePermissions } from '../auth/PermissionContext';
 import UserAvatar from '../components/ui/UserAvatar';
 import PrintGuardSettings from './PrintGuardSettings';
+import AttendanceOperations from '../components/AttendanceOperations';
 
 const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'iLux Sentinela', 'Minha conta', 'Agente Local', 'PrintGuard'];
 const TAB_PERMISSIONS = [
@@ -1121,6 +1122,7 @@ export default function Settings() {
 
       {tab === 1 && (
         <div style={s.sections}>
+          <AttendanceOperations />
           <div style={s.card}>
             <h2 style={s.cardTitle}>Horário de atendimento</h2>
             <div style={s.form}>

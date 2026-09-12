@@ -868,7 +868,7 @@ async function sendMessage(req, res) {
       const messageBody = outbound.mode === 'template' ? outbound.renderedBody : String(body || '').trim();
       if (!messageBody) return res.status(400).json({ error: 'Digite uma mensagem para enviar.' });
       const quoted = await findQuotedMessage(id, req.user.tenantId, quotedMsgId, ticket.contactId);
-      await ticketSessionService.ensureSessionForActivity(ticket);
+      const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket);
       const now = new Date();
       const updatedTicket = await prisma.ticket.update({
         where: { id },
@@ -876,7 +876,8 @@ async function sendMessage(req, res) {
           status: 'open',
           agentId: req.user.userId,
           unreadCount: 0,
-          firstResponseAt: ticket.firstResponseAt || now,
+          firstResponseAt: sessionResult.startedNew ? now : ticket.firstResponseAt || now,
+          slaDueAt: null,
           lastMessageAt: now,
         },
       });
@@ -978,12 +979,10 @@ async function sendMessage(req, res) {
     }
 
     // SLA: Marca primeira resposta do agente
-    if (!ticket.firstResponseAt) {
-      await prisma.ticket.update({
-        where: { id },
-        data: { firstResponseAt: new Date() }
-      });
-    }
+    await prisma.ticket.updateMany({
+      where: { id, tenantId: req.user.tenantId, firstResponseAt: null },
+      data: { firstResponseAt: new Date(), slaDueAt: null },
+    });
 
     const message = await prisma.message.create({
       data: { ticketId: id, agentId: req.user.userId, body: messageBody, fromMe: true, externalId, quotedMsgId: storedQuotedMsgId, quotedMsgBody },
@@ -1053,11 +1052,11 @@ async function sendMediaMessage(req, res) {
           : file.mimetype?.startsWith('audio/')
             ? 'audio'
             : 'document';
-      await ticketSessionService.ensureSessionForActivity(ticket);
+      const sessionResult = await ticketSessionService.ensureSessionForActivity(ticket);
       const now = new Date();
       const updatedTicket = await prisma.ticket.update({
         where: { id },
-        data: { status: 'open', agentId: req.user.userId, unreadCount: 0, firstResponseAt: ticket.firstResponseAt || now, lastMessageAt: now },
+        data: { status: 'open', agentId: req.user.userId, unreadCount: 0, firstResponseAt: sessionResult.startedNew ? now : ticket.firstResponseAt || now, slaDueAt: null, lastMessageAt: now },
       });
       const message = await prisma.message.create({
         data: {
@@ -1267,6 +1266,11 @@ async function sendMediaMessage(req, res) {
     // Atualiza lastMessageAt para ordenação da lista
     await prisma.ticket.update({ where: { id }, data: { lastMessageAt: new Date(), instanceId: usedInstance.id } });
     if (usedInstance.id !== ticket.instanceId && io) io.to(req.user.tenantId).emit('ticket_updated', { ticketId: id });
+
+    await prisma.ticket.updateMany({
+      where: { id, tenantId: req.user.tenantId, firstResponseAt: null },
+      data: { firstResponseAt: new Date(), slaDueAt: null },
+    });
 
     if (mediaType === 'audio' && require('../services/aiService').resolveCapabilityEngine(settings, 'audio').engine) {
       (async () => {
@@ -1608,7 +1612,7 @@ async function forwardMessage(req, res) {
 
     if (!originalMsg) return res.status(404).json({ error: 'Mensagem original não encontrada' });
 
-    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+    const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId } });
     if (!contact) return res.status(404).json({ error: 'Contato de destino não encontrado' });
 
     // Encontra ou cria um ticket aberto para o contato
@@ -1682,6 +1686,11 @@ async function forwardMessage(req, res) {
     });
 
     const externalId = result?.key?.id || result?.message?.key?.id;
+    await ticketSessionService.ensureSessionForActivity(ticket);
+    await prisma.ticket.updateMany({
+      where: { id: ticket.id, tenantId, firstResponseAt: null },
+      data: { firstResponseAt: new Date(), slaDueAt: null },
+    });
     const newMessage = await prisma.message.create({
       data: {
         ticketId: ticket.id,

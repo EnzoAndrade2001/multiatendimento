@@ -8,6 +8,9 @@ datasource db {
 }
 
 model Tenant {
+  ticketPresences TicketPresence[]
+  attendancePolicy AttendancePolicy?
+  attendanceTasks AttendanceTask[]
   maxConcurrentSessions      Int?
   id                         String                      @id @default(cuid())
   name                       String
@@ -314,6 +317,11 @@ model DeploymentChecklistItem {
 }
 
 model User {
+  ticketPresences TicketPresence[]
+  attendanceAvailable Boolean @default(false)
+  attendanceHeartbeatAt DateTime?
+  assignedAttendanceTasks AttendanceTask[] @relation("TaskAssignee")
+  createdAttendanceTasks AttendanceTask[] @relation("TaskCreator")
   id                         String                      @id @default(cuid())
   tenantId                   String
   name                       String
@@ -396,6 +404,7 @@ model TechnicalContact {
 }
 
 model Team {
+  attendanceTasks AttendanceTask[]
   id               String            @id @default(cuid())
   tenantId         String
   name             String
@@ -483,6 +492,7 @@ model MetaInstance {
 }
 
 model Contact {
+  attendanceTasks AttendanceTask[]
   id                String    @id @default(cuid())
   tenantId          String
   instanceId        String
@@ -529,6 +539,11 @@ model Contact {
 }
 
 model Ticket {
+  presences TicketPresence[]
+  attendanceTasks AttendanceTask[]
+  slaPolicyKey String?
+  slaWarnedAt DateTime?
+  slaBreachedAt DateTime?
   id             String    @id @default(cuid())
   tenantId       String
   instanceId     String?
@@ -817,6 +832,19 @@ model QuickResponseAudit {
 }
 
 model ScheduledMessage {
+  instanceId String?
+  status String @default("queued")
+  attempts Int @default(0)
+  nextAttemptAt DateTime?
+  claimedAt DateTime?
+  claimToken String?
+  sentAt DateTime?
+  lastError String?
+  providerMessageId String?
+  deliveryUncertain Boolean @default(false)
+
+  @@index([status, sendAt, nextAttemptAt])
+  @@index([tenantId, contactId, sendAt])
   id        String   @id @default(cuid())
   tenantId  String
   contactId String
@@ -966,6 +994,7 @@ model Equipment {
 }
 
 model ServiceOrder {
+  attendanceTasks AttendanceTask[]
   id                   String    @id @default(cuid())
   tenantId             String
   contactId            String
@@ -1673,3 +1702,66 @@ model CrmBillingStatementLine {
   @@unique([statementId, lineNo])
   @@index([tenantId, statementExternalId])
 }
+model AttendanceTask {
+  id             String    @id @default(cuid())
+  tenantId       String
+  title          String
+  description    String?   @db.Text
+  kind           String    @default("task")
+  status         String    @default("open")
+  dueAt          DateTime?
+  completedAt    DateTime?
+  assigneeId     String
+  createdById    String
+  teamId         String?
+  contactId      String?
+  ticketId       String?
+  serviceOrderId String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee       User     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy      User     @relation("TaskCreator", fields: [createdById], references: [id])
+  team           Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  ticket         Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, assigneeId, status, dueAt])
+  @@index([tenantId, teamId, status, dueAt])
+}
+
+model AttendancePolicy {
+  id String @id @default(cuid())
+  tenantId String @unique
+  slaEnabled Boolean @default(false)
+  assignmentEnabled Boolean @default(false)
+  redistributeUnavailable Boolean @default(false)
+  maxActiveTickets Int @default(10)
+  unavailableMinutes Int @default(5)
+  rules Json @default("[]")
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// "Fulano também está vendo/digitando" no Inbox. Uma linha por (userId,
+// sessionId) - o front manda heartbeat a cada poucos segundos; linhas com
+// lastSeenAt velho (>45s) são varridas no próprio heartbeat, sem cron.
+model TicketPresence {
+  id           String    @id @default(cuid())
+  tenantId     String
+  userId       String
+  ticketId     String
+  sessionId    String
+  lastSeenAt   DateTime  @default(now())
+  typingUntil  DateTime?
+  sendingUntil DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sessionId])
+  @@index([tenantId, ticketId, lastSeenAt])
+}
+

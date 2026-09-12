@@ -35,6 +35,7 @@ import UserAvatar from './ui/UserAvatar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ToastContainer from './ToastContainer';
 import InternalChatDrawer from './InternalChatDrawer';
+import AttendanceAvailability from './AttendanceAvailability';
 import { usePermissions } from '../auth/PermissionContext';
 
 const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm', '/revenue'];
@@ -367,6 +368,7 @@ export default function Layout() {
     { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', feature: 'contacts', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Clientes & conversas', to: '/quick-responses', icon: <Zap size={18} />, label: 'Respostas Rápidas', permission: 'quick_responses.manage', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Aquisição
+    { section: 'Clientes & conversas', to: '/tasks', icon: <ClipboardCheck size={18} />, label: 'Minhas pendências', permission: 'inbox.view', feature: 'inbox' },
     { section: 'Aquisição', to: '/campaigns', icon: <Megaphone size={18} />, label: 'Campanhas', permission: 'campaigns.manage', feature: 'campaigns', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', feature: 'lead_generation', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Inteligência & gestão
@@ -589,7 +591,8 @@ export default function Layout() {
       )}
 
       <div style={{ ...styles.content, paddingBottom: isMobile ? '74px' : '0' }} className="app-layout-content">
-        <Outlet context={{ instances }} />
+        {can('inbox.view') && hasFeature('inbox') && !localStorage.getItem('supportMasterToken') ? <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--border-color)' }}><AttendanceAvailability /></div> : null}
+        <Outlet context={{ instances, internalSocket }} />
       </div>
 
       {isMobile ? (
