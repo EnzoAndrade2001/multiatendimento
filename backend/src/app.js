@@ -366,6 +366,15 @@ server.listen(PORT, () => {
   // Auto-correção de URLs da Evolution inválidas (ex: contendo '@' ou emails)
   (async () => {
     try {
+      const prisma = require('./lib/prisma');
+      const { ensureProductCatalog } = require('./services/productCatalogSeedService');
+      await ensureProductCatalog(prisma);
+      console.log('[product-catalog] planos e recursos verificados.');
+    } catch (err) {
+      console.error('[product-catalog] Erro ao inicializar catálogo:', err.message);
+    }
+
+    try {
       const { recoverInterruptedDocuments } = require('./services/knowledgeDocumentService');
       await recoverInterruptedDocuments(new Date(bootAt));
     } catch (err) {
