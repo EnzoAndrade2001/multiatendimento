@@ -50,7 +50,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.2.0"
+DEFAULT_AGENT_VERSION = "1.2.1"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -950,7 +950,7 @@ class CRMClient:
                 if attempt < 3:
                     time.sleep(attempt)
 
-    def send_ping(self) -> None:
+    def send_ping(self, compatibility: dict[str, Any] | None = None) -> None:
         url = f"{self.config.crm_base_url}/api/integrations/firebird/ping"
         try:
             self.session.post(
@@ -962,6 +962,7 @@ class CRMClient:
                     "version": self.config.agent_version,
                     "protocolVersion": self.config.agent_protocol_version,
                     "capabilities": list(AGENT_CAPABILITIES),
+                    "compatibility": compatibility,
                     "health": {
                         "status": "online",
                         "reportedAt": datetime.now().isoformat(timespec="seconds"),
@@ -1265,6 +1266,45 @@ class FirebirdRepository:
             password=self.config.firebird_password,
             charset=self.config.firebird_charset,
         )
+
+    @staticmethod
+    def _service_order_compatibility_from_cursor(cur) -> dict[str, Any]:
+        cur.execute(
+            "select count(*) from rdb$relation_fields "
+            "where rdb$relation_name = 'IXLOS' "
+            "and rdb$field_name = 'TPORCATEND1'"
+        )
+        supports_official_column = bool(cur.fetchone()[0])
+
+        def catalog_has(table: str, field: str, value: str) -> bool:
+            cur.execute(f"select count(*) from {table} where {field} = ?", (value,))
+            return bool(cur.fetchone()[0])
+
+        supports_official_codes = (
+            catalog_has("IXLOSSTATUS", "CDSTATUS", "O")
+            and catalog_has("IXLOSDEFEITOTP", "CDDEFEITO", "1001")
+        )
+        official = supports_official_column and supports_official_codes
+        return {
+            "serviceOrderTable": "IXLOS",
+            "serviceOrderProfile": "official" if official else "legacy",
+            "tporcatend1": supports_official_column,
+            "officialCodes": supports_official_codes,
+            "status": "A" if official else "E",
+            "cdStatus": "O" if official else "E1",
+            "defaultCdDefeito": "1001" if official else "MAN",
+            "tfLiberado": "N" if official else "S",
+        }
+
+    def detect_service_order_compatibility(self) -> dict[str, Any]:
+        con = self.connect()
+        try:
+            return self._service_order_compatibility_from_cursor(con.cursor())
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
 
     def _rows(self, sql: str, params: tuple[Any, ...]) -> Iterator[dict[str, Any]]:
         con = self.connect()
@@ -2664,22 +2704,14 @@ class FirebirdRepository:
             con = self.connect()
             try:
                 cur = con.cursor()
-                cur.execute(
-                    "select count(*) from rdb$relation_fields "
-                    "where rdb$relation_name = 'IXLOS' "
-                    "and rdb$field_name = 'TPORCATEND1'"
-                )
-                supports_official_column = bool(cur.fetchone()[0])
-
                 def catalog_has(table: str, field: str, value: str) -> bool:
                     cur.execute(f"select count(*) from {table} where {field} = ?", (value,))
                     return bool(cur.fetchone()[0])
 
-                supports_official_codes = (
-                    catalog_has("IXLOSSTATUS", "CDSTATUS", "O")
-                    and catalog_has("IXLOSDEFEITOTP", "CDDEFEITO", "1001")
-                )
-                official_profile = supports_official_column and supports_official_codes
+                compatibility = self._service_order_compatibility_from_cursor(cur)
+                supports_official_column = compatibility["tporcatend1"]
+                supports_official_codes = compatibility["officialCodes"]
+                official_profile = compatibility["serviceOrderProfile"] == "official"
                 logging.info(
                     "Perfil de abertura de O.S. detectado: %s (TPORCATEND1=%s, codigos oficiais=%s)",
                     "oficial" if official_profile else "legado",
@@ -3605,6 +3637,27 @@ def run_cycle(
 ) -> None:
     repo = FirebirdRepository(config)
     crm = CRMClient(config)
+    compatibility = None
+    try:
+        compatibility = repo.detect_service_order_compatibility()
+        logging.info(
+            "Estrutura de O.S. detectada: perfil %s | tabela %s | TPORCATEND1=%s | "
+            "STATUS=%s | CDSTATUS=%s | CDDEFEITO padrao=%s | TFLIBERADO=%s",
+            "OFICIAL (padrao O.S. 1.879)"
+            if compatibility["serviceOrderProfile"] == "official"
+            else "LEGADO",
+            compatibility["serviceOrderTable"],
+            "presente" if compatibility["tporcatend1"] else "ausente",
+            compatibility["status"],
+            compatibility["cdStatus"],
+            compatibility["defaultCdDefeito"],
+            compatibility["tfLiberado"],
+        )
+    except Exception as exc:
+        logging.warning(
+            "Nao foi possivel identificar antecipadamente a estrutura de O.S.: %s",
+            exc,
+        )
     # v4: "equipamentos vinculados" contava todo equipamento que ja passou pelo
     # contrato (IXLCONTRATOSIT sem filtro), incluindo os ja devolvidos/trocados
     # -- agora so conta quem ainda esta instalado (DTINSTALACAOFIN nulo ou >=
@@ -3708,7 +3761,7 @@ def run_cycle(
             return
 
     # Inform backend that agent is alive
-    crm.send_ping()
+    crm.send_ping(compatibility)
 
 
 def run_service_order_history_backfill(config: AppConfig) -> dict[str, Any]:

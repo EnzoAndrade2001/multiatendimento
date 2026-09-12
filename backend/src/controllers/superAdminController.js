@@ -394,6 +394,7 @@ async function listFirebirdAgents(req, res) {
       version: row.version || null,
       protocolVersion: row.protocolVersion || null,
       runtime: row.runtime || null,
+      compatibility: row.compatibility || null,
       firstSeenAt: row.firstSeenAt,
       lastSeenAt: row.lastSeenAt,
       lastPingIp: row.lastPingIp || null,

@@ -504,6 +504,9 @@ export default function SuperAdmin() {
                     </div>
                     {!agent.identified && <div style={s.companyMeta}>agente antigo · atualizar p/ individualizar</div>}
                     {agent.identified && agent.runtime === 'python' && <div style={s.companyMeta}>execução via Python</div>}
+                    {agent.compatibility?.serviceOrderProfile && <div style={s.companyMeta}>
+                      O.S.: tabela {agent.compatibility.serviceOrderTable || 'IXLOS'} · perfil {agent.compatibility.serviceOrderProfile === 'official' ? 'oficial 1.879' : 'legado'}
+                    </div>}
                   </td>
                   <td style={s.td}>
                     <code style={s.code}>{agent.version || 'desconhecida'}</code>

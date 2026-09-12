@@ -43,7 +43,7 @@ class AuthFailureSession:
 
 class AgentHeartbeatTest(unittest.TestCase):
     def test_default_version_matches_current_release(self):
-        self.assertEqual(DEFAULT_AGENT_VERSION, "1.2.0")
+        self.assertEqual(DEFAULT_AGENT_VERSION, "1.2.1")
 
     def test_crm_base_url_is_normalized_for_old_env_files(self):
         with patch.dict(
