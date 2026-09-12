@@ -43,6 +43,35 @@ function getReleasePath(release) {
   return filePath;
 }
 
+function listReleaseCatalog() {
+  const manifest = readReleaseManifest();
+  if (!manifest) return { stableVersion: null, releases: [] };
+  const seen = new Set();
+  const releases = [manifest, ...(Array.isArray(manifest.releases) ? manifest.releases : [])]
+    .filter((release) => release?.version && !seen.has(String(release.version)) && seen.add(String(release.version)))
+    .map((release) => {
+      const filePath = getReleasePath(release);
+      let sizeBytes = null;
+      let available = false;
+      try {
+        const stat = fs.statSync(filePath);
+        available = stat.isFile();
+        sizeBytes = available ? stat.size : null;
+      } catch {}
+      return {
+        version: String(release.version),
+        fileName: path.basename(release.fileName || ''),
+        sha256: release.sha256 || null,
+        releasedAt: release.releasedAt || null,
+        stable: String(release.version) === String(manifest.version),
+        available,
+        sizeBytes,
+        remoteUpdateCapable: !isOutdated(release.version, '1.2.0'),
+      };
+    });
+  return { stableVersion: String(manifest.version), releases };
+}
+
 function getAgentFileName(manifest = null) {
   return path.basename(manifest?.fileName || process.env.FIREBIRD_AGENT_FILE_NAME || 'FirebirdCRMClient.exe');
 }
@@ -158,4 +187,4 @@ async function getAgentStatus(req, res) {
   });
 }
 
-module.exports = { getAgentInfo, downloadAgent, downloadAgentRelease, getAgentStatus, readReleaseManifest, findRelease };
+module.exports = { getAgentInfo, downloadAgent, downloadAgentRelease, getAgentStatus, readReleaseManifest, findRelease, listReleaseCatalog };

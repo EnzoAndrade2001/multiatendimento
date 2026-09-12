@@ -237,6 +237,8 @@ export const getStats = () => api.get('/dashboard/stats');
 export const getTenants = () => api.get('/superadmin/tenants');
 export const getFirebirdAgents = () => api.get('/superadmin/firebird-agents');
 export const requestAgentVersion = (agentId, data) => api.post(`/superadmin/agent-operations/${agentId}/version`, data);
+export const getAgentReleases = () => api.get('/superadmin/agent-releases');
+export const downloadAgentReleaseVersion = (version) => api.get(`/superadmin/agent-releases/${encodeURIComponent(version)}/download`, { responseType: 'blob', timeout: 120000 });
 export const getDeploymentChecklist = (tenantId) => api.get(`/superadmin/tenants/${tenantId}/deployment-checklist`);
 export const updateDeploymentChecklistItem = (tenantId, itemId, data) => api.patch(`/superadmin/tenants/${tenantId}/deployment-checklist/${itemId}`, data);
 export const createTenant = (data) => api.post('/superadmin/tenants', data);

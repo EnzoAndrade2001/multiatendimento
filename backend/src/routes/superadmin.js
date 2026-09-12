@@ -9,13 +9,15 @@ const {
   listSupportUsers, createSupportUser, updateSupportUser,
 } = require('../controllers/superAdminController');
 const { listCatalog, upsertFeature, upsertPlan, setPlanFeatures, getTenantEntitlements, setTenantOverrides } = require('../controllers/entitlementController');
-const { listAgentOperations, requestAgentVersion, getChecklist, updateChecklistItem } = require('../controllers/supportOperationsController');
+const { listAgentOperations, requestAgentVersion, listAgentReleases, downloadAgentRelease, getChecklist, updateChecklistItem } = require('../controllers/supportOperationsController');
 
 router.use(authenticate);
 router.get('/tenants', listTenants);
 router.get('/firebird-agents', listFirebirdAgents);
 router.get('/agent-operations', listAgentOperations);
 router.post('/agent-operations/:agentId/version', requestAgentVersion);
+router.get('/agent-releases', listAgentReleases);
+router.get('/agent-releases/:version/download', downloadAgentRelease);
 router.get('/tenants/:tenantId/deployment-checklist', getChecklist);
 router.patch('/tenants/:tenantId/deployment-checklist/:itemId', updateChecklistItem);
 router.get('/support-users', listSupportUsers);

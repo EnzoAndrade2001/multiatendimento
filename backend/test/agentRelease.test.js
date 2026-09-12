@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { getAgentInfo } = require('../src/controllers/agentController');
+const { getAgentInfo, listReleaseCatalog } = require('../src/controllers/agentController');
 
 test('manifesto persistente prevalece sobre versao antiga do EasyPanel', (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-release-'));
@@ -42,4 +42,29 @@ test('manifesto persistente prevalece sobre versao antiga do EasyPanel', (contex
   assert.equal(res.body.sha256, 'sha-novo');
   assert.equal(res.body.downloadAvailable, true);
   assert.match(headers['Cache-Control'], /no-store/);
+});
+
+test('catalogo lista versao estavel e arquivos historicos disponiveis', (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-catalog-'));
+  const previousDir = process.env.FIREBIRD_AGENT_RELEASE_DIR;
+  context.after(() => {
+    fs.rmSync(directory, { recursive: true, force: true });
+    if (previousDir === undefined) delete process.env.FIREBIRD_AGENT_RELEASE_DIR;
+    else process.env.FIREBIRD_AGENT_RELEASE_DIR = previousDir;
+  });
+  process.env.FIREBIRD_AGENT_RELEASE_DIR = directory;
+  fs.writeFileSync(path.join(directory, 'FirebirdCRMClient.exe'), 'current');
+  fs.writeFileSync(path.join(directory, 'FirebirdCRMClient-1.1.8.exe'), 'legacy');
+  fs.writeFileSync(path.join(directory, 'release.json'), JSON.stringify({
+    version: '1.2.0', fileName: 'FirebirdCRMClient.exe', sha256: 'current-sha',
+    releases: [{ version: '1.1.8', fileName: 'FirebirdCRMClient-1.1.8.exe', sha256: 'legacy-sha' }],
+  }));
+
+  const catalog = listReleaseCatalog();
+  assert.equal(catalog.stableVersion, '1.2.0');
+  assert.deepEqual(catalog.releases.map((item) => item.version), ['1.2.0', '1.1.8']);
+  assert.equal(catalog.releases[0].stable, true);
+  assert.equal(catalog.releases[0].available, true);
+  assert.equal(catalog.releases[0].remoteUpdateCapable, true);
+  assert.equal(catalog.releases[1].remoteUpdateCapable, false);
 });

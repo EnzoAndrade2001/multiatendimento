@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const { queueAuditEvent } = require('../services/auditEventService');
-const { readReleaseManifest, findRelease } = require('./agentController');
+const agentController = require('./agentController');
+const { readReleaseManifest, findRelease } = agentController;
 
 const CHECKLIST = [
   ['access', 'Acessos da empresa conferidos', 'Conta e acesso'],
@@ -47,6 +48,17 @@ async function requestAgentVersion(req, res) {
   res.status(202).json(record);
 }
 
+function listAgentReleases(req, res) {
+  if (deny(req, res)) return;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(agentController.listReleaseCatalog());
+}
+
+function downloadAgentRelease(req, res) {
+  if (deny(req, res)) return;
+  return agentController.downloadAgentRelease(req, res);
+}
+
 async function getChecklist(req, res) {
   if (deny(req, res)) return;
   const tenant = await prisma.tenant.findUnique({ where: { id: req.params.tenantId }, select: { id: true, name: true } });
@@ -67,4 +79,4 @@ async function updateChecklistItem(req, res) {
   res.json(item);
 }
 
-module.exports = { listAgentOperations, requestAgentVersion, getChecklist, updateChecklistItem };
+module.exports = { listAgentOperations, requestAgentVersion, listAgentReleases, downloadAgentRelease, getChecklist, updateChecklistItem };
