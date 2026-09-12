@@ -318,7 +318,7 @@ model DeploymentChecklistItem {
 
 model User {
   ticketPresences TicketPresence[]
-  attendanceAvailable Boolean @default(false)
+  attendanceAvailable Boolean @default(true)
   attendanceHeartbeatAt DateTime?
   assignedAttendanceTasks AttendanceTask[] @relation("TaskAssignee")
   createdAttendanceTasks AttendanceTask[] @relation("TaskCreator")
