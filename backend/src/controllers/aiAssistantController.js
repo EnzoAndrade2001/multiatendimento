@@ -12,6 +12,8 @@ async function query(req, res) {
   const ticketId = req.body?.ticketId ? String(req.body.ticketId) : null;
   if (!pergunta) return res.status(400).json({ error: 'Informe uma pergunta.' });
 
+  // Compatibilidade com chamadas antigas. O novo Assistente iLux não depende
+  // de uma conversa e usa o escopo global como padrão.
   if (!crmCustomerId && ticketId) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, tenantId },

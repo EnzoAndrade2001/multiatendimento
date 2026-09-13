@@ -45,7 +45,7 @@ export const ACCESS_PROFILES = {
 export const PERMISSION_GROUPS = [
   { label: 'Atendimento', keys: PERMISSION_KEYS.filter((key) => key.startsWith('inbox.')) },
   { label: 'CRM e financeiro', keys: PERMISSION_KEYS.filter((key) => key.startsWith('crm.') || key.startsWith('billing.')) },
-  { label: 'Operação', keys: ['dashboard.view', 'campaigns.manage', 'leads.manage', 'connections.manage', 'revenue.view', 'telemetry.view', 'telemetry.manage', 'internal_chat.view'] },
+  { label: 'Operação', keys: ['dashboard.view', 'campaigns.manage', 'leads.manage', 'connections.manage', 'revenue.view', 'telemetry.view', 'telemetry.manage', 'internal_chat.view', 'ai.assistant.query'] },
   { label: 'Administração', keys: PERMISSION_KEYS.filter((key) => key.startsWith('settings.') || ['users.manage', 'teams.manage', 'quick_responses.manage', 'tags.manage', 'privacy.manage', 'audit.view'].includes(key)) },
 ];
 
@@ -64,7 +64,7 @@ export const PERMISSION_LABELS = {
   'quick_responses.manage': 'Gerenciar respostas rápidas', 'tags.manage': 'Gerenciar etiquetas',
   'settings.agent.manage': 'Configurar Agente Local', 'privacy.manage': 'Gerenciar privacidade e LGPD',
   'internal_chat.view': 'Usar chat interno', 'audit.view': 'Consultar auditoria do sistema', 'telemetry.view': 'Acompanhar telemetria operacional', 'telemetry.manage': 'Gerenciar decisões do Sentinela',
-  'ai.assistant.query': 'Consultar a assistente de IA',
+  'ai.assistant.query': 'Consultar o Assistente iLux',
 };
 
 export function permissionsForUser(user = {}) {

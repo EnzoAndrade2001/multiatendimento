@@ -33,7 +33,6 @@ import LinkContactModal from '../components/LinkContactModal';
 import InstanceSelectionModal from '../components/InstanceSelectionModal';
 import TicketPresence from '../components/TicketPresence';
 import ScheduledMessagesPanel from '../components/ScheduledMessagesPanel';
-import AiAssistantDrawer from '../components/AiAssistantDrawer';
 import AttendanceAvailability from '../components/AttendanceAvailability';
 import { CrmCustomerProfileModal } from './CRM';
 import { ChatHeader, ContactPanel, ForwardModal, MessageComposer, MessageList, TicketSidebar, TransferModal } from './inbox/components';
@@ -93,7 +92,6 @@ export default function Inbox() {
   const MESSAGE_PAGE_SIZE = 60;
   const [selectedId, setSelectedId] = useState(null);
   const [directTicket, setDirectTicket] = useState(null);
-  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [text, setText] = useState('');
   const [me, setMe] = useState(null);
   const [users, setUsers] = useState([]);
@@ -1023,7 +1021,6 @@ export default function Inbox() {
                 canResolve={can('inbox.resolve')}
                 canReopen={can('inbox.reopen')}
                 canTransfer={can('inbox.assign') || can('inbox.transfer')}
-                canUseAiAssistant={can('ai.assistant.query') && hasFeature('crm')}
                 botName={botName}
                 handleReopen={handleReopen}
                 handleResolve={handleResolve}
@@ -1031,7 +1028,6 @@ export default function Inbox() {
                 isMobile={isMobile}
                 isCompactDesktop={isCompactDesktop}
                 onImageClick={openPreviewImage}
-                onOpenAiAssistant={() => setAiAssistantOpen(true)}
                 selectedTicket={selectedTicket}
                 setShowInfo={setShowInfo}
                 setShowOsModal={setShowOsModal}
@@ -1259,15 +1255,6 @@ export default function Inbox() {
           styles={s}
         />
       )}
-
-      <AiAssistantDrawer
-        isOpen={aiAssistantOpen}
-        onClose={() => setAiAssistantOpen(false)}
-        ticketId={selectedTicket?.id || null}
-        crmCustomerId={selectedTicket?.contact?.crmCustomer?.id || selectedTicket?.contact?.crmCustomerId || null}
-        customerName={selectedTicket?.contact?.crmCustomer?.fantasyName || selectedTicket?.contact?.crmCustomer?.name || selectedTicket?.contact?.fantasyName || selectedTicket?.contact?.name || null}
-        isMobile={isMobile}
-      />
 
       {forwardingMessage && (
         <ForwardModal

@@ -50,7 +50,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.2.1"
+DEFAULT_AGENT_VERSION = "1.3.0"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -508,6 +508,9 @@ class StateStore:
                 "contracts": 0,
                 "serviceOrders": 0,
                 "serviceOrderAttendances": 0,
+                "receivables": 0,
+                "payables": 0,
+                "equipmentMeters": 0,
             },
             "last_sync_at": None,
         }
@@ -1589,6 +1592,45 @@ class FirebirdRepository:
             return int(cur.fetchone()[0] or 0)
         finally:
             con.close()
+
+    def get_payables_watermark(self) -> int:
+        con = self.connect()
+        try:
+            cur = con.cursor()
+            cur.execute("select coalesce(max(SEQDESPESA), 0) from IDESPESAS")
+            return int(cur.fetchone()[0] or 0)
+        finally:
+            con.close()
+
+    def _payables_sql(self, where_clause: str, order_clause: str, limit: int | None = None) -> str:
+        first = f"first {max(1, int(limit))}" if limit is not None else ""
+        return f"""
+            select {first}
+                d.SEQDESPESA, d.CDDESPESA, d.CDFORNECEDOR,
+                coalesce(f.FANTASIA, f.NMFORNECEDOR, d.FANTASIA) as NMFORNECEDOR,
+                d.DTEMISSAODESP, d.DTVECTODESP, d.DTPAGTODESP,
+                d.DTPREVPAGTODES, d.VALDESPESA, d.VALDESPESAPAGA,
+                d.NUMNF, d.CDFORMAPAGTO, d.STATUSDESPESA, d.TFPROJECAO,
+                d.HISTORICO, d.CDEMPRESA, d.ATUALIZADO
+            from IDESPESAS d
+            left join IFORNECEDORES f on f.CDFORNECEDOR = d.CDFORNECEDOR
+            where {where_clause}
+            order by {order_clause}
+        """
+
+    def fetch_payables(self, cursor: int) -> Iterator[dict[str, Any]]:
+        yield from self._rows(self._payables_sql("d.SEQDESPESA > ?", "d.SEQDESPESA"), (cursor,))
+
+    def fetch_recent_payables(self, limit: int = 1000) -> Iterator[dict[str, Any]]:
+        yield from self._rows(self._payables_sql("1 = 1", "d.SEQDESPESA desc", limit), ())
+
+    def fetch_open_payables(self, limit: int = 5000) -> Iterator[dict[str, Any]]:
+        sql = self._payables_sql(
+            "d.DTPAGTODESP is null and coalesce(d.VALDESPESAPAGA, 0) < coalesce(d.VALDESPESA, 0)",
+            "d.DTVECTODESP, d.SEQDESPESA",
+            limit,
+        )
+        yield from self._rows(sql, ())
 
     def fetch_receivables(self, cursor: int, limit: int | None = None) -> Iterator[dict[str, Any]]:
         first = f"first {max(1, int(limit))}" if limit is not None else ""
@@ -2986,6 +3028,31 @@ def normalize_receivable(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def normalize_payable(record: dict[str, Any]) -> dict[str, Any]:
+    value = float(record.get("valdespesa") or 0)
+    paid_value = float(record.get("valdespesapaga") or 0)
+    return {
+        "externalId": str(record["seqdespesa"]).strip(),
+        "documentNumber": first_non_empty(record.get("cddespesa"), record.get("numnf")),
+        "supplierExternalId": str(record["cdfornecedor"]).strip() if record.get("cdfornecedor") is not None else None,
+        "supplierName": first_non_empty(record.get("nmfornecedor"), record.get("fantasia")),
+        "issuedAt": parse_firebird_timestamp(record.get("dtemissaodesp")),
+        "dueAt": parse_firebird_timestamp(record.get("dtvectodesp")),
+        "expectedPaymentAt": parse_firebird_timestamp(record.get("dtprevpagtdes")),
+        "paidAt": parse_firebird_timestamp(record.get("dtpagtodesp")),
+        "value": value,
+        "paidValue": paid_value,
+        "openValue": max(0, value - paid_value),
+        "status": first_non_empty(record.get("statusdespesa")),
+        "paymentMethod": first_non_empty(record.get("cdformapagto")),
+        "history": first_non_empty(record.get("historico")),
+        "companyCode": first_non_empty(record.get("cdempresa")),
+        "projection": str(record.get("tfprojecao") or "N").strip().upper() == "S",
+        "updatedAt": parse_firebird_timestamp(record.get("atualizado")),
+        "raw": {k: json_safe(v) for k, v in record.items()},
+    }
+
+
 def normalize_equipment_meter(record: dict[str, Any]) -> dict[str, Any]:
     equipment_id = str(record["cdequipamento"]).strip()
     meter_code = str(record["cdmedidor"]).strip()
@@ -3303,6 +3370,10 @@ def sync_entity(
         iterator = repo.fetch_receivables(cursor)
         normalizer = normalize_receivable
         cursor_field = "seqreceita"
+    elif entity == "payables":
+        iterator = repo.fetch_payables(cursor)
+        normalizer = normalize_payable
+        cursor_field = "seqdespesa"
     elif entity == "serviceOrders":
         iterator = repo.fetch_service_orders(cursor)
         normalizer = normalize_service_order
@@ -3383,6 +3454,21 @@ def sync_crm360_details(
         state.save()
     sync_entity(repo, crm, state, "receivables", batch_size)
 
+    # IDESPESAS existe nas bases iLux atuais, mas instalações antigas podem
+    # não possuir o financeiro de despesas. A ausência não interrompe os
+    # demais módulos do agente.
+    payables_available = True
+    try:
+        payable_cursor = state.get_cursor("payables")
+        if payable_cursor <= 0:
+            watermark = repo.get_payables_watermark()
+            state.set_cursor("payables", max(0, watermark - 2000))
+            state.save()
+        sync_entity(repo, crm, state, "payables", batch_size)
+    except Exception as exc:
+        payables_available = False
+        logging.info("Contas a pagar indisponiveis nesta base iLux: %s", exc)
+
     meter_cursor = 0 if force_meter_bootstrap else state.get_cursor("equipmentMeters")
     meter_total, max_equipment = push_normalized_batches(
         crm,
@@ -3428,6 +3514,18 @@ def sync_crm360_details(
         open_receivables, _ = push_normalized_batches(
             crm, "receivables", repo.fetch_open_receivables(5000), normalize_receivable, batch_size
         )
+        payables_total = 0
+        if payables_available:
+            try:
+                recent_payables, _ = push_normalized_batches(
+                    crm, "payables", repo.fetch_recent_payables(1000), normalize_payable, batch_size
+                )
+                open_payables, _ = push_normalized_batches(
+                    crm, "payables", repo.fetch_open_payables(5000), normalize_payable, batch_size
+                )
+                payables_total = recent_payables + open_payables
+            except Exception as exc:
+                logging.info("Atualizacao de contas a pagar ignorada nesta base: %s", exc)
         recent_meters, _ = push_normalized_batches(
             crm, "equipmentMeters", repo.fetch_recent_equipment_meters(1000), normalize_equipment_meter, batch_size
         )
@@ -3485,8 +3583,9 @@ def sync_crm360_details(
         state.data["crm360_recent_refresh_at"] = refresh_started_at.isoformat(timespec="seconds")
         state.data["crm360_contracts_updated_at"] = refresh_started_at.isoformat(timespec="seconds")
         logging.info(
-            "CRM 360: atualizados %s titulo(s), %s medidor(es), %s equipamento(s) e %s contrato(s) recentes",
+            "CRM 360: atualizados %s titulo(s), %s conta(s) a pagar, %s medidor(es), %s equipamento(s) e %s contrato(s) recentes",
             recent_receivables + open_receivables,
+            payables_total,
             recent_meters,
             recent_equipments,
             contract_refresh_total,
@@ -3681,6 +3780,7 @@ def run_cycle(
             "serviceOrders": 0,
             "serviceOrderAttendances": 0,
             "receivables": 0,
+            "payables": 0,
             "equipmentMeters": 0,
         }
         state.save()

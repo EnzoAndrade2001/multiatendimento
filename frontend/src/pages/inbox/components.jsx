@@ -1794,14 +1794,12 @@ export const ChatHeader = React.memo(function ChatHeader({
   canResolve,
   canReopen,
   canTransfer,
-  canUseAiAssistant,
   handleReopen,
   handleResolve,
   handleSummarize,
   isMobile,
   isCompactDesktop,
   onImageClick,
-  onOpenAiAssistant,
   selectedTicket,
   setShowInfo,
   setShowOsModal,
@@ -1898,20 +1896,6 @@ export const ChatHeader = React.memo(function ChatHeader({
       </div>
 
       <div style={styles.headerActions}>
-        {canUseAiAssistant && !isMobile ? (
-          <button
-            type="button"
-            className="inbox-control"
-            style={styles.headerGhostBtn}
-            onClick={onOpenAiAssistant}
-            title="Conversar com a assistente de IA"
-            aria-label="Abrir assistente de IA"
-          >
-            <Bot size={15} strokeWidth={2.2} />
-            Assistente IA
-          </button>
-        ) : null}
-
         {canCreateOs && !isMobile ? (
           <button
             type="button"
@@ -1971,12 +1955,6 @@ export const ChatHeader = React.memo(function ChatHeader({
                 <Sparkles size={15} strokeWidth={2.2} />
                 {summarizing ? 'Gerando resumo...' : 'Resumo IA'}
               </button>
-              {canUseAiAssistant && isMobile ? (
-                <button type="button" className="inbox-control" style={styles.headerMenuItem} onClick={() => { onOpenAiAssistant(); setActionsOpen(false); }}>
-                  <Bot size={15} strokeWidth={2.2} />
-                  Perguntar à IA
-                </button>
-              ) : null}
               {selectedTicket.status !== 'resolved' && canTransfer ? (
                 <button type="button" className="inbox-control" style={styles.headerMenuItem} onClick={() => { setTransferModal(true); setActionsOpen(false); }}>
                   <ArrowRightLeft size={15} strokeWidth={2.2} />

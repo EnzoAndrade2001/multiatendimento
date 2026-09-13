@@ -29,6 +29,7 @@ import {
   Activity,
   LayoutGrid,
   AlertTriangle,
+  Bot,
 } from 'lucide-react';
 import { endSupportSession, getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
@@ -372,6 +373,7 @@ export default function Layout() {
     { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', feature: 'lead_generation', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Inteligência & gestão
     { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', feature: 'ai_knowledge', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/assistente-ilux', icon: <Bot size={18} />, label: 'Assistente iLux', permission: 'ai.assistant.query', feature: 'ai_assistant', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', feature: 'telemetry', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', feature: 'billing_reports', roles: ['admin', 'superadmin'] },
     // Operação › Sistema

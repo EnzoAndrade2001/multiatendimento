@@ -3,7 +3,7 @@ const FEATURES = [
   ['contacts', 'Clientes e contatos', 'operacao'], ['internal_chat', 'Chat interno', 'equipe'],
   ['crm', 'CRM 360 iLux', 'ilux'], ['service_orders', 'Ordens de serviço iLux', 'ilux'],
   ['campaigns', 'Campanhas', 'automacao'], ['ai_bot', 'Robô de atendimento', 'ia'],
-  ['ai_knowledge', 'Base de conhecimento', 'ia'], ['billing', 'Cobrança', 'financeiro'],
+  ['ai_knowledge', 'Base de conhecimento', 'ia'], ['ai_assistant', 'Assistente corporativo iLux', 'ia'], ['billing', 'Cobrança', 'financeiro'],
   ['billing_reports', 'Relatórios de cobrança', 'financeiro'], ['lead_generation', 'Prospecção de leads', 'comercial'],
   ['printguard', 'PrintGuard', 'telemetria'], ['telemetry', 'Telemetria', 'telemetria'],
   ['park_health', 'Saúde do parque', 'telemetria'], ['ilux_sentinel', 'iLux Sentinela', 'ilux'],
@@ -13,7 +13,7 @@ const FEATURES = [
 ];
 
 const BASE = ['dashboard', 'inbox', 'contacts', 'audit', 'connections', 'quick_responses', 'privacy', 'settings'];
-const PROFESSIONAL = [...BASE, 'internal_chat', 'crm', 'service_orders', 'campaigns', 'ai_bot', 'ai_knowledge'];
+const PROFESSIONAL = [...BASE, 'internal_chat', 'crm', 'service_orders', 'campaigns', 'ai_bot', 'ai_knowledge', 'ai_assistant'];
 const PLANS = [
   ['essential', 'Essencial', 'Operação de atendimento', 10, { maxUsers: 5, maxConnections: 1 }, BASE],
   ['professional', 'Profissional', 'Atendimento integrado ao iLux', 20, { maxUsers: 10, maxConnections: 5 }, PROFESSIONAL],

@@ -30,6 +30,7 @@ const RevGuard = lazy(() => import('./pages/RevGuard'));
 const BillingReports = lazy(() => import('./pages/BillingReports'));
 const Privacy = lazy(() => import('./pages/Privacy'));
 const Audit = lazy(() => import('./pages/Audit'));
+const IluxAssistant = lazy(() => import('./pages/IluxAssistant'));
 // Interceptor global para tratar erros de autenticacao (401)
 api.interceptors.response.use(
   (response) => response,
@@ -204,6 +205,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/tasks" element={<RequireAccess permission="inbox.view" feature="inbox"><MyTasks /></RequireAccess>} />
             <Route path="/contacts" element={<RequireAccess permission="crm.view" feature="contacts"><Contacts /></RequireAccess>} />
             <Route path="/crm" element={<RequireAccess permission="crm.view" feature="crm"><CRM /></RequireAccess>} />
+            <Route path="/assistente-ilux" element={<RequireAccess permission="ai.assistant.query" feature="ai_assistant"><IluxAssistant /></RequireAccess>} />
             <Route path="/users" element={<RequirePermission permission="users.manage"><Users /></RequirePermission>} />
             <Route path="/teams" element={<RequirePermission permission="teams.manage"><Teams /></RequirePermission>} />
               <Route path="/settings" element={<RequireFeature feature="settings"><Settings /></RequireFeature>} />
