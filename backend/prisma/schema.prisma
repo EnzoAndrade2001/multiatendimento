@@ -8,9 +8,9 @@ datasource db {
 }
 
 model Tenant {
-  ticketPresences TicketPresence[]
-  attendancePolicy AttendancePolicy?
-  attendanceTasks AttendanceTask[]
+  ticketPresences            TicketPresence[]
+  attendancePolicy           AttendancePolicy?
+  attendanceTasks            AttendanceTask[]
   maxConcurrentSessions      Int?
   id                         String                      @id @default(cuid())
   name                       String
@@ -317,11 +317,11 @@ model DeploymentChecklistItem {
 }
 
 model User {
-  ticketPresences TicketPresence[]
-  attendanceAvailable Boolean @default(true)
-  attendanceHeartbeatAt DateTime?
-  assignedAttendanceTasks AttendanceTask[] @relation("TaskAssignee")
-  createdAttendanceTasks AttendanceTask[] @relation("TaskCreator")
+  ticketPresences            TicketPresence[]
+  attendanceAvailable        Boolean                     @default(true)
+  attendanceHeartbeatAt      DateTime?
+  assignedAttendanceTasks    AttendanceTask[]            @relation("TaskAssignee")
+  createdAttendanceTasks     AttendanceTask[]            @relation("TaskCreator")
   id                         String                      @id @default(cuid())
   tenantId                   String
   name                       String
@@ -404,7 +404,7 @@ model TechnicalContact {
 }
 
 model Team {
-  attendanceTasks AttendanceTask[]
+  attendanceTasks  AttendanceTask[]
   id               String            @id @default(cuid())
   tenantId         String
   name             String
@@ -492,21 +492,21 @@ model MetaInstance {
 }
 
 model Contact {
-  attendanceTasks AttendanceTask[]
-  id                String    @id @default(cuid())
+  attendanceTasks   AttendanceTask[]
+  id                String           @id @default(cuid())
   tenantId          String
   instanceId        String
   crmCustomerId     String?
-  externalSource    String?   @default("manual")
+  externalSource    String?          @default("manual")
   externalId        String?
   externalUpdatedAt DateTime?
   phone             String
   name              String?
   fantasyName       String?
   avatarUrl         String?
-  createdAt         DateTime  @default(now())
+  createdAt         DateTime         @default(now())
   notes             String?
-  tags              String    @default("[]")
+  tags              String           @default("[]")
   whatsapp          String?
   whatsappJid       String?
 
@@ -539,25 +539,25 @@ model Contact {
 }
 
 model Ticket {
-  presences TicketPresence[]
+  presences       TicketPresence[]
   attendanceTasks AttendanceTask[]
-  slaPolicyKey String?
-  slaWarnedAt DateTime?
-  slaBreachedAt DateTime?
-  id             String    @id @default(cuid())
-  tenantId       String
-  instanceId     String?
-  metaInstanceId String?
-  contactId      String
-  teamId         String?
-  agentId        String?
-  status         String    @default("pending")
-  priority       String    @default("medium") // low, medium, high, urgent
-  subject        String?
-  unreadCount    Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  resolvedAt     DateTime?
+  slaPolicyKey    String?
+  slaWarnedAt     DateTime?
+  slaBreachedAt   DateTime?
+  id              String           @id @default(cuid())
+  tenantId        String
+  instanceId      String?
+  metaInstanceId  String?
+  contactId       String
+  teamId          String?
+  agentId         String?
+  status          String           @default("pending")
+  priority        String           @default("medium") // low, medium, high, urgent
+  subject         String?
+  unreadCount     Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  resolvedAt      DateTime?
 
   // Início da conversa/sessão atual. Reiniciado a cada reabertura (o mesmo Ticket
   // é reaproveitado por contato), para que métricas sejam por conversa e não pela
@@ -832,28 +832,28 @@ model QuickResponseAudit {
 }
 
 model ScheduledMessage {
-  instanceId String?
-  status String @default("queued")
-  attempts Int @default(0)
-  nextAttemptAt DateTime?
-  claimedAt DateTime?
-  claimToken String?
-  sentAt DateTime?
-  lastError String?
+  instanceId        String?
+  status            String    @default("queued")
+  attempts          Int       @default(0)
+  nextAttemptAt     DateTime?
+  claimedAt         DateTime?
+  claimToken        String?
+  sentAt            DateTime?
+  lastError         String?
   providerMessageId String?
-  deliveryUncertain Boolean @default(false)
+  deliveryUncertain Boolean   @default(false)
+  id                String    @id @default(cuid())
+  tenantId          String
+  contactId         String
+  body              String
+  sendAt            DateTime
+  processed         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  contact           Contact   @relation(fields: [contactId], references: [id])
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
 
   @@index([status, sendAt, nextAttemptAt])
   @@index([tenantId, contactId, sendAt])
-  id        String   @id @default(cuid())
-  tenantId  String
-  contactId String
-  body      String
-  sendAt    DateTime
-  processed Boolean  @default(false)
-  createdAt DateTime @default(now())
-  contact   Contact  @relation(fields: [contactId], references: [id])
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
 }
 
 model InternalMessage {
@@ -994,12 +994,12 @@ model Equipment {
 }
 
 model ServiceOrder {
-  attendanceTasks AttendanceTask[]
-  id                   String    @id @default(cuid())
+  attendanceTasks      AttendanceTask[]
+  id                   String           @id @default(cuid())
   tenantId             String
   contactId            String
   equipmentId          String
-  externalSource       String?   @default("manual")
+  externalSource       String?          @default("manual")
   externalId           String?
   externalUpdatedAt    DateTime?
   requestKey           String?
@@ -1008,12 +1008,12 @@ model ServiceOrder {
   cdDefeito            String?
   nmsuportet           String?
   defect               String? // Descrição do defeito relatado
-  status               String    @default("PENDENTE") // PENDENTE, EM_ATENDIMENTO, AGUARDANDO_RETORNO, FINALIZADA
+  status               String           @default("PENDENTE") // PENDENTE, EM_ATENDIMENTO, AGUARDANDO_RETORNO, FINALIZADA
   technicalNotes       String? // Notas do técnico (peças trocadas, pendências)
   meters               String? // Medidores em JSON (ex: {"mono": 1000, "cor": 500})
   userId               String? // Atendente que criou a O.S.
   managerCopySentAt    DateTime?
-  managerCopyLastError String?   @db.Text
+  managerCopyLastError String?          @db.Text
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -1220,24 +1220,27 @@ model CrmDefectType {
 }
 
 model BillingLog {
-  id                String    @id @default(cuid())
-  tenantId          String
-  cpfCnpj           String?
-  clientName        String?
-  fileName          String
-  status            String // "SUCCESS", "FAILED" ou "TEST" (envio simulado, modo teste)
-  errorMessage      String?   @db.Text
-  sentAt            DateTime  @default(now())
+  id                   String    @id @default(cuid())
+  tenantId             String
+  cpfCnpj              String?
+  clientName           String?
+  fileName             String
+  status               String // "SUCCESS", "FAILED" ou "TEST" (envio simulado, modo teste)
+  errorMessage         String?   @db.Text
+  sentAt               DateTime  @default(now())
   // Confirmacao de entrega no WhatsApp (Evolution messages.update / ACK).
   // messageId = id da 1a midia enviada; deliveryStatus: sent|delivered|read|failed.
-  messageId         String?
-  deliveryStatus    String?   @default("sent")
-  deliveryUpdatedAt DateTime?
+  messageId            String?
+  deliveryStatus       String?   @default("sent")
+  deliveryUpdatedAt    DateTime?
+  // Titulo financeiro que originou o envio automatico.
+  receivableExternalId String?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([tenantId, messageId])
+  @@index([tenantId, receivableExternalId, status, sentAt])
 }
 
 model PrivacyAuditLog {
@@ -1702,13 +1705,14 @@ model CrmBillingStatementLine {
   @@unique([statementId, lineNo])
   @@index([tenantId, statementExternalId])
 }
+
 model AttendanceTask {
-  id             String    @id @default(cuid())
+  id             String        @id @default(cuid())
   tenantId       String
   title          String
-  description    String?   @db.Text
-  kind           String    @default("task")
-  status         String    @default("open")
+  description    String?       @db.Text
+  kind           String        @default("task")
+  status         String        @default("open")
   dueAt          DateTime?
   completedAt    DateTime?
   assigneeId     String
@@ -1717,14 +1721,14 @@ model AttendanceTask {
   contactId      String?
   ticketId       String?
   serviceOrderId String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignee       User     @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  createdBy      User     @relation("TaskCreator", fields: [createdById], references: [id])
-  team           Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  ticket         Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee       User          @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy      User          @relation("TaskCreator", fields: [createdById], references: [id])
+  team           Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  ticket         Ticket?       @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, assigneeId, status, dueAt])
@@ -1732,16 +1736,16 @@ model AttendanceTask {
 }
 
 model AttendancePolicy {
-  id String @id @default(cuid())
-  tenantId String @unique
-  slaEnabled Boolean @default(false)
-  assignmentEnabled Boolean @default(false)
-  redistributeUnavailable Boolean @default(false)
-  maxActiveTickets Int @default(10)
-  unavailableMinutes Int @default(5)
-  rules Json @default("[]")
-  updatedAt DateTime @updatedAt
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                      String   @id @default(cuid())
+  tenantId                String   @unique
+  slaEnabled              Boolean  @default(false)
+  assignmentEnabled       Boolean  @default(false)
+  redistributeUnavailable Boolean  @default(false)
+  maxActiveTickets        Int      @default(10)
+  unavailableMinutes      Int      @default(5)
+  rules                   Json     @default("[]")
+  updatedAt               DateTime @updatedAt
+  tenant                  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 // "Fulano também está vendo/digitando" no Inbox. Uma linha por (userId,
@@ -1764,4 +1768,3 @@ model TicketPresence {
   @@unique([userId, sessionId])
   @@index([tenantId, ticketId, lastSeenAt])
 }
-

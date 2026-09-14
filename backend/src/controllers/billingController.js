@@ -526,21 +526,26 @@ async function autoSendBilling(req, res) {
     failureCpfCnpj = crmCustomer.cpfCnpj || '';
     failureClientName = customerName;
 
-    // Proteção contra envio duplicado caso o ledger do agente seja apagado (evita spam no mesmo dia)
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const alreadySentToday = await prisma.billingLog.findFirst({
+    // O ledger local tambem deduplica, mas pode ser apagado e o PDF pode ser
+    // regenerado. Um SUCCESS do mesmo titulo bloqueia outro envio automatico
+    // durante todo o mes. Titulos diferentes e o reenvio manual continuam.
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const nextMonthStart = new Date(monthStart);
+    nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
+    const alreadySentThisMonth = await prisma.billingLog.findFirst({
       where: {
         tenantId: tenant.id,
-        cpfCnpj: crmCustomer.cpfCnpj,
+        receivableExternalId: String(receivableExternalId),
         status: 'SUCCESS',
-        sentAt: { gte: startOfDay }
+        sentAt: { gte: monthStart, lt: nextMonthStart }
       }
     });
 
-    if (alreadySentToday) {
-      // Retorna sucesso silenciado para o agente registrar no ledger e não tentar mais, mas não processa envio
-      return res.json({ success: true, message: 'Já enviado hoje com sucesso.' });
+    if (alreadySentThisMonth) {
+      // Sem "skipped": o agente grava no ledger e para de reapresentar o titulo.
+      return res.json({ success: true, duplicate: true, message: 'Titulo ja enviado automaticamente neste mes.' });
     }
 
     // O agente re-tenta títulos sem opt-in/telefone em todo ciclo (10 min).
@@ -773,7 +778,7 @@ async function autoSendBilling(req, res) {
     const updatedTicket = await prisma.ticket.update({ where: { id: ticket.id }, data: { lastMessageAt: new Date() } });
 
     await prisma.billingLog.create({
-      data: { tenantId: tenant.id, cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SUCCESS', messageId: firstMediaMessageId, deliveryStatus: 'sent' },
+      data: { tenantId: tenant.id, receivableExternalId: String(receivableExternalId), cpfCnpj: crmCustomer.cpfCnpj, clientName: customerName, fileName: fileNames, status: 'SUCCESS', messageId: firstMediaMessageId, deliveryStatus: 'sent' },
     });
     await prisma.ticketEvent.create({
       data: {
@@ -807,6 +812,7 @@ async function autoSendBilling(req, res) {
           await prisma.billingLog.create({
             data: {
               tenantId: tenant.id,
+              receivableExternalId: receivableExternalId ? String(receivableExternalId) : null,
               cpfCnpj: failureCpfCnpj,
               clientName: failureClientName,
               fileName: (documents || []).map((document) => document.fileName).join(', '),

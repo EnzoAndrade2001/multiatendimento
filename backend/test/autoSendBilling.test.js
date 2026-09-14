@@ -207,9 +207,12 @@ test('nao regrava SKIPPED quando ja existe um recente para o mesmo cliente (evit
   let billingCreateCalls = 0;
   prisma.billingLog.create = async ({ data }) => { billingCreateCalls += 1; return data; };
   prisma.billingLog.findFirst = async ({ where }) => {
-    assert.equal(where.cpfCnpj, '01971259000142');
     assert.ok(where.sentAt?.gte instanceof Date);
-    if (where.status === 'SUCCESS') return null; // ainda nao enviado hoje
+    if (where.status === 'SUCCESS') {
+      assert.equal(where.receivableExternalId, '18741');
+      return null; // ainda nao enviado neste mes
+    }
+    assert.equal(where.cpfCnpj, '01971259000142');
     assert.equal(where.status, 'SKIPPED');
     return { id: 'skip-recente' }; // ja existe um SKIPPED recente
   };
@@ -252,4 +255,56 @@ test('D4: titulo emitido em mes anterior nao dispara envio automatico', async (c
   assert.equal(res.body.success, true);
   assert.equal(res.body.skipped, true);
   assert.match(res.body.message, /per[ií]odo anterior/i);
+});
+
+test('nao envia duas vezes o mesmo titulo financeiro dentro do mesmo mes', async (context) => {
+  const originals = {
+    tenant: prisma.tenant.findUnique,
+    externalFindFirst: prisma.externalSyncRecord.findFirst,
+    customerFindFirst: prisma.crmCustomer.findFirst,
+    billingLogFindFirst: prisma.billingLog.findFirst,
+    sendText: evolutionService.sendText,
+    sendMedia: evolutionService.sendMedia,
+  };
+  context.after(() => {
+    prisma.tenant.findUnique = originals.tenant;
+    prisma.externalSyncRecord.findFirst = originals.externalFindFirst;
+    prisma.crmCustomer.findFirst = originals.customerFindFirst;
+    prisma.billingLog.findFirst = originals.billingLogFindFirst;
+    evolutionService.sendText = originals.sendText;
+    evolutionService.sendMedia = originals.sendMedia;
+  });
+
+  prisma.tenant.findUnique = async () => TENANT;
+  prisma.externalSyncRecord.findFirst = async () => ({
+    payload: { clientExternalId: '326', issuedAt: new Date().toISOString() },
+  });
+  prisma.crmCustomer.findFirst = async () => ({
+    id: 'crm-customer-1', externalId: '326', name: 'Cliente', cpfCnpj: '01971259000142',
+  });
+  prisma.billingLog.findFirst = async ({ where }) => {
+    assert.equal(where.tenantId, TENANT.id);
+    assert.equal(where.receivableExternalId, '18741');
+    assert.equal(where.status, 'SUCCESS');
+    assert.ok(where.sentAt.gte instanceof Date);
+    assert.ok(where.sentAt.lt instanceof Date);
+    assert.equal(where.sentAt.gte.getDate(), 1);
+    return { id: 'envio-anterior-no-mes' };
+  };
+  let whatsappCalls = 0;
+  evolutionService.sendText = async () => { whatsappCalls += 1; };
+  evolutionService.sendMedia = async () => { whatsappCalls += 1; };
+
+  const res = fakeRes();
+  await autoSendBilling(fakeReq({
+    tenantSlug: 'lcd',
+    receivableExternalId: '18741',
+    sendPolicy: 'Somente Marcados',
+    documents: [{ documentType: 'boleto', pdfBase64: 'AA==', fileName: 'a.pdf' }],
+  }), res);
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.duplicate, true);
+  assert.match(res.body.message, /ja enviado automaticamente neste mes/i);
+  assert.equal(whatsappCalls, 0);
 });
