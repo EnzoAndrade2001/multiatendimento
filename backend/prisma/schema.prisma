@@ -456,6 +456,21 @@ model WaInstance {
   tenant              Tenant              @relation(fields: [tenantId], references: [id])
 }
 
+// Catalogo global (nao por tenant - gerenciado pela operacao) de servidores
+// Evolution API disponiveis para NOVAS conexoes escolherem automaticamente.
+// Sem nenhuma linha aqui, tudo continua caindo no padrao de sempre
+// (TenantSettings.evolutionUrl) - isso e so o pool usado pela distribuicao
+// automatica em evolutionServerPoolService.pickServerForNewInstance().
+model EvolutionServer {
+  id        String   @id @default(cuid())
+  name      String
+  url       String
+  apiKey    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Historico append-only de saude das instancias WhatsApp. Uma linha por
 // TRANSICAO de estado/health (nao a cada checagem) + eventos de "instancia
 // muda" (conectada mas sem receber webhook). Sem isso, um incidente

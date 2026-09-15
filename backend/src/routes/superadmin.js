@@ -7,6 +7,7 @@ const {
   startSupportSession, endSupportSession,
   listSupportSessions, revokeSupportSession,
   listSupportUsers, createSupportUser, updateSupportUser,
+  listEvolutionServers, createEvolutionServer, updateEvolutionServer, deleteEvolutionServer,
 } = require('../controllers/superAdminController');
 const { listCatalog, upsertFeature, upsertPlan, setPlanFeatures, getTenantEntitlements, setTenantOverrides } = require('../controllers/entitlementController');
 const { listAgentOperations, requestAgentVersion, listAgentReleases, downloadAgentRelease, getChecklist, updateChecklistItem } = require('../controllers/supportOperationsController');
@@ -39,5 +40,9 @@ router.delete('/support-sessions/:id', revokeSupportSession);
 router.get('/tenants/:id/users', listTenantUsers);
 router.post('/tenants/:id/users', createTenantUser);
 router.patch('/tenants/:id/users/:userId', updateTenantUser);
+router.get('/evolution-servers', listEvolutionServers);
+router.post('/evolution-servers', createEvolutionServer);
+router.patch('/evolution-servers/:id', updateEvolutionServer);
+router.delete('/evolution-servers/:id', deleteEvolutionServer);
 
 module.exports = router;

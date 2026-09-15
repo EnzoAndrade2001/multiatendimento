@@ -4,6 +4,7 @@ const metaCloudApi = require('../services/metaCloudApiService');
 const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
 const { syncMissedMessages } = require('../services/syncMissedMessagesService');
 const { assertTenantLimit } = require('../services/tenantLimitService');
+const { pickServerForNewInstance } = require('../services/evolutionServerPoolService');
 
 // `waInstance` opcional: quando a conexão tem seu próprio evolutionUrl/Key
 // (override por instância, ex: oficial isolada num servidor dedicado), isso
@@ -158,10 +159,24 @@ async function create(req, res) {
 
     // Override opcional: permite criar a conexão já apontando pra um
     // servidor Evolution dedicado, diferente do padrão da empresa (ex:
-    // isolar a conexão oficial num Evolution só dela). Sem isso, cai no
-    // comportamento de sempre (servidor da empresa).
-    const instanceEvolutionUrl = String(req.body.evolutionUrl || '').trim() || null;
-    const instanceEvolutionKey = String(req.body.evolutionKey || '').trim() || null;
+    // isolar a conexão oficial num Evolution só dela).
+    let instanceEvolutionUrl = String(req.body.evolutionUrl || '').trim() || null;
+    let instanceEvolutionKey = String(req.body.evolutionKey || '').trim() || null;
+
+    // Sem override manual: deixa o pool escolher sozinho um servidor que
+    // essa empresa ainda não usa em outra conexão (isola número de número
+    // automaticamente) e balanceado entre os servidores cadastrados. Sem
+    // nenhum servidor no pool (ou só 1), não muda nada - cai no padrão de
+    // sempre (servidor da empresa).
+    if (!instanceEvolutionUrl || !instanceEvolutionKey) {
+      const picked = await pickServerForNewInstance(req.user.tenantId);
+      if (picked) {
+        instanceEvolutionUrl = picked.url;
+        instanceEvolutionKey = picked.apiKey;
+        console.log(`[instanceController] Servidor Evolution escolhido automaticamente pelo pool: ${picked.name}`);
+      }
+    }
+
     const { evolutionUrl, evolutionKey } = await getSettings(
       req.user.tenantId,
       instanceEvolutionUrl && instanceEvolutionKey ? { evolutionUrl: instanceEvolutionUrl, evolutionKey: instanceEvolutionKey } : null,
