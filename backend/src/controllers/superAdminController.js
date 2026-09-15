@@ -468,6 +468,54 @@ async function updateSupportUser(req, res) {
   res.json(await prisma.user.update({ where: { id: existing.id }, data, select: { id: true, name: true, email: true, supportLevel: true, active: true, lastLoginAt: true, createdAt: true } }));
 }
 
+// Pool de servidores Evolution API usado pela distribuicao automatica de
+// novas conexoes (ver evolutionServerPoolService.pickServerForNewInstance).
+// Gerenciado aqui, nao por tenant - e infraestrutura da operacao.
+function maskEvolutionServer(server) {
+  const { apiKey, ...rest } = server;
+  return { ...rest, apiKeyPreview: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : null };
+}
+
+async function listEvolutionServers(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const servers = await prisma.evolutionServer.findMany({ orderBy: { createdAt: 'asc' } });
+  res.json(servers.map(maskEvolutionServer));
+}
+
+async function createEvolutionServer(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const name = String(req.body.name || '').trim();
+  const url = String(req.body.url || '').trim();
+  const apiKey = String(req.body.apiKey || '').trim();
+  if (!name || !url || !apiKey) return res.status(400).json({ error: 'Nome, URL e chave de API são obrigatórios.' });
+  const server = await prisma.evolutionServer.create({ data: { name, url, apiKey } });
+  res.status(201).json(maskEvolutionServer(server));
+}
+
+async function updateEvolutionServer(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const existing = await prisma.evolutionServer.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Servidor não encontrado.' });
+  const data = {};
+  if (req.body.name !== undefined) data.name = String(req.body.name).trim();
+  if (req.body.url !== undefined) data.url = String(req.body.url).trim();
+  if (req.body.apiKey) data.apiKey = String(req.body.apiKey).trim();
+  if (req.body.active !== undefined) data.active = Boolean(req.body.active);
+  const updated = await prisma.evolutionServer.update({ where: { id: existing.id }, data });
+  res.json(maskEvolutionServer(updated));
+}
+
+async function deleteEvolutionServer(req, res) {
+  if (denySuperadmin(req, res)) return;
+  const existing = await prisma.evolutionServer.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Servidor não encontrado.' });
+  // Nao apaga - so desativa. Conexoes ja criadas continuam guardando a
+  // URL/chave delas mesmas (WaInstance.evolutionUrl), remover o cadastro do
+  // pool nao as afeta; so tira o servidor de futuras escolhas automaticas.
+  await prisma.evolutionServer.update({ where: { id: existing.id }, data: { active: false } });
+  res.json({ ok: true });
+}
+
 module.exports = {
   listTenants, createTenant, updateTenant, updateTenantCommercial,
   listTenantUsers, createTenantUser, updateTenantUser,
@@ -475,4 +523,5 @@ module.exports = {
   listSupportUsers, createSupportUser, updateSupportUser,
   startSupportSession, endSupportSession,
   listSupportSessions, revokeSupportSession,
+  listEvolutionServers, createEvolutionServer, updateEvolutionServer, deleteEvolutionServer,
 };
