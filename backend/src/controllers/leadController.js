@@ -472,10 +472,10 @@ async function sendToLeads(req, res) {
     if (!hasText && !hasMedia) return res.status(400).json({ error: 'Informe uma mensagem ou mídia para enviar.' });
     const media = normalizeMedia(rawMedia, req.body.mediaType, req.body.mediaMimeType);
     const requestedInstanceId = text(req.body.instanceId, 100);
-    const instance = await prisma.waInstance.findFirst({ where: { tenantId, ...(requestedInstanceId ? { id: requestedInstanceId } : { status: { in: ['connected', 'CONNECTED', 'open', 'OPEN'] } }), instanceName: { not: { startsWith: 'DELETED_' } } }, select: { id: true, instanceName: true, phone: true, status: true }, orderBy: { instanceName: 'asc' } });
+    const instance = await prisma.waInstance.findFirst({ where: { tenantId, ...(requestedInstanceId ? { id: requestedInstanceId } : { status: { in: ['connected', 'CONNECTED', 'open', 'OPEN'] } }), instanceName: { not: { startsWith: 'DELETED_' } } }, select: { id: true, instanceName: true, phone: true, status: true, evolutionUrl: true, evolutionKey: true }, orderBy: { instanceName: 'asc' } });
     if (!instance) return res.status(400).json({ error: 'Instância de saída não encontrada para este tenant.' });
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId }, select: { evolutionUrl: true, evolutionKey: true } });
-    if (!settings?.evolutionUrl || !settings?.evolutionKey) return res.status(400).json({ error: 'Configure a Evolution API antes de enviar.' });
+    if (!evolutionService.resolveEvolutionConfig(settings, instance).evolutionUrl) return res.status(400).json({ error: 'Configure a Evolution API antes de enviar.' });
     // A key supplied by the client makes retries idempotent. Without one,
     // create a fresh key so that an intentional new campaign is allowed;
     // active-recipient checks below still prevent duplicate queueing.

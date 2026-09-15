@@ -5,10 +5,12 @@ const { parseConnectionState, healthForState } = require('../services/instanceHe
 const { syncMissedMessages } = require('../services/syncMissedMessagesService');
 const { assertTenantLimit } = require('../services/tenantLimitService');
 
-async function getSettings(tenantId) {
+// `waInstance` opcional: quando a conexão tem seu próprio evolutionUrl/Key
+// (override por instância, ex: oficial isolada num servidor dedicado), isso
+// prevalece sobre o padrão da empresa. Ver evolutionService.resolveEvolutionConfig.
+async function getSettings(tenantId, waInstance) {
   const s = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-  const evolutionUrl = s?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-  const evolutionKey = s?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+  const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(s, waInstance);
   if (!evolutionUrl || !evolutionKey) throw new Error('Evolution API não configurada. Contate o administrador.');
   return { ...s, evolutionUrl, evolutionKey };
 }
@@ -54,18 +56,20 @@ async function list(req, res) {
       })));
     }
     
-    let settings;
-    try {
-      settings = await getSettings(req.user.tenantId);
-    } catch {
-      // Se não estiver configurado, retorna a lista do banco mas sem o status real
-      return res.json(instances.map(i => ({ ...i, state: 'close' })));
-    }
+    const tenantSettings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
 
-    const { evolutionUrl, evolutionKey } = settings;
+    // Antes só existia config no nível da empresa: sem ela configurada, nem
+    // vale a pena tentar. Agora uma instância pode ter seu próprio override,
+    // então só desiste de checar o status real se ninguém está configurado.
+    const anyConfigured = instances.some((i) => evolution.resolveEvolutionConfig(tenantSettings, i).evolutionUrl);
+    if (!anyConfigured) return res.json(instances.map(i => ({ ...i, state: 'close' })));
 
     const result = await Promise.all(instances.map(async (inst) => {
       try {
+        const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(tenantSettings, inst);
+        if (!evolutionUrl || !evolutionKey) {
+          return { ...inst, state: 'close', healthStatus: 'unknown' };
+        }
         const checkedAt = new Date();
         const data = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName, { timeout: 15000 });
         const state = parseConnectionState(data) || 'unknown';
@@ -152,8 +156,17 @@ async function create(req, res) {
       });
     }
 
-    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);
-    
+    // Override opcional: permite criar a conexão já apontando pra um
+    // servidor Evolution dedicado, diferente do padrão da empresa (ex:
+    // isolar a conexão oficial num Evolution só dela). Sem isso, cai no
+    // comportamento de sempre (servidor da empresa).
+    const instanceEvolutionUrl = String(req.body.evolutionUrl || '').trim() || null;
+    const instanceEvolutionKey = String(req.body.evolutionKey || '').trim() || null;
+    const { evolutionUrl, evolutionKey } = await getSettings(
+      req.user.tenantId,
+      instanceEvolutionUrl && instanceEvolutionKey ? { evolutionUrl: instanceEvolutionUrl, evolutionKey: instanceEvolutionKey } : null,
+    );
+
     const instanceName = `${req.user.tenantId}_${name.toLowerCase().replace(/\s+/g, '_')}`;
 
     // Cria na Evolution
@@ -185,6 +198,8 @@ async function create(req, res) {
         phone: officialPhone,
         officialPhoneId,
         officialBusinessId: officialBusinessId || null,
+        evolutionUrl: instanceEvolutionUrl,
+        evolutionKey: instanceEvolutionKey,
       }
     });
 
@@ -231,7 +246,7 @@ async function getQrCode(req, res) {
     }
     if (!inst) return res.status(404).json({ error: 'Instância não encontrada' });
 
-    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);
+    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId, inst);
     const data = await evolution.getQrCode(evolutionUrl, evolutionKey, inst.instanceName);
 
     res.json({
@@ -257,7 +272,7 @@ async function repair(req, res) {
     }
     if (!inst) return res.status(404).json({ error: 'Instancia nao encontrada' });
 
-    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);
+    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId, inst);
     const diagnostics = [];
 
     try {
@@ -338,14 +353,86 @@ async function recoverMessages(req, res) {
   }
 }
 
+// Muda o servidor Evolution API que ESTA conexão usa (isolar do padrão da
+// empresa - ex: mover a conexão oficial pra um Evolution dedicado, deixando
+// as QR-code no servidor de sempre). Body vazio ({}) limpa o override e
+// volta a usar o padrão da empresa. Tenta deixar a instância já criada e com
+// webhook configurado no servidor de destino; pra oficial, também tenta
+// reinscrever o app na WABA (o token da Meta não fica guardado no nosso
+// banco - vive só na instância da Evolution - então precisa ser reenviado
+// aqui pra migrar de servidor).
+async function updateServer(req, res) {
+  try {
+    const { id } = req.params;
+    const inst = await prisma.waInstance.findFirst({ where: { id, tenantId: req.user.tenantId } });
+    if (!inst) return res.status(404).json({ error: 'Instância não encontrada' });
+
+    const newUrl = String(req.body.evolutionUrl || '').trim() || null;
+    const newKey = String(req.body.evolutionKey || '').trim() || null;
+    if ((newUrl && !newKey) || (!newUrl && newKey)) {
+      return res.status(400).json({ error: 'Informe URL e chave juntas, ou deixe as duas em branco para limpar o override.' });
+    }
+
+    const warnings = [];
+    if (newUrl && newKey) {
+      try {
+        await evolution.createInstance(newUrl, newKey, inst.instanceName, {
+          provider: inst.provider,
+          phoneNumberId: inst.officialPhoneId,
+          businessId: inst.officialBusinessId,
+          accessToken: req.body.officialAccessToken ? String(req.body.officialAccessToken).trim() : undefined,
+        });
+      } catch (err) {
+        if (!evolution.isInstanceAlreadyInUse(err)) {
+          return res.status(400).json({ error: `Erro ao criar a instância no novo servidor: ${evolution.getEvolutionErrorDetail(err)}` });
+        }
+      }
+
+      try {
+        await evolution.setWebhook(newUrl, newKey, inst.instanceName, evolution.getWebhookCallbackUrl());
+      } catch (err) {
+        warnings.push(`Instância criada no novo servidor, mas não consegui configurar o webhook automaticamente (${err.response?.data?.message || err.message}).`);
+      }
+
+      if (inst.provider === 'evolution_official' && inst.officialBusinessId && req.body.officialAccessToken) {
+        try {
+          const metaCloudApi = require('../services/metaCloudApiService');
+          const callbackUrl = `${newUrl.replace(/\/+$/, '')}/webhook/meta`;
+          await metaCloudApi.subscribeAppToWaba({
+            wabaId: inst.officialBusinessId,
+            accessToken: String(req.body.officialAccessToken).trim(),
+            callbackUrl,
+            verifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || 'evolution',
+          });
+        } catch (err) {
+          const metaCloudApi = require('../services/metaCloudApiService');
+          warnings.push(`Instância migrada, mas não consegui reinscrever o app na WABA (${metaCloudApi.graphErrorDetail(err)}). A Meta pode continuar mandando eventos pro servidor antigo até isso ser refeito.`);
+        }
+      } else if (inst.provider === 'evolution_official') {
+        warnings.push('Lembrete: pra oficial receber mensagens no novo servidor, a inscrição do app na WABA da Meta (subscribed_apps) precisa apontar pro novo servidor. Informe o token de acesso da Meta pra eu tentar fazer isso automaticamente, ou refaça manualmente.');
+      }
+    }
+
+    const updated = await prisma.waInstance.update({
+      where: { id },
+      data: { evolutionUrl: newUrl, evolutionKey: newKey },
+    });
+
+    res.json(warnings.length ? { ...updated, warnings } : updated);
+  } catch (err) {
+    console.error('[instanceController] Erro ao trocar servidor da instância:', err.response?.data || err.message);
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+}
+
 async function remove(req, res) {
   try {
     const { id } = req.params;
     const inst = await prisma.waInstance.findFirst({ where: { id, tenantId: req.user.tenantId } });
     if (!inst) return res.status(404).json({ error: 'Instância não encontrada' });
 
-    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId);
-    
+    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId, inst);
+
     // Tenta deletar na Evolution (ignora erro se já não existir lá)
     try { await evolution.deleteInstance(evolutionUrl, evolutionKey, inst.instanceName); } catch {}
 
@@ -390,4 +477,4 @@ async function healthEvents(req, res) {
   }
 }
 
-module.exports = { list, create, getQrCode, repair, recoverMessages, remove, healthEvents };
+module.exports = { list, create, getQrCode, repair, recoverMessages, remove, healthEvents, updateServer };

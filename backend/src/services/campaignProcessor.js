@@ -136,7 +136,7 @@ async function processCampaign(campaignId) {
       await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'QUEUED', lastError: 'A instancia de saida esta desconectada. Aguardando reconexao.' } });
       return;
     }
-    if (!campaign.tenant?.settings?.evolutionUrl || !campaign.tenant?.settings?.evolutionKey) {
+    if (!evolutionService.resolveEvolutionConfig(campaign.tenant?.settings, campaign.instance).evolutionUrl) {
       await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'FAILED', lastError: 'Instância de saída ou Evolution API não configurada.' } });
       return;
     }
@@ -184,13 +184,14 @@ async function processCampaign(campaignId) {
       }
       try {
         let result;
+        const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(campaign.tenant.settings, campaign.instance);
         if (campaign.mediaUrl) {
           const filename = path.basename(String(campaign.mediaUrl).split('?')[0]);
           const filePath = path.join(uploadsPath, filename);
           if (!fs.existsSync(filePath)) throw new Error('Anexo da campanha não está disponível no servidor.');
           result = await evolutionService.sendMedia(
-            campaign.tenant.settings.evolutionUrl,
-            campaign.tenant.settings.evolutionKey,
+            evolutionUrl,
+            evolutionKey,
             campaign.instance.instanceName,
             recipient.phone,
             {
@@ -202,7 +203,7 @@ async function processCampaign(campaignId) {
             }
           );
         } else {
-          result = await evolutionService.sendText(campaign.tenant.settings.evolutionUrl, campaign.tenant.settings.evolutionKey, campaign.instance.instanceName, recipient.phone, recipient.renderedMessage);
+          result = await evolutionService.sendText(evolutionUrl, evolutionKey, campaign.instance.instanceName, recipient.phone, recipient.renderedMessage);
         }
         const externalId = messageId(result);
         const sentAt = new Date();

@@ -74,11 +74,12 @@ async function syncMissedMessages(instanceName, options = {}) {
     });
     const settings = waInstance?.tenant?.settings;
     if (!waInstance || !waInstance.tenant || !settings) return result;
-    if (!settings.evolutionUrl || !settings.evolutionKey) return result;
+    const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, waInstance);
+    if (!evolutionUrl || !evolutionKey) return result;
 
     const jids = new Set();
     try {
-      const chats = asArray(await evolutionService.findChats(settings.evolutionUrl, settings.evolutionKey, instanceName));
+      const chats = asArray(await evolutionService.findChats(evolutionUrl, evolutionKey, instanceName));
       chats.forEach((chat) => {
         const jid = chatJid(chat);
         if (jid) jids.add(jid);
@@ -108,8 +109,8 @@ async function syncMissedMessages(instanceName, options = {}) {
       let messages;
       try {
         messages = asArray(await evolutionService.findMessages(
-          settings.evolutionUrl,
-          settings.evolutionKey,
+          evolutionUrl,
+          evolutionKey,
           instanceName,
           jid,
           normalized.limitPerChat,

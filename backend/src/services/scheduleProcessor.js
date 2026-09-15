@@ -69,11 +69,13 @@ async function retryPendingMedia() {
       try {
         const settings = msg.ticket.tenant.settings;
         const instance = msg.ticket.instance;
-        if (!settings?.evolutionUrl || !settings?.evolutionKey || !instance) continue;
+        if (!instance) continue;
+        const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, instance);
+        if (!evolutionUrl || !evolutionKey) continue;
 
         const result = await evolutionService.getMediaBase64(
-          settings.evolutionUrl,
-          settings.evolutionKey,
+          evolutionUrl,
+          evolutionKey,
           instance.instanceName,
           { id: msg.externalId }
         );

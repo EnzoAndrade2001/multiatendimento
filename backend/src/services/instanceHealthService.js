@@ -154,8 +154,7 @@ async function checkInstance(instance) {
     return instance;
   }
   const settings = instance.tenant?.settings;
-  const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-  const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+  const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, instance);
 
   if (!evolutionUrl || !evolutionKey) {
     const health = { status: 'degraded', healthStatus: 'misconfigured' };

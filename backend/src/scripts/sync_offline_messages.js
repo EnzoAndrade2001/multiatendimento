@@ -29,8 +29,7 @@ async function main() {
       where: { tenantId: inst.tenantId }
     });
 
-    const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+    const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, inst);
 
     if (!evolutionUrl || !evolutionKey) {
       console.log(`[Erro] URL ou Chave da Evolution nao configuradas para o tenant: ${inst.tenantId}`);
