@@ -409,8 +409,7 @@ server.listen(PORT, () => {
           if (String(inst.instanceName || '').startsWith('DELETED_')) continue;
           try {
           const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: inst.tenantId } });
-          const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-          const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+          const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, inst);
           if (evolutionUrl && evolutionKey) {
             console.log(`[startup-webhook-fix] Atualizando webhook da instância ${inst.instanceName} com URL ${webhookUrl}...`);
            await evolution.setWebhook(evolutionUrl, evolutionKey, inst.instanceName, webhookUrl);

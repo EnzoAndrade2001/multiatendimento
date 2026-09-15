@@ -292,10 +292,9 @@ async function sendBilling(req, res) {
       return res.json({ success: true, message: 'Envio de cobrança via WhatsApp não habilitado para este contato.' });
     }
 
-    const evolutionUrl = tenant.settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = tenant.settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
     const billingInstance = resolveBillingInstance(tenant);
     const instanceName = billingInstance?.instanceName;
+    const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(tenant.settings, billingInstance);
 
     if (!evolutionUrl || !evolutionKey) {
       throw new Error('Integração com WhatsApp não configurada ou sem instâncias conectadas.');
@@ -581,10 +580,9 @@ async function autoSendBilling(req, res) {
       return res.json({ success: true, skipped: true, message: 'Envio automatico nao habilitado para este contato.' });
     }
 
-    const evolutionUrl = tenant.settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = tenant.settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
     const billingInstance = resolveBillingInstance(tenant);
     const instanceName = billingInstance?.instanceName;
+    const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(tenant.settings, billingInstance);
     const phone = getBillingContactPhone(precheckContact);
     let deliveryBlock = null;
     if (!evolutionUrl || !evolutionKey) {

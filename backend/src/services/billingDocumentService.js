@@ -414,6 +414,7 @@ async function resolveDelivery({ tenantId, customerId, ticketId }) {
     instanceName: ticket.instance?.instanceName || null,
     instanceStatus: ticket.instance?.status || null,
     instanceProvider: ticket.instance?.provider || null,
+    waInstance: ticket.instance || null,
     unavailableReason: !phone
       ? 'Telefone WhatsApp invalido.'
       : !ticket.instance?.instanceName
@@ -455,8 +456,7 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
   });
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-  const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-  const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+  const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, delivery.waInstance);
   if (!evolutionUrl || !evolutionKey) throw new Error('Evolution API nao configurada para o tenant.');
 
   const customerName = customer.fantasyName || customer.name;

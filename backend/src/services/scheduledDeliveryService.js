@@ -1,4 +1,5 @@
 const { randomUUID } = require('crypto');
+const { resolveEvolutionConfig } = require('./evolutionService');
 const MAX_ATTEMPTS = 5;
 const CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -51,8 +52,7 @@ function createScheduledDeliveryService({ prisma, compliance, sendText, now = ()
           await finish({ status: 'blocked', processed: true, lastError: `${gate.code}: ${gate.reason || 'Envio bloqueado pela política de WhatsApp.'}` });
           continue;
         }
-        const url = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-        const key = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+        const { evolutionUrl: url, evolutionKey: key } = resolveEvolutionConfig(settings, instance);
         if (!url || !key) {
           await finish({ status: 'blocked', processed: true, lastError: 'Configure a conexão WhatsApp antes de reenviar.' });
           continue;

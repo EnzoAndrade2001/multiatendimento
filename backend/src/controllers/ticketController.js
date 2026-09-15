@@ -299,11 +299,12 @@ async function refreshTicketAvatarInBackground(ticket) {
       include: { settings: true },
     });
 
-    if (!tenant?.settings?.evolutionUrl || !tenant.settings?.evolutionKey) return;
+    const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(tenant?.settings, ticket.instance);
+    if (!evolutionUrl || !evolutionKey) return;
 
     const nextAvatarUrl = await evolutionService.fetchProfilePicture(
-      tenant.settings.evolutionUrl,
-      tenant.settings.evolutionKey,
+      evolutionUrl,
+      evolutionKey,
       ticket.instance.instanceName,
       ticket.contact.phone,
     );
@@ -323,7 +324,7 @@ async function refreshTicketAvatarInBackground(ticket) {
         contact: true,
         agent: { select: { id: true, name: true } },
         team: true,
-        instance: { select: { instanceName: true } },
+        instance: { select: { instanceName: true, evolutionUrl: true, evolutionKey: true } },
       },
     });
 
@@ -422,7 +423,7 @@ async function list(req, res) {
       contact: { include: { crmCustomer: true } }, 
       agent: { select: { id: true, name: true } }, 
       team: true,
-      instance: { select: { instanceName: true } }
+      instance: { select: { instanceName: true, evolutionUrl: true, evolutionKey: true } }
     },
     orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
     take: 200,
@@ -594,7 +595,7 @@ async function detail(req, res) {
       contact: { include: { crmCustomer: true } },
       agent: { select: { id: true, name: true } },
       team: true,
-      instance: { select: { instanceName: true } },
+      instance: { select: { instanceName: true, evolutionUrl: true, evolutionKey: true } },
     },
   });
   if (!ticket) return res.status(404).json({ error: 'Ticket nao encontrado' });
@@ -771,10 +772,11 @@ async function resolve(req, res) {
         if (waInstance) {
           console.log(`[CSAT_SEND] Enviando para ${require('../utils/privacy').maskPhone(ticket.contact.phone)} via ${waInstance.instanceName}`);
           const ratingText = settings.ratingMessage || "Como você avalia nosso atendimento de 1 a 5?";
+          const csatConfig = evolutionService.resolveEvolutionConfig(settings, waInstance);
           const result = await evolutionService.sendText(
-            settings.evolutionUrl, 
-            settings.evolutionKey, 
-            waInstance.instanceName, 
+            csatConfig.evolutionUrl,
+            csatConfig.evolutionKey,
+            waInstance.instanceName,
             ticket.contact.phone, 
             ratingText
           );
@@ -860,8 +862,6 @@ async function sendMessage(req, res) {
     });
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
-    const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
 
     if (isLocalDemo()) {
       const agent = await prisma.user.findUnique({ where: { id: req.user.userId } });
@@ -896,11 +896,11 @@ async function sendMessage(req, res) {
       return res.json(message);
     }
 
-    if (!evolutionUrl || !evolutionKey) {
+    const evolutionService = require('../services/evolutionService');
+    if (!evolutionService.resolveEvolutionConfig(settings, outbound.instance).evolutionUrl) {
       return res.status(400).json({ error: 'Integração com o WhatsApp (Evolution API) não configurada para esta empresa' });
     }
 
-    const evolutionService = require('../services/evolutionService');
     const agent = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (!agent) return res.status(400).json({ error: 'Usuário/Agente não encontrado' });
     const messageBody = outbound.mode === 'template' ? outbound.renderedBody : body;
@@ -935,6 +935,7 @@ async function sendMessage(req, res) {
       preferredInstanceId: outbound.instance.id,
       strictPreferred: true,
       send: (instance) => {
+        const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, instance);
         if (outbound.mode === 'template') {
           const components = outbound.templateValues.length ? [{
             type: 'body',
@@ -1039,8 +1040,6 @@ async function sendMediaMessage(req, res) {
     });
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
-    const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
 
     if (isLocalDemo()) {
       const mediaUrl = `/uploads/media/${file.filename}`;
@@ -1077,11 +1076,10 @@ async function sendMediaMessage(req, res) {
       return res.json(message);
     }
 
-    if (!evolutionUrl || !evolutionKey) {
+    const evolutionService = require('../services/evolutionService');
+    if (!evolutionService.resolveEvolutionConfig(settings, outbound.instance).evolutionUrl) {
       return res.status(400).json({ error: 'Integração com o WhatsApp (Evolution API) não configurada para esta empresa' });
     }
-
-    const evolutionService = require('../services/evolutionService');
 
     const base64 = (await fs.promises.readFile(file.path)).toString('base64');
     const mime = file.mimetype;
@@ -1143,6 +1141,7 @@ async function sendMediaMessage(req, res) {
       preferredInstanceId: outbound.instance.id,
       strictPreferred: true,
       send: async (instance) => {
+        const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, instance);
         let lastError;
         let conversationJids = [];
 
@@ -1435,11 +1434,12 @@ async function deleteMessage(req, res) {
     // Revoga no WhatsApp quando a mensagem possui os dados necessarios.
     // A exclusao local continua funcionando mesmo sem configuracao da Evolution
     // ou para mensagens internas/historicas sem externalId.
-    if (settings?.evolutionUrl && settings?.evolutionKey && message.externalId && message.ticket.instance?.instanceName) {
+    const revokeEvoConfig = evolutionService.resolveEvolutionConfig(settings, message.ticket.instance);
+    if (revokeEvoConfig.evolutionUrl && revokeEvoConfig.evolutionKey && message.externalId && message.ticket.instance?.instanceName) {
       try {
         await evolutionService.revokeMessage(
-          settings.evolutionUrl,
-          settings.evolutionKey,
+          revokeEvoConfig.evolutionUrl,
+          revokeEvoConfig.evolutionKey,
           message.ticket.instance.instanceName,
           message.ticket.contact.phone,
           message.externalId
@@ -1494,7 +1494,7 @@ async function linkContact(req, res) {
           contact: { include: { crmCustomer: true } },
           agent: { select: { name: true } },
           team: true,
-          instance: { select: { instanceName: true } }
+          instance: { select: { instanceName: true, evolutionUrl: true, evolutionKey: true } }
         }
       });
 
@@ -1532,7 +1532,7 @@ async function linkContact(req, res) {
           contact: { include: { crmCustomer: true } },
           agent: { select: { name: true } },
           team: true,
-          instance: { select: { instanceName: true } }
+          instance: { select: { instanceName: true, evolutionUrl: true, evolutionKey: true } }
         }
       });
 
@@ -1577,7 +1577,7 @@ async function linkContact(req, res) {
     // Retorna o ticket atualizado (sem mudar o contactId)
     const updatedTicket = await prisma.ticket.findUnique({
       where: { id },
-      include: { contact: { include: { crmCustomer: true } }, agent: { select: { name: true } }, team: true, instance: { select: { instanceName: true } } }
+      include: { contact: { include: { crmCustomer: true } }, agent: { select: { name: true } }, team: true, instance: { select: { instanceName: true, evolutionUrl: true, evolutionKey: true } } }
     });
 
     // 3. Log de evento
@@ -1633,14 +1633,11 @@ async function forwardMessage(req, res) {
     }
 
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-    const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-    const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
-
-    if (!evolutionUrl || !evolutionKey) {
+    const evolutionService = require('../services/evolutionService');
+    if (!evolutionService.resolveEvolutionConfig(settings, ticket.instance).evolutionUrl) {
       return res.status(400).json({ error: 'Integração com o WhatsApp (Evolution API) não configurada para esta empresa' });
     }
 
-    const evolutionService = require('../services/evolutionService');
     const agent = await prisma.user.findUnique({ where: { id: req.user.userId } });
 
     const phone = evolutionService.normalizePhoneNumber(contact.phone || '');
@@ -1654,6 +1651,7 @@ async function forwardMessage(req, res) {
       ticketId: ticket.id,
       preferredInstanceId: ticket.instanceId,
       send: async (instance) => {
+        const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, instance);
         if (mediaUrl) {
           const filePath = path.resolve(__dirname, '..', '..', mediaUrl.startsWith('/') ? mediaUrl.substring(1) : mediaUrl);
           if (!fs.existsSync(filePath)) {

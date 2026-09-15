@@ -37,10 +37,9 @@ function normalizeTemplate(template) {
   };
 }
 
-async function getSettings(tenantId) {
+async function getSettings(tenantId, waInstance) {
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-  const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-  const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+  const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, waInstance);
   if (!evolutionUrl || !evolutionKey) throw Object.assign(new Error('Evolution API não configurada.'), { status: 400 });
   return { evolutionUrl, evolutionKey };
 }
@@ -188,7 +187,7 @@ async function canAutomatedSend(args) {
 
 async function listApprovedTemplates({ tenantId, instance }) {
   if (!isOfficialInstance(instance)) return [];
-  const { evolutionUrl, evolutionKey } = await getSettings(tenantId);
+  const { evolutionUrl, evolutionKey } = await getSettings(tenantId, instance);
   const raw = await evolutionService.findTemplates(evolutionUrl, evolutionKey, instance.instanceName);
   return templateRows(raw)
     .map(normalizeTemplate)

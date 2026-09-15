@@ -442,6 +442,13 @@ model WaInstance {
   provider            String              @default("evolution_qr")
   officialPhoneId     String?
   officialBusinessId  String?
+  // Override opcional do servidor Evolution API usado por ESTA conexão.
+  // Quando nulo, cai para TenantSettings.evolutionUrl/evolutionKey (padrão
+  // da empresa) - ver evolutionService.resolveEvolutionConfig(). Existe pra
+  // permitir isolar uma conexão (ex: WhatsApp oficial) num servidor Evolution
+  // dedicado, diferente do resto das conexões QR-code da mesma empresa.
+  evolutionUrl        String?
+  evolutionKey        String?
   contacts            Contact[]
   tickets             Ticket[]
   campaigns           Campaign[]

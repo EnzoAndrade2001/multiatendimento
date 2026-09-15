@@ -268,12 +268,11 @@ async function sendServiceOrderManagerCopy(tenantId, serviceOrderId, { force = f
 
   const instance = await prisma.waInstance.findFirst({
     where: { id: settings.serviceOrderManagerInstanceId, tenantId },
-    select: { id: true, instanceName: true },
+    select: { id: true, instanceName: true, evolutionUrl: true, evolutionKey: true },
   });
   if (!instance) throw new Error('Instância configurada para a cópia da O.S. não foi encontrada.');
 
-  const evolutionUrl = settings.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-  const evolutionKey = settings.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+  const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, instance);
   if (!evolutionUrl || !evolutionKey) throw new Error('Evolution API não configurada para o tenant.');
 
   const claimedAt = new Date();

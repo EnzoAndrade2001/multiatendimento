@@ -362,8 +362,9 @@ async function testSend(req, res) {
     const phone = validPhone(req.body.phone);
     if (!phone) return res.status(400).json({ error: 'Telefone de teste inválido.' });
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
-    if (!settings?.evolutionUrl || !settings?.evolutionKey) return res.status(400).json({ error: 'Evolution API não configurada.' });
-    const result = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, instance.instanceName, phone, String(req.body.message || ''));
+    const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, instance);
+    if (!evolutionUrl || !evolutionKey) return res.status(400).json({ error: 'Evolution API não configurada.' });
+    const result = await evolutionService.sendText(evolutionUrl, evolutionKey, instance.instanceName, phone, String(req.body.message || ''));
     res.json({ ok: true, externalId: result?.key?.id || result?.message?.key?.id || null });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message || 'Não foi possível enviar o teste.' });

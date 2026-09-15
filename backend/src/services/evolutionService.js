@@ -671,11 +671,30 @@ async function findConversationJidsByMessageIds(url, key, instanceName, messageI
   return [];
 }
 
+// Decide qual servidor Evolution API usar para UMA conexão específica.
+// `waInstance` pode trazer seu próprio evolutionUrl/evolutionKey (ex: a
+// conexão oficial isolada num servidor dedicado) - quando não tem, cai pro
+// padrão da empresa (`tenantSettings`), e por fim pro default global do
+// processo. Mantém o comportamento de hoje pra toda conexão que nunca
+// configurou um override (a esmagadora maioria).
+function resolveEvolutionConfig(tenantSettings, waInstance) {
+  const evolutionUrl = waInstance?.evolutionUrl
+    || tenantSettings?.evolutionUrl
+    || process.env.DEFAULT_EVOLUTION_URL
+    || null;
+  const evolutionKey = waInstance?.evolutionKey
+    || tenantSettings?.evolutionKey
+    || process.env.DEFAULT_EVOLUTION_KEY
+    || null;
+  return { evolutionUrl, evolutionKey };
+}
+
 module.exports = {
   sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
   getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
   normalizePhoneNumber, samePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findMessages, findConversationJidsByMessageIds,
   getEvolutionErrorDetail,
+  resolveEvolutionConfig,
   __testing: { buildCreateInstancePayload }
 };

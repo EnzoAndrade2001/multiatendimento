@@ -104,8 +104,7 @@ async function confirmDisconnected(instanceName, waInstanceId) {
   if (!waInstance) return;
 
   const settings = waInstance.tenant?.settings;
-  const evolutionUrl = settings?.evolutionUrl || process.env.DEFAULT_EVOLUTION_URL;
-  const evolutionKey = settings?.evolutionKey || process.env.DEFAULT_EVOLUTION_KEY;
+  const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, waInstance);
   if (!evolutionUrl || !evolutionKey) {
     console.warn(`[webhook] Nao foi possivel confirmar desconexao de ${instanceName}: Evolution nao configurada.`);
     return;
@@ -345,7 +344,7 @@ function normalizeHistoryForAi(messages = []) {
     .filter(Boolean);
 }
 
-async function downloadMedia(settings, instanceName, msg, messageId) {
+async function downloadMedia(evolutionUrl, evolutionKey, instanceName, msg, messageId) {
   let attempts = 0;
   const maxAttempts = 5;
 
@@ -353,7 +352,7 @@ async function downloadMedia(settings, instanceName, msg, messageId) {
     try {
       console.log(`[media-download] [${instanceName}] Tentativa ${attempts + 1} para msg ${msg.key.id}...`);
       const result = await evolutionService.getMediaBase64(
-        settings.evolutionUrl, settings.evolutionKey, instanceName, msg.key
+        evolutionUrl, evolutionKey, instanceName, msg.key
       );
       
       const base64 = result?.base64 || result?.data?.base64;
@@ -522,8 +521,9 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
   }
 
   // Busca foto de perfil em background se ainda não tiver
-  if (!contact.avatarUrl && tenant.settings?.evolutionUrl && tenant.settings?.evolutionKey) {
-    evolutionService.fetchProfilePicture(tenant.settings.evolutionUrl, tenant.settings.evolutionKey, instance, phone)
+  const avatarEvoConfig = evolutionService.resolveEvolutionConfig(tenant.settings, waInstance);
+  if (!contact.avatarUrl && avatarEvoConfig.evolutionUrl && avatarEvoConfig.evolutionKey) {
+    evolutionService.fetchProfilePicture(avatarEvoConfig.evolutionUrl, avatarEvoConfig.evolutionKey, instance, phone)
       .then(async (picture) => {
         if (picture) await prisma.contact.update({ where: { id: contact.id }, data: { avatarUrl: picture } });
       })
@@ -582,7 +582,8 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
       const csatGate = await whatsappComplianceService.canAutomatedSend({ tenantId: tenant.id, contactId: contact.id, instance: waInstance });
       if (csatGate.allowed) {
         const thankYouText = "Obrigado por sua avaliação! 🙏 Sua nota é muito importante para nós.";
-        const sent = await evolutionService.sendText(tenant.settings.evolutionUrl, tenant.settings.evolutionKey, instance, phone, thankYouText);
+        const csatEvoConfig = evolutionService.resolveEvolutionConfig(tenant.settings, waInstance);
+        const sent = await evolutionService.sendText(csatEvoConfig.evolutionUrl, csatEvoConfig.evolutionKey, instance, phone, thankYouText);
         const sentExternalId = sent?.key?.id || sent?.message?.key?.id || null;
         const echoed = sentExternalId ? await prisma.message.findFirst({
           where: { externalId: sentExternalId, ticket: { tenantId: tenant.id } },
@@ -735,9 +736,10 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
        if (!lastOooEvent || lastOooEvent.createdAt < fourHoursAgo) {
           const oooGate = await whatsappComplianceService.canAutomatedSend({ tenantId: tenant.id, contactId: contact.id, instance: waInstance });
           if (oooGate.allowed) {
+            const oooEvoConfig = evolutionService.resolveEvolutionConfig(tenant.settings, waInstance);
             await evolutionService.sendText(
-              tenant.settings.evolutionUrl,
-              tenant.settings.evolutionKey,
+              oooEvoConfig.evolutionUrl,
+              oooEvoConfig.evolutionKey,
               instance,
               phone,
               tenant.settings.outOfOfficeMessage
@@ -752,7 +754,8 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
 
   // Download de mídia e Transcrição em background
   if (media) {
-    downloadMedia(tenant.settings, instance, msg, message.id).then(async (mediaUrl) => {
+    const mediaEvoConfig = evolutionService.resolveEvolutionConfig(tenant.settings, waInstance);
+    downloadMedia(mediaEvoConfig.evolutionUrl, mediaEvoConfig.evolutionKey, instance, msg, message.id).then(async (mediaUrl) => {
       if (!mediaUrl) {
         await prisma.message.update({
           where: { id: message.id },
@@ -1143,6 +1146,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   }
 
   const transferWord = settings.botTransferWord || 'humano';
+  const botEvoConfig = evolutionService.resolveEvolutionConfig(settings, waInstance);
   let actorContext = null;
   try {
     actorContext = await technicalAssistantService.resolveWhatsAppActor({ tenantId: tenant.id, phone: contact.phone });
@@ -1154,7 +1158,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
 
   const sendBotMessage = async (body, automationType) => {
     try {
-      const sent = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, waInstance.instanceName, contact.phone, body);
+      const sent = await evolutionService.sendText(botEvoConfig.evolutionUrl, botEvoConfig.evolutionKey, waInstance.instanceName, contact.phone, body);
       const botMessage = await prisma.message.create({
         data: { ticketId: ticket.id, body, fromMe: true, fromBot: true, automationType, externalId: sent?.key?.id || sent?.id },
       });
@@ -1214,7 +1218,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     // mandando "olá?" de novo achando que ninguem viu.
     try {
       const confirmation = 'Combinado! Já te encaminhei para um de nossos atendentes, só um instante. 👍';
-      const sent = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, waInstance.instanceName, contact.phone, confirmation);
+      const sent = await evolutionService.sendText(botEvoConfig.evolutionUrl, botEvoConfig.evolutionKey, waInstance.instanceName, contact.phone, confirmation);
       const botMessage = await prisma.message.create({
         data: { ticketId: ticket.id, body: confirmation, fromMe: true, fromBot: true, automationType: 'TRANSFER_CONFIRMATION', externalId: sent?.key?.id || sent?.id },
       });
@@ -1480,7 +1484,7 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
     knowledgeLogId = auditLog.id;
   } catch (err) { console.error('[log] erro ao gravar auditoria:', err.message); }
 
-  const sent = await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, waInstance.instanceName, contact.phone, finalMessageBody);
+  const sent = await evolutionService.sendText(botEvoConfig.evolutionUrl, botEvoConfig.evolutionKey, waInstance.instanceName, contact.phone, finalMessageBody);
   const externalId = sent?.key?.id || sent?.id;
 
   const botMessage = await prisma.message.create({

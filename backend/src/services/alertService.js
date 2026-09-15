@@ -10,7 +10,7 @@ async function sendSystemAlert(tenantId, message) {
   try {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
     const targetPhone = settings?.serviceOrderManagerPhone || settings?.notificationPhone;
-    if (!targetPhone || !settings?.evolutionUrl || !settings?.evolutionKey) {
+    if (!targetPhone) {
       console.log(`[alertService] Alerta ignorado para tenant=${tenantId}: Configurações incompletas.`);
       return false;
     }
@@ -31,11 +31,17 @@ async function sendSystemAlert(tenantId, message) {
       return false;
     }
 
+    const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, instance);
+    if (!evolutionUrl || !evolutionKey) {
+      console.log(`[alertService] Alerta ignorado para tenant=${tenantId}: Configurações incompletas.`);
+      return false;
+    }
+
     const formattedPhone = targetPhone.replace(/\D/g, '');
 
     await evolution.sendText(
-      settings.evolutionUrl,
-      settings.evolutionKey,
+      evolutionUrl,
+      evolutionKey,
       instance.instanceName,
       formattedPhone,
       `⚠️ *ALERTA DO SISTEMA - MULTIATENDIMENTO PRO*\n\n${message}`
