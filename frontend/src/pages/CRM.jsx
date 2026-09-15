@@ -60,7 +60,7 @@ const CRM_PAGE_SIZE = 60;
 const CRM_VIEW_OPTIONS = [
   { id: 'all', label: 'Todos' },
   { id: 'contracted', label: 'Em contrato' },
-  { id: 'open', label: 'O.S. abertas' },
+  { id: 'open', label: 'Aguardando atendimento' },
   { id: 'attention', label: 'Requer atenção' },
   { id: 'without-contract', label: 'Sem contrato' },
 ];
@@ -327,7 +327,7 @@ export default function CRM() {
         <Stat icon={<Printer size={19} />} label="Equipamentos cadastrados" value={pick(summary, 'equipments', 'totalEquipments')} />
         <Stat icon={<ShieldCheck size={19} />} label="Equipamentos em contrato" value={pick(summary, 'contractedEquipments')} />
         <Stat icon={<FileText size={19} />} label="Contratos ativos" value={summary.contracts?.active ?? pick(summary, 'activeContracts')} />
-        <Stat icon={<ClipboardList size={19} />} label="O.S. abertas" value={summary.serviceOrders?.open ?? pick(summary, 'openServiceOrders', 'openOrders', 'serviceOrdersOpen')} tone="warning" />
+        <Stat icon={<ClipboardList size={19} />} label="O.S. aguardando atendimento" value={summary.serviceOrders?.open ?? pick(summary, 'openServiceOrders', 'openOrders', 'serviceOrdersOpen')} tone="warning" />
         <Stat
           icon={<CircleDollarSign size={19} />}
           label="Mensalidade ativa"
@@ -454,7 +454,7 @@ export default function CRM() {
             <select className="sort-select" value={sortBy} style={s.sortSelect} onChange={(event) => { const nextSort = event.target.value; setSortBy(nextSort); setPage(1); load(q, 1, { sortBy: nextSort }); }} aria-label="Ordenar clientes">
               <option value="name">Nome</option>
               <option value="attention">Atenção primeiro</option>
-              <option value="open">O.S. abertas</option>
+              <option value="open">Aguardando atendimento</option>
               <option value="contracted">Equipamentos em contrato</option>
               <option value="updated">Atualização recente</option>
             </select>
@@ -1663,7 +1663,7 @@ function compareCrmCustomers(firstCustomer, secondCustomer, sortBy) {
 }
 
 function sortLabel(sortBy) {
-  return { name: 'Ordenados por nome', attention: 'Atenção primeiro', open: 'O.S. abertas primeiro', contracted: 'Equipamentos em contrato', updated: 'Atualizados recentemente' }[sortBy] || 'Ordenados por nome';
+  return { name: 'Ordenados por nome', attention: 'Atenção primeiro', open: 'Aguardando atendimento primeiro', contracted: 'Equipamentos em contrato', updated: 'Atualizados recentemente' }[sortBy] || 'Ordenados por nome';
 }
 
 function hasValue(value) { return value !== null && value !== undefined && value !== ''; }

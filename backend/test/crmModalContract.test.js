@@ -5,6 +5,7 @@ const {
   paginateServiceOrders,
   getCrmCapabilities,
   syncMetadata,
+  isServiceOrderAwaitingAttendance,
 } = require('../src/controllers/crmController');
 
 test('paginacao de O.S. usa limites seguros e offset explicito', () => {
@@ -62,4 +63,11 @@ test('metadados de sincronizacao tem formato estavel e fallback seguro', () => {
   assert.deepEqual(syncMetadata(null, '2026-08-20T10:00:00.000Z'), {
     source: 'firebird', status: 'ok', lastSyncedAt: '2026-08-20T10:00:00.000Z', error: null,
   });
+});
+
+test('card operacional conta somente O.S. que ainda aguardam atendimento', () => {
+  assert.equal(isServiceOrderAwaitingAttendance({ status: 'PENDENTE', attendedAt: null }), true);
+  assert.equal(isServiceOrderAwaitingAttendance({ status: 'EM_ATENDIMENTO', attendedAt: '2026-09-14T10:00:00Z' }), false);
+  assert.equal(isServiceOrderAwaitingAttendance({ status: 'PENDENTE', resolvedAt: new Date() }), false);
+  assert.equal(isServiceOrderAwaitingAttendance({ status: 'FINALIZADA', attendedAt: null }), false);
 });

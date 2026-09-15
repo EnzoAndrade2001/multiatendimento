@@ -4,8 +4,9 @@ from main import AppConfig, FirebirdRepository, normalize_defect_type
 
 
 class FakeCursor:
-    def __init__(self, *, official: bool, os_type=(1, "2")):
+    def __init__(self, *, official: bool, observed_ao: bool = False, os_type=(1, "2")):
         self.official = official
+        self.observed_ao = observed_ao
         self.os_type = os_type
         self._row = None
         self.insert_sql = ""
@@ -21,7 +22,9 @@ class FakeCursor:
         elif "FROM IXLOSSTATUS" in normalized:
             self._row = (1 if self.official else 0,)
         elif "FROM IXLOSDEFEITOTP" in normalized:
-            self._row = (1 if self.official else 0,)
+            self._row = (1 if self.official or self.observed_ao else 0,)
+        elif "FROM IXLOS" in normalized and "STATUS = 'A'" in normalized:
+            self._row = (1 if self.observed_ao else 0,)
         elif "FROM IXLOSTP" in normalized:
             self._row = self.os_type
         elif "MAX(SEQOS)" in normalized:
@@ -59,8 +62,8 @@ class ServiceOrderCompatibilityTest(unittest.TestCase):
             "tfinativo": "N",
         }), {"code": "MAN", "name": "MANUTENCAO", "inactive": False})
 
-    def create(self, official):
-        cursor = FakeCursor(official=official)
+    def create(self, official, observed_ao=False):
+        cursor = FakeCursor(official=official, observed_ao=observed_ao)
         connection = FakeConnection(cursor)
         repo = FirebirdRepository(AppConfig())
         repo.connect = lambda: connection
@@ -89,6 +92,15 @@ class ServiceOrderCompatibilityTest(unittest.TestCase):
         self.assertTrue(connection.committed)
         self.assertIn("TPORCATEND1", cursor.insert_sql)
         self.assertIn("'A', ?", cursor.insert_sql)
+        self.assertEqual(cursor.insert_params[7], "A")
+        self.assertEqual(cursor.insert_params[8], "O")
+        self.assertEqual(cursor.insert_params[-5:-1], ("2", 1, "N", "1001"))
+
+    def test_softilux_25_observed_profile_uses_ao_without_new_column(self):
+        seq, cursor, connection = self.create(False, observed_ao=True)
+        self.assertEqual(seq, 1234)
+        self.assertTrue(connection.committed)
+        self.assertNotIn("TPORCATEND1", cursor.insert_sql)
         self.assertEqual(cursor.insert_params[7], "A")
         self.assertEqual(cursor.insert_params[8], "O")
         self.assertEqual(cursor.insert_params[-5:-1], ("2", 1, "N", "1001"))

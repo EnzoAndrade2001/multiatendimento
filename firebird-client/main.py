@@ -50,7 +50,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.3.0"
+DEFAULT_AGENT_VERSION = "1.3.1"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -1283,16 +1283,27 @@ class FirebirdRepository:
             cur.execute(f"select count(*) from {table} where {field} = ?", (value,))
             return bool(cur.fetchone()[0])
 
-        supports_official_codes = (
-            catalog_has("IXLOSSTATUS", "CDSTATUS", "O")
-            and catalog_has("IXLOSDEFEITOTP", "CDDEFEITO", "1001")
+        has_status_o_catalog = catalog_has("IXLOSSTATUS", "CDSTATUS", "O")
+        has_defect_1001 = catalog_has("IXLOSDEFEITOTP", "CDDEFEITO", "1001")
+        # Algumas bases Softilux 2.5 nao possuem TPORCATEND1 nem a linha O na
+        # IXLOSSTATUS, mas o proprio desktop/integrador ja grava IXLOS em A/O
+        # com defeito 1001 (perfil confirmado na base do Luciano). Essa
+        # evidencia e mais confiavel que atrelar tres recursos independentes.
+        cur.execute(
+            "select count(*) from IXLOS "
+            "where STATUS = 'A' and CDSTATUS = 'O' and CDDEFEITO = '1001'"
         )
-        official = supports_official_column and supports_official_codes
+        has_observed_ao_profile = bool(cur.fetchone()[0])
+        supports_official_codes = has_defect_1001 and (
+            has_status_o_catalog or has_observed_ao_profile
+        )
+        official = supports_official_codes
         return {
             "serviceOrderTable": "IXLOS",
             "serviceOrderProfile": "official" if official else "legacy",
             "tporcatend1": supports_official_column,
             "officialCodes": supports_official_codes,
+            "observedAoProfile": has_observed_ao_profile,
             "status": "A" if official else "E",
             "cdStatus": "O" if official else "E1",
             "defaultCdDefeito": "1001" if official else "MAN",
@@ -2782,8 +2793,8 @@ class FirebirdRepository:
                     cd_defeito = requested_defect_code
                 tf_liberado = "N" if official_profile else "S"
                 sql = sql_base.format(
-                    tporcatend1_column="TPORCATEND1," if official_profile else "",
-                    tporcatend1_value="'A'," if official_profile else "",
+                    tporcatend1_column="TPORCATEND1," if supports_official_column else "",
+                    tporcatend1_value="'A'," if supports_official_column else "",
                 )
 
                 cur.execute("SELECT COALESCE(MAX(SEQOS), 0) + 1 FROM IXLOS")

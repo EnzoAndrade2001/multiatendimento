@@ -342,6 +342,14 @@ function normalizeLocalOrder(order) {
   };
 }
 
+// Indicador operacional escolhido para o CRM: uma O.S. deixa de "aguardar
+// atendimento" assim que o iLux informa DTATENDIMENTO, mesmo que continue
+// sem DTFECHAMENTO para faturamento ou outras etapas internas.
+function isServiceOrderAwaitingAttendance(order) {
+  if (!order || isServiceOrderClosed(order)) return false;
+  return !first(order.attendedAt, order.resolvedAt);
+}
+
 function orderTimestamp(order) {
   const value = order.closedAt || order.attendedAt || order.updatedAt || order.openedAt;
   const timestamp = value ? new Date(value).getTime() : 0;
@@ -561,7 +569,7 @@ async function getSummary(req, res) {
     syncedServiceOrders,
     syncedOpenServiceOrderRecords,
     localServiceOrders,
-    localOpenServiceOrders,
+    localServiceOrderCandidates,
     customerRevenue,
     settings,
   ] = await Promise.all([
@@ -590,7 +598,10 @@ async function getSummary(req, res) {
       select: { externalId: true, payload: true },
     }),
     prisma.serviceOrder.count({ where: { tenantId } }),
-    prisma.serviceOrder.count({ where: { tenantId, status: { not: 'FINALIZADA' } } }),
+    prisma.serviceOrder.findMany({
+      where: { tenantId, status: { not: 'FINALIZADA' } },
+      select: { status: true, resolvedAt: true, closedAt: true },
+    }),
     prisma.crmCustomer.findMany({ where: { tenantId }, select: { raw: true } }),
     prisma.tenantSettings.findUnique({
       where: { tenantId },
@@ -598,9 +609,10 @@ async function getSummary(req, res) {
     }),
   ]);
 
-  const syncedOpenServiceOrders = syncedOpenServiceOrderRecords.filter((record) => (
-    !isServiceOrderClosed(normalizeExternalOrder(record.payload, { externalId: record.externalId }))
+  const syncedAwaitingServiceOrders = syncedOpenServiceOrderRecords.filter((record) => (
+    isServiceOrderAwaitingAttendance(normalizeExternalOrder(record.payload, { externalId: record.externalId }))
   )).length;
+  const localAwaitingServiceOrders = localServiceOrderCandidates.filter(isServiceOrderAwaitingAttendance).length;
 
   const contracts = contractRecords.map(normalizeContract);
   const activeContractIds = new Set(
@@ -636,10 +648,10 @@ async function getSummary(req, res) {
     serviceOrders: {
       synced: syncedServiceOrders,
       local: localServiceOrders,
-      open: syncedServiceOrders ? syncedOpenServiceOrders : localOpenServiceOrders,
+      open: syncedServiceOrders ? syncedAwaitingServiceOrders : localAwaitingServiceOrders,
       closed: syncedServiceOrders
-        ? Math.max(0, syncedServiceOrders - syncedOpenServiceOrders)
-        : Math.max(0, localServiceOrders - localOpenServiceOrders),
+        ? Math.max(0, syncedServiceOrders - syncedAwaitingServiceOrders)
+        : Math.max(0, localServiceOrders - localAwaitingServiceOrders),
     },
     monthlyRevenue,
     synchronization: {
@@ -848,7 +860,7 @@ async function loadCustomerOperationalMetrics(tenantId, customers) {
     const key = `${customer.id}:${normalized.externalId || record.id}`;
     if (orderKeys.has(key)) continue;
     orderKeys.add(key);
-    if (!isServiceOrderClosed(normalized)) metric.openServiceOrdersCount += 1;
+    if (isServiceOrderAwaitingAttendance(normalized)) metric.openServiceOrdersCount += 1;
     const timestamp = orderTimestamp(normalized);
     if (timestamp && (!metric.lastServiceOrderAt || timestamp > new Date(metric.lastServiceOrderAt).getTime())) {
       metric.lastServiceOrderAt = normalized.openedAt || normalized.updatedAt || null;
@@ -861,7 +873,7 @@ async function loadCustomerOperationalMetrics(tenantId, customers) {
     const key = `${customerId}:local:${order.id}`;
     if (orderKeys.has(key)) continue;
     orderKeys.add(key);
-    if (!isServiceOrderClosed(order)) metric.openServiceOrdersCount += 1;
+    if (isServiceOrderAwaitingAttendance(order)) metric.openServiceOrdersCount += 1;
     const timestamp = order.createdAt || order.updatedAt;
     if (timestamp && (!metric.lastServiceOrderAt || new Date(timestamp).getTime() > new Date(metric.lastServiceOrderAt).getTime())) {
       metric.lastServiceOrderAt = timestamp;
@@ -1022,7 +1034,7 @@ async function exportCustomers(req, res) {
     ['Equipamentos cadastrados', (customer) => customer.totalEquipmentCount],
     ['Equipamentos em contrato', (customer) => customer.contractedEquipmentsCount],
     ['Contratos ativos', (customer) => customer.activeContractsCount],
-    ['O.S. abertas', (customer) => customer.openServiceOrdersCount],
+    ['O.S. aguardando atendimento', (customer) => customer.openServiceOrdersCount],
     ['Títulos vencidos', (customer) => customer.overdueReceivablesCount],
     ['Mensalidade', (customer) => customer.monthlyValue],
     ['Última O.S.', (customer) => customer.lastServiceOrderAt],
@@ -1840,4 +1852,5 @@ module.exports = {
   queryCustomers,
   normalizeReceivable,
   receivableIsCancelled,
+  isServiceOrderAwaitingAttendance,
 };
