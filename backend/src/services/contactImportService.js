@@ -10,7 +10,11 @@ function asArray(payload) {
 }
 
 function extractJid(raw) {
-  const jid = raw?.id || raw?.remoteJid || raw?.jid;
+  // Nos registros de /chat/findContacts, "id" é o id interno do registro no
+  // banco da Evolution (ex.: "cmtt3lk8..."), NÃO o jid do WhatsApp -- o jid
+  // real vem em "remoteJid". "id" só entra como último recurso (fallback
+  // pra versões antigas da Evolution que talvez devolvam o jid ali mesmo).
+  const jid = raw?.remoteJid || raw?.jid || raw?.id;
   return typeof jid === 'string' && jid.trim() ? jid.trim().toLowerCase() : null;
 }
 
