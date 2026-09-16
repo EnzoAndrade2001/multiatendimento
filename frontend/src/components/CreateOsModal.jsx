@@ -313,7 +313,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               <option value="">Selecione o tipo...</option>
               {osTypes.map(t => (
                 <option key={t.id} value={t.code} disabled={t.inactive}>
-                  {t.name} ({t.code}){t.formulario ? ` — ${t.formulario}` : ''}{t.inactive ? ' — inativo' : ''}
+                  {t.name} ({t.code}) — O.S. CRM{t.inactive ? ' — inativo' : ''}
                 </option>
               ))}
             </select>
