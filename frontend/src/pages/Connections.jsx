@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
-import { AlertTriangle, Clock3, History, Plus, QrCode, RotateCcw, Smartphone, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, Clock3, History, Plus, QrCode, RotateCcw, Smartphone, Trash2, Users, Wifi, WifiOff } from 'lucide-react';
 import { toast } from '../utils/toast';
-import { getInstances, createInstance, deleteInstance, getInstanceQrCode, repairInstance, recoverInstanceMessages } from '../services/api';
+import { getInstances, createInstance, deleteInstance, getInstanceQrCode, repairInstance, recoverInstanceMessages, importInstanceContacts } from '../services/api';
 import { SOCKET_URL } from '../services/socket';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -52,6 +52,7 @@ export default function Connections() {
   const [repairingId, setRepairingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [recoveringId, setRecoveringId] = useState(null);
+  const [importingId, setImportingId] = useState(null);
   const [showOfficialGuide, setShowOfficialGuide] = useState(false);
 
   useEffect(() => {
@@ -92,6 +93,22 @@ export default function Connections() {
       toast.error(err.response?.data?.error || 'Não foi possível recuperar as mensagens.');
     } finally {
       setRecoveringId(null);
+    }
+  }
+
+  async function handleImportContacts(inst) {
+    if (importingId) return;
+    const confirmed = window.confirm(`Importar a agenda de contatos do celular pareado na conexão ${inst.instanceName.split('_').pop()}? Contatos já cadastrados não serão sobrescritos.`);
+    if (!confirmed) return;
+    setImportingId(inst.id);
+    try {
+      const { data } = await importInstanceContacts(inst.id);
+      toast.success(`${data.imported || 0} contato(s) novo(s); ${data.updated || 0} atualizado(s); ${data.scanned || 0} analisado(s).`, 7000);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível importar os contatos.');
+    } finally {
+      setImportingId(null);
     }
   }
 
@@ -232,10 +249,15 @@ export default function Connections() {
 
                 <div style={s.cardBody}>
                   {isConnected ? (
-                    <div style={s.connectedBox}>
-                      <Smartphone size={16} />
-                      Pronto para uso
-                    </div>
+                    <>
+                      <div style={s.connectedBox}>
+                        <Smartphone size={16} />
+                        Pronto para uso
+                      </div>
+                      <button type="button" style={s.importContactsBtn} onClick={() => handleImportContacts(inst)} disabled={importingId === inst.id}>
+                        <Users size={15} /> {importingId === inst.id ? 'Importando…' : 'Importar contatos do WhatsApp'}
+                      </button>
+                    </>
                   ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' || connectionView.key === 'wrong_number' ? (
                     <>
                       <div style={{ ...s.healthBox, borderColor: connectionView.key === 'unstable' ? 'var(--warning-border)' : 'var(--danger-border)', color: connectionView.color }}>
@@ -485,6 +507,22 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '8px'
+  },
+  importContactsBtn: {
+    width: '100%',
+    marginTop: '0.75rem',
+    background: 'var(--accent-light)',
+    color: 'var(--accent)',
+    border: '1px solid var(--accent-border)',
+    padding: '0.75rem',
+    borderRadius: '12px',
+    fontWeight: 800,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    fontSize: '0.85rem'
   },
   repairBtn: {
     width: '100%',

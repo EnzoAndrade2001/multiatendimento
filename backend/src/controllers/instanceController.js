@@ -3,6 +3,7 @@ const evolution = require('../services/evolutionService');
 const metaCloudApi = require('../services/metaCloudApiService');
 const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
 const { syncMissedMessages } = require('../services/syncMissedMessagesService');
+const { importContactsFromWhatsApp } = require('../services/contactImportService');
 const { assertTenantLimit } = require('../services/tenantLimitService');
 const { pickServerForNewInstance } = require('../services/evolutionServerPoolService');
 
@@ -368,6 +369,35 @@ async function recoverMessages(req, res) {
   }
 }
 
+// Importa a agenda de contatos que a Evolution sincronizou do celular
+// pareado por QR Code. Só funciona com a sessão aberta (o celular precisa ter
+// entregado a agenda pra Evolution) e não existe pra números oficiais.
+async function importContacts(req, res) {
+  try {
+    const inst = await prisma.waInstance.findFirst({
+      where: { id: req.params.id, tenantId: req.user.tenantId, instanceName: { not: { startsWith: 'DELETED_' } } },
+    });
+    if (!inst) return res.status(404).json({ error: 'Instância não encontrada' });
+    if (inst.provider === 'evolution_official') {
+      return res.status(409).json({ error: 'Conexões oficiais (API Cloud da Meta) não têm agenda de contatos pessoal para importar.' });
+    }
+
+    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId, inst);
+
+    const stateData = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName);
+    const state = parseConnectionState(stateData);
+    if (state !== 'open') {
+      return res.status(400).json({ error: 'A conexão precisa estar com a sessão ativa (QR conectado) para importar os contatos.' });
+    }
+
+    const result = await importContactsFromWhatsApp(inst, { evolutionUrl, evolutionKey });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[instanceController] Erro ao importar contatos:', err.response?.data || err.message);
+    res.status(400).json({ error: evolution.getEvolutionErrorDetail(err) });
+  }
+}
+
 // Muda o servidor Evolution API que ESTA conexão usa (isolar do padrão da
 // empresa - ex: mover a conexão oficial pra um Evolution dedicado, deixando
 // as QR-code no servidor de sempre). Body vazio ({}) limpa o override e
@@ -492,4 +522,4 @@ async function healthEvents(req, res) {
   }
 }
 
-module.exports = { list, create, getQrCode, repair, recoverMessages, remove, healthEvents, updateServer };
+module.exports = { list, create, getQrCode, repair, recoverMessages, importContacts, remove, healthEvents, updateServer };

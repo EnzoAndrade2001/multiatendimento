@@ -634,6 +634,22 @@ async function findChats(url, key, instanceName) {
   return data;
 }
 
+// Agenda de contatos sincronizada pela Evolution a partir do celular pareado
+// via QR (Baileys). Números oficiais (Cloud API) não têm essa agenda. A
+// Evolution mudou o verbo desse endpoint entre versões (GET puro x POST com
+// filtro `where`) -- tenta os dois antes de desistir.
+async function findContacts(url, key, instanceName) {
+  const client = getClient(url, key);
+  try {
+    const { data } = await client.post(`/chat/findContacts/${instanceName}`, { where: {} });
+    return data;
+  } catch (err) {
+    if (err.response?.status === 401 || err.response?.status === 403) throw err;
+    const { data } = await client.get(`/chat/findContacts/${instanceName}`);
+    return data;
+  }
+}
+
 async function findMessages(url, key, instanceName, remoteJid, limit = 50) {
   const client = getClient(url, key);
   const { data } = await client.post(`/chat/findMessages/${instanceName}?limit=${limit}`, {
@@ -693,7 +709,7 @@ module.exports = {
   sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
   getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
   normalizePhoneNumber, samePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
-  findChats, findMessages, findConversationJidsByMessageIds,
+  findChats, findContacts, findMessages, findConversationJidsByMessageIds,
   getEvolutionErrorDetail,
   resolveEvolutionConfig,
   __testing: { buildCreateInstancePayload }
