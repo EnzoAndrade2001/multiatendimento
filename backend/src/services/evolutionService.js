@@ -628,10 +628,19 @@ async function revokeMessage(url, key, instanceName, remoteJid, messageId) {
   }
 }
 
+// Assim como findContacts, a Evolution mudou o verbo desse endpoint entre
+// versões (GET puro x POST com filtro `where`) -- tenta POST primeiro
+// (confirmado como o que essa versão em produção aceita; GET dá 404 nela).
 async function findChats(url, key, instanceName) {
   const client = getClient(url, key);
-  const { data } = await client.get(`/chat/findChats/${instanceName}`);
-  return data;
+  try {
+    const { data } = await client.post(`/chat/findChats/${instanceName}`, { where: {} });
+    return data;
+  } catch (err) {
+    if (err.response?.status === 401 || err.response?.status === 403) throw err;
+    const { data } = await client.get(`/chat/findChats/${instanceName}`);
+    return data;
+  }
 }
 
 // Agenda de contatos sincronizada pela Evolution a partir do celular pareado

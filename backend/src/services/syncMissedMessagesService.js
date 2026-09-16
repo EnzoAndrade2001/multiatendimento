@@ -19,7 +19,10 @@ function asArray(payload) {
 }
 
 function chatJid(chat) {
-  const value = typeof chat === 'string' ? chat : chat?.id || chat?.jid || chat?.remoteJid;
+  // "id" no registro de /chat/findChats é o id interno do banco da
+  // Evolution (cuid), não o jid do WhatsApp -- o jid real vem em
+  // "remoteJid". Mesmo bug que existiu na importação de contatos.
+  const value = typeof chat === 'string' ? chat : chat?.remoteJid || chat?.jid || chat?.id;
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
