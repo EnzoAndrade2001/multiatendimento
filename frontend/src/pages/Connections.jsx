@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
-import { AlertTriangle, Clock3, History, Plus, QrCode, RotateCcw, Smartphone, Trash2, Users, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, Clock3, History, MessageSquare, Plus, QrCode, RotateCcw, Smartphone, Trash2, Users, Wifi, WifiOff } from 'lucide-react';
 import { toast } from '../utils/toast';
-import { getInstances, createInstance, deleteInstance, getInstanceQrCode, repairInstance, recoverInstanceMessages, importInstanceContacts } from '../services/api';
+import { getInstances, createInstance, deleteInstance, getInstanceQrCode, repairInstance, recoverInstanceMessages, importInstanceContacts, importInstanceHistory } from '../services/api';
 import { SOCKET_URL } from '../services/socket';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
@@ -53,6 +53,7 @@ export default function Connections() {
   const [deletingId, setDeletingId] = useState(null);
   const [recoveringId, setRecoveringId] = useState(null);
   const [importingId, setImportingId] = useState(null);
+  const [importingHistoryId, setImportingHistoryId] = useState(null);
   const [showOfficialGuide, setShowOfficialGuide] = useState(false);
 
   useEffect(() => {
@@ -109,6 +110,30 @@ export default function Connections() {
       toast.error(err.response?.data?.error || 'Não foi possível importar os contatos.');
     } finally {
       setImportingId(null);
+    }
+  }
+
+  async function handleImportHistory(inst) {
+    if (importingHistoryId) return;
+    const input = window.prompt(
+      `Importar quantos dias de histórico de conversas da conexão ${inst.instanceName.split('_').pop()}? (1 a 180)\n\nCada conversa nova entra como "resolvida" no histórico do contato -- não aparece na fila de atendimento.`,
+      '30',
+    );
+    if (input === null) return;
+    const days = Number(input);
+    if (!Number.isFinite(days) || days < 1 || days > 180) {
+      toast.error('Informe um número de dias entre 1 e 180.');
+      return;
+    }
+    setImportingHistoryId(inst.id);
+    try {
+      const { data } = await importInstanceHistory(inst.id, days);
+      toast.success(`${data.imported || 0} mensagem(ns) importada(s) de ${data.chats || 0} conversa(s); ${data.scanned || 0} analisada(s).`, 8000);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Não foi possível importar o histórico de conversas.');
+    } finally {
+      setImportingHistoryId(null);
     }
   }
 
@@ -256,6 +281,9 @@ export default function Connections() {
                       </div>
                       <button type="button" style={s.importContactsBtn} onClick={() => handleImportContacts(inst)} disabled={importingId === inst.id}>
                         <Users size={15} /> {importingId === inst.id ? 'Importando…' : 'Importar contatos do WhatsApp'}
+                      </button>
+                      <button type="button" style={s.importContactsBtn} onClick={() => handleImportHistory(inst)} disabled={importingHistoryId === inst.id}>
+                        <MessageSquare size={15} /> {importingHistoryId === inst.id ? 'Importando…' : 'Importar histórico de conversas'}
                       </button>
                     </>
                   ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' || connectionView.key === 'wrong_number' ? (

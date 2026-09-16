@@ -383,7 +383,8 @@ async function downloadMedia(evolutionUrl, evolutionKey, instanceName, msg, mess
   return null;
 }
 
-async function processSingleMessage(msg, instance, waInstance, tenant, isHistorical) {
+async function processSingleMessage(msg, instance, waInstance, tenant, isHistorical, options = {}) {
+  const { forceResolvedOnCreate = false } = options;
   const identity = getWebhookMessageIdentity(msg);
   if (!identity.valid) {
     console.warn(`[webhook] Ignorando messages.upsert sem identidade/direcao confiavel. instance=${instance || 'desconhecida'}`);
@@ -622,7 +623,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
         tenantId: tenant.id,
         instanceId: waInstance.id,
         contactId: contact.id,
-        status: fromMe ? 'open' : (!isGroup && useBotForInstance ? 'bot' : 'pending'),
+        status: forceResolvedOnCreate ? 'resolved' : (fromMe ? 'open' : (!isGroup && useBotForInstance ? 'bot' : 'pending')),
         sessionStartedAt: new Date(),
       }
     });

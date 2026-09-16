@@ -4,6 +4,7 @@ const metaCloudApi = require('../services/metaCloudApiService');
 const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
 const { syncMissedMessages } = require('../services/syncMissedMessagesService');
 const { importContactsFromWhatsApp } = require('../services/contactImportService');
+const { importChatHistory } = require('../services/chatHistoryImportService');
 const { assertTenantLimit } = require('../services/tenantLimitService');
 const { pickServerForNewInstance } = require('../services/evolutionServerPoolService');
 
@@ -398,6 +399,38 @@ async function importContacts(req, res) {
   }
 }
 
+// Importa o histórico de conversas mantido pela Evolution (sincronizado do
+// celular pareado por QR). Ação manual -- o cliente decide se quer rodar,
+// diferente da importação de contatos. Cada conversa nova entra "resolvida"
+// pra não inundar a fila de atendimento com conversas antigas.
+async function importHistory(req, res) {
+  try {
+    const inst = await prisma.waInstance.findFirst({
+      where: { id: req.params.id, tenantId: req.user.tenantId, instanceName: { not: { startsWith: 'DELETED_' } } },
+      include: { tenant: { include: { settings: true } } },
+    });
+    if (!inst) return res.status(404).json({ error: 'Instância não encontrada' });
+    if (inst.provider === 'evolution_official') {
+      return res.status(409).json({ error: 'Conexões oficiais (API Cloud da Meta) não têm histórico de conversas para importar.' });
+    }
+
+    const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId, inst);
+
+    const stateData = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName);
+    const state = parseConnectionState(stateData);
+    if (state !== 'open') {
+      return res.status(400).json({ error: 'A conexão precisa estar com a sessão ativa (QR conectado) para importar o histórico.' });
+    }
+
+    const days = Number(req.body?.days || req.query?.days || 30);
+    const result = await importChatHistory(inst, { evolutionUrl, evolutionKey }, { days });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[instanceController] Erro ao importar historico de conversas:', err.response?.data || err.message);
+    res.status(400).json({ error: evolution.getEvolutionErrorDetail(err) });
+  }
+}
+
 // Muda o servidor Evolution API que ESTA conexão usa (isolar do padrão da
 // empresa - ex: mover a conexão oficial pra um Evolution dedicado, deixando
 // as QR-code no servidor de sempre). Body vazio ({}) limpa o override e
@@ -522,4 +555,4 @@ async function healthEvents(req, res) {
   }
 }
 
-module.exports = { list, create, getQrCode, repair, recoverMessages, importContacts, remove, healthEvents, updateServer };
+module.exports = { list, create, getQrCode, repair, recoverMessages, importContacts, importHistory, remove, healthEvents, updateServer };

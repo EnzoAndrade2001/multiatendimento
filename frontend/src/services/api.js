@@ -170,6 +170,7 @@ export const createInstance = (payload) => api.post('/instance/create', typeof p
 export const repairInstance = (id) => api.post(`/instance/${id}/repair`);
 export const recoverInstanceMessages = (id, hours = 24) => api.post(`/instance/${id}/recover`, { hours });
 export const importInstanceContacts = (id) => api.post(`/instance/${id}/import-contacts`);
+export const importInstanceHistory = (id, days = 30) => api.post(`/instance/${id}/import-history`, { days });
 export const deleteInstance = (id) => api.delete(`/instance/${id}`);
 
 // Contacts
