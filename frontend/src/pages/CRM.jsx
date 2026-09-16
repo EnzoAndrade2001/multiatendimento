@@ -1312,6 +1312,7 @@ function EquipmentDetail({ equipment, evolution }) {
           <Info label="Número de série" value={equipment.serialNumber} />
           <Info label="Patrimônio" value={equipment.assetTag} />
           <Info label="Tipo" value={equipment.type} />
+          <Info label="Proprietário" value={equipmentOwnerLabel(equipment)} />
           <Info label="Contrato ILUX" value={equipment.contractExternalId} />
         </div>
       </InfoSection>
@@ -1538,6 +1539,7 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
                 <div style={s.osMeta}>
                   <span><Printer size={13} /> {pick(order, 'equipmentModel', 'equipment', 'model') || `Equip. ${pick(order, 'equipmentExternalId', 'equipmentId', 'cdequipamento') || '—'}`}</span>
                   <span><Wrench size={13} /> {pick(order, 'technicianName', 'technician', 'assignedTo') || 'Técnico não informado'}</span>
+                  {pick(order, 'statusCode', 'cdStatus', 'cdstatus') ? <span>Status ILUX: {pick(order, 'statusCode', 'cdStatus', 'cdstatus')}</span> : null}
                   {pick(order, 'closedAt', 'finishedAt') ? <span><CalendarDays size={13} /> Fechada em {formatDate(pick(order, 'closedAt', 'finishedAt'))}</span> : null}
                 </div>
                 {closed && pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing') ? <div style={s.resolution}><strong>Fechamento:</strong> {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing')}</div> : null}
@@ -1669,6 +1671,12 @@ function sortLabel(sortBy) {
 function hasValue(value) { return value !== null && value !== undefined && value !== ''; }
 function joinLocation(item) { return [item.address, item.complement, item.neighborhood, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
 function equipmentLocation(item) { return [item.address, item.complement, pick(item, 'department', 'sector'), item.installLocation, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
+function equipmentOwnerLabel(item) {
+  const owner = String(pick(item, 'ownerType', 'proprietario', 'tfproprietario') || '').trim().toUpperCase();
+  if (owner === 'C' || owner === 'CLIENTE') return 'Cliente';
+  if (owner === 'E' || owner === 'EMPRESA') return 'Empresa';
+  return owner || undefined;
+}
 function searchableEquipment(item) { return [item.model, item.manufacturer, item.serialNumber, item.assetTag, equipmentLocation(item), item.externalId].filter(Boolean).join(' ').toLowerCase(); }
 function unitLocation(item) { return [item.address, item.neighborhood, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
 

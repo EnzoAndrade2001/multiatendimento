@@ -290,6 +290,7 @@ function normalizeExternalOrder(payload, fallback = {}) {
     source.raw?.OBSDEFEITOATS
   );
   const rawStatus = first(rawValue(source, 'status', 'nmstatus'));
+  const statusCode = first(rawValue(source, 'statusCode', 'cdStatus', 'cdstatus'));
   const value = asNumber(rawValue(source, 'value', 'totalValue', 'vl_total', 'valortotal', 'vl_os', 'valortotalos', 'valor_os', 'valorservico', 'valorpecas')) || 0;
   return {
     id: null,
@@ -302,6 +303,7 @@ function normalizeExternalOrder(payload, fallback = {}) {
     type: first(rawValue(source, 'osType', 'nmostp'), rawValue(osType, 'nmostp')),
     status: normalizeOrderStatus(rawStatus, closedAt, closing),
     statusLabel: rawStatus,
+    statusCode,
     defect: first(rawValue(source, 'defect', 'obsdefeitocli')),
     value,
     closing,
@@ -327,6 +329,7 @@ function normalizeLocalOrder(order) {
     type: text(order.cdOstp),
     status: order.status,
     statusLabel: order.status,
+    statusCode: text(order.sourceStatusCode),
     defect: text(order.defect),
     value: 0, // Fallback for local orders without value
     closing: text(order.technicalNotes),

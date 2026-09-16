@@ -63,3 +63,28 @@ test('snapshot incompleto nao mexe nos equipamentos', async () => {
     /invalido ou incompleto/,
   );
 });
+
+test('snapshot contratado vazio desativa equipamentos sem SEQCONTRATO antigos', async (context) => {
+  const originalFindMany = prisma.crmEquipment.findMany;
+  const originalUpdateMany = prisma.crmEquipment.updateMany;
+  context.after(() => {
+    prisma.crmEquipment.findMany = originalFindMany;
+    prisma.crmEquipment.updateMany = originalUpdateMany;
+  });
+  prisma.crmEquipment.findMany = async () => ([{ id: 'sem-contrato', externalId: '1543' }]);
+  const updates = [];
+  prisma.crmEquipment.updateMany = async (args) => {
+    updates.push(args);
+    return { count: args.where.id.in.length };
+  };
+
+  const deactivated = await reconcileEquipmentsSnapshot('tenant-1', {
+    completeWindow: true,
+    scope: 'contracted',
+    count: 0,
+    externalIds: [],
+  });
+
+  assert.equal(deactivated, 1);
+  assert.deepEqual(updates[0].where.id.in, ['sem-contrato']);
+});

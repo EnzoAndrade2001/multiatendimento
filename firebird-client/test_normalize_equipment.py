@@ -46,6 +46,15 @@ class NormalizeEquipmentContractLinkTest(unittest.TestCase):
         self.assertEqual(result["contractExternalId"], "330")
         self.assertFalse(result["inactive"])
 
+    def test_proprietario_cliente_e_normalizado(self):
+        self.assertEqual(normalize_equipment(_record(proprietario="C"))["ownerType"], "CLIENTE")
+
+    def test_proprietario_empresa_e_normalizado(self):
+        self.assertEqual(normalize_equipment(_record(proprietario="E"))["ownerType"], "EMPRESA")
+
+    def test_alias_tfproprietario_e_aceito(self):
+        self.assertEqual(normalize_equipment(_record(tfproprietario="C"))["ownerType"], "CLIENTE")
+
 
 if __name__ == "__main__":
     unittest.main()

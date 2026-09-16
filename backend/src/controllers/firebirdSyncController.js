@@ -21,6 +21,7 @@ const normalizeDate = parseFirebirdDate;
 
 const RECEIVABLE_SNAPSHOT_ENTITY = 'receivablesSnapshot';
 const EQUIPMENT_SNAPSHOT_ENTITY = 'equipmentsSnapshot';
+const TECHNICIAN_SNAPSHOT_ENTITY = 'techniciansSnapshot';
 const SERVICE_ORDER_OPEN_SNAPSHOT_ENTITY = 'serviceOrdersOpenSnapshot';
 
 // Authentication failures are actionable, but logging every retry from a
@@ -76,6 +77,14 @@ function pick(...values) {
 // 'true'/'false'; `tfinativo` legado chega como 'S'/'N'.
 function isInactiveFlag(value) {
   return ['1', 'S', 'SIM', 'TRUE', 'Y', 'YES'].includes(String(value ?? '').trim().toUpperCase());
+}
+
+function normalizeEquipmentOwner(value) {
+  const code = String(value ?? '').trim().toUpperCase();
+  if (!code) return null;
+  if (code === 'C' || code === 'CLIENTE') return 'CLIENTE';
+  if (code === 'E' || code === 'EMPRESA') return 'EMPRESA';
+  return code;
 }
 
 function normalizePhone(value, fallback) {
@@ -293,10 +302,11 @@ async function reconcileEquipmentsSnapshot(tenantId, snapshot) {
   const minExternalId = Number(snapshot?.minExternalId);
   const maxExternalId = Number(snapshot?.maxExternalId);
   const declaredCount = Number(snapshot?.count);
-  if (!snapshot?.completeWindow || !externalIds.length
-    || !Number.isSafeInteger(minExternalId) || !Number.isSafeInteger(maxExternalId)
-    || minExternalId <= 0 || maxExternalId < minExternalId
-    || declaredCount !== externalIds.length) {
+  const hasRange = externalIds.length > 0
+    && Number.isSafeInteger(minExternalId) && Number.isSafeInteger(maxExternalId)
+    && minExternalId > 0 && maxExternalId >= minExternalId;
+  if (!snapshot?.completeWindow || !Array.isArray(snapshot?.externalIds)
+    || declaredCount !== externalIds.length || (externalIds.length > 0 && !hasRange)) {
     throw new Error('Snapshot de equipamentos invalido ou incompleto; reconciliacao ignorada por seguranca.');
   }
 
@@ -308,10 +318,12 @@ async function reconcileEquipmentsSnapshot(tenantId, snapshot) {
   const missingIds = cached
     .filter((record) => {
       const numericId = Number(record.externalId);
-      return Number.isSafeInteger(numericId)
-        && numericId >= minExternalId
-        && numericId <= maxExternalId
-        && !present.has(String(record.externalId));
+      const inScope = snapshot.scope === 'contracted'
+        ? true
+        : Number.isSafeInteger(numericId)
+          && numericId >= minExternalId
+          && numericId <= maxExternalId;
+      return inScope && !present.has(String(record.externalId));
     })
     .map((record) => record.id);
   if (missingIds.length) {
@@ -319,6 +331,30 @@ async function reconcileEquipmentsSnapshot(tenantId, snapshot) {
       where: { id: { in: missingIds } },
       data: { isActive: false },
     });
+  }
+  return missingIds.length;
+}
+
+// A lista de tecnicos tambem e uma janela autoritativa. O iLux mistura
+// tecnicos e atendentes em IXLOSSUPORTE; depois do filtro TIPO=S, os registros
+// antigos do tipo O precisam ser desativados no espelho local.
+async function reconcileTechniciansSnapshot(tenantId, snapshot) {
+  const sourceIds = Array.isArray(snapshot?.externalIds) ? snapshot.externalIds : [];
+  const externalIds = [...new Set(sourceIds.map((value) => String(value).trim().toUpperCase()).filter(Boolean))];
+  const declaredCount = Number(snapshot?.count);
+  if (!snapshot?.completeWindow || !Array.isArray(snapshot?.externalIds) || declaredCount !== externalIds.length) {
+    throw new Error('Snapshot de tecnicos invalido ou incompleto; reconciliacao ignorada.');
+  }
+
+  const cached = await prisma.crmTechnician.findMany({
+    where: { tenantId, isActive: true },
+    select: { id: true, name: true },
+  });
+  const missingIds = cached
+    .filter((record) => !externalIds.includes(String(record.name || '').trim().toUpperCase()))
+    .map((record) => record.id);
+  if (missingIds.length) {
+    await prisma.crmTechnician.updateMany({ where: { id: { in: missingIds } }, data: { isActive: false } });
   }
   return missingIds.length;
 }
@@ -533,6 +569,7 @@ async function upsertCrmEquipment(tenant, data) {
     city: pick(data.city, data.cidade),
     state: pick(data.state, data.uf),
     phone: normalizePhone(pick(data.phone, data.fone, data.celular, data.whatsapp), null),
+    ownerType: normalizeEquipmentOwner(pick(data.ownerType, data.proprietario, data.tfproprietario)),
     // O agente ja resolve o vinculo real pelo historico de instalacao do
     // contrato (IXLCONTRATOSIT); quando a maquina saiu do contrato ele manda
     // null/inactive. `?? null` garante que o vinculo antigo seja limpo no
@@ -663,6 +700,14 @@ async function upsertServiceOrder(tenant, instance, data) {
   const hasAttendedAt = ['resolvedAt', 'dtAtendimento', 'dtatendimento'].some((key) => (
     Object.prototype.hasOwnProperty.call(data, key) || Object.prototype.hasOwnProperty.call(data.raw || {}, key)
   ));
+  const sourceStatusCode = pick(
+    data.statusCode,
+    data.cdStatus,
+    data.cdstatus,
+    data.raw?.statusCode,
+    data.raw?.cdStatus,
+    data.raw?.cdstatus,
+  );
 
   const defaults = {
     tenantId: tenant.id,
@@ -671,6 +716,7 @@ async function upsertServiceOrder(tenant, instance, data) {
     externalSource: 'firebird',
     externalId,
     externalUpdatedAt: parseFirebirdDate(pick(data.updatedAt, data.atualizado, data.raw?.atualizado)) || openedAt || attendedAt || closedAt,
+    sourceStatusCode,
     status: normalizeStatus(pick(data.status, data.nmStatus, data.nmstatus, data.raw?.status, data.raw?.nmstatus, data.tffaturar, data.raw?.tffaturar)),
     defect: pick(data.defect, data.nmDefeito, data.causa, data.sintoma),
     technicalNotes: [pick(data.action, data.acao), pick(data.observacao), pick(data.nmSuporteT)].filter(Boolean).join(' | ') || null,
@@ -695,6 +741,7 @@ async function upsertServiceOrder(tenant, instance, data) {
         contactId: contact.id,
         equipmentId: equipment.id,
         status: defaults.status || existing.status,
+        sourceStatusCode: sourceStatusCode || existing.sourceStatusCode,
         defect: defaults.defect || existing.defect,
         technicalNotes: defaults.technicalNotes || existing.technicalNotes,
         ...(openedAt ? { createdAt: openedAt } : {}),
@@ -959,6 +1006,11 @@ async function pushBatch(req, res) {
         }
         if (entity === EQUIPMENT_SNAPSHOT_ENTITY) {
           stats.reconciled += await reconcileEquipmentsSnapshot(tenant.id, record);
+          stats.stored += 1;
+          continue;
+        }
+        if (entity === TECHNICIAN_SNAPSHOT_ENTITY) {
+          stats.reconciled += await reconcileTechniciansSnapshot(tenant.id, record);
           stats.stored += 1;
           continue;
         }
@@ -1888,6 +1940,7 @@ module.exports = {
   pushBatch,
   reconcileReceivablesSnapshot,
   reconcileEquipmentsSnapshot,
+  reconcileTechniciansSnapshot,
   getPendingCommands,
   commandCallback,
   agentPing,

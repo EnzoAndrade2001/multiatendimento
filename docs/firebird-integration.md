@@ -24,11 +24,13 @@ A integração é híbrida e assíncrona, composta por três partes principais:
 
 3. **Banco de Dados Firebird (ERP ILUX):**
    - Tabela `ICLIENTES`: Cadastro de clientes.
-   - Tabela `IXLEQUIPAMENTO`: Cadastro de equipamentos. `SEQCONTRATO`/`TFINATIVO` não são confiáveis (o SEQCONTRATO fica preso ao último contrato e o TFINATIVO nunca é usado nesta base).
+     Alterações posteriores ao cadastro são reenviadas periodicamente usando `ATUALIZADO`, além da carga incremental por `CDCLIENTE`.
+   - Tabela `IXLEQUIPAMENTO`: Cadastro de equipamentos. O espelho CRM importa apenas registros com `SEQCONTRATO > 0` e mapeia `PROPRIETARIO` (`C` = cliente, `E` = empresa). Bases antigas que chamam o mesmo dado de `TFPROPRIETARIO` também são aceitas.
    - Tabela `IXLCONTRATOSIT`: Histórico de instalação equipamento×contrato. `DTINSTALACAOFIN` no passado = equipamento removido/trocado; é a fonte real de "equipamento ativo/em contrato".
    - Tabela `IXLOS`: Cadastro das ordens de serviço.
    - Tabela `IXLCONTROLESEQ`: Tabela que armazena os sequenciais das tabelas (geradores manuais).
    - Tabela `IXLOSDEFEITOTP`: Tabela de tipos de defeito cadastrados no ERP.
+   - Tabela `IXLOSSUPORTE`: Cadastro misto de atendentes e técnicos; o agente importa somente `TIPO = 'S'`.
 
 ```mermaid
 flowchart LR
@@ -75,8 +77,8 @@ Ao inserir um novo registro de O.S. (`IXLOS`) no Firebird, diversos campos são 
 | **CDOSTP** | VARCHAR | `os.cdOstp` | Código do Tipo de O.S. selecionado no modal (Ex: `'01'`, `'02'`). |
 | **DTINCLUSAO** | DATE | `now()` | Data de criação (formato `YYYY-MM-DD`). |
 | **HRINCLUSAO** | TIME | `now()` | Hora de criação (formato `HH:MM`). |
-| **STATUS** | VARCHAR | `'E'` | Status de fluxo (Mapeado como `'E'` para Aberto / Pendente de execução). |
-| **CDSTATUS** | VARCHAR | `'E1'` | Código detalhado do status inicial (Mapeado como `'E1'`). |
+| **STATUS** | VARCHAR | `'A'` (base Luciano) | Status de fluxo da abertura. O agente detecta a convenção da instalação e mantém compatibilidade com bases legadas. |
+| **CDSTATUS** | VARCHAR | `'0'` (base Luciano) | Código detalhado do status inicial, também enviado na sincronização do histórico de O.S. |
 | **OBSDEFEITOCLI** | BLOB/SUB_TYPE 1 | `os.defect` | Relato do defeito fornecido pelo cliente. |
 | **NMSUPORTET** | VARCHAR | `os.nmsuportet` | Nome do Técnico encarregado (Ex: `'ROBSON'`). |
 | **NMSUPORTEA** | VARCHAR | `user.firebirdSupportName` | Nome do Atendente do CRM que abriu o chamado. |

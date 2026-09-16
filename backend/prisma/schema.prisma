@@ -1029,6 +1029,7 @@ model ServiceOrder {
   cdOstp               String?
   cdDefeito            String?
   nmsuportet           String?
+  sourceStatusCode     String? // IXLOS.CDSTATUS
   defect               String? // Descrição do defeito relatado
   status               String           @default("PENDENTE") // PENDENTE, EM_ATENDIMENTO, AGUARDANDO_RETORNO, FINALIZADA
   technicalNotes       String? // Notas do técnico (peças trocadas, pendências)
@@ -1141,6 +1142,7 @@ model CrmEquipment {
   city               String?
   state              String?
   phone              String?
+  ownerType          String? // PROPRIETARIO: CLIENTE ou EMPRESA
   contractExternalId String?
   // Current meter snapshot received from PrintGuard. Historical readings
   // remain available in PrintGuard; these fields make the latest value

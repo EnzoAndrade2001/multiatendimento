@@ -50,7 +50,7 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
-DEFAULT_AGENT_VERSION = "1.3.1"
+DEFAULT_AGENT_VERSION = "1.3.2"
 DEFAULT_AGENT_PROTOCOL_VERSION = "1"
 # O pacote oficial e o painel de configurações usam este endpoint. Manter um
 # valor padrão evita que uma instalação nova, com .env vazio ou incompleto,
@@ -1069,6 +1069,43 @@ class FirebirdRepository:
         self.config = config
         self._financial_index: FinancialDocumentIndex | None = None
         self._last_scan_stats: dict[str, Any] | None = None
+        self._equipment_owner_column: str | None = None
+        self._equipment_owner_column_loaded = False
+
+    def _equipment_owner_expression(self) -> str:
+        """Retorna a coluna de proprietario disponivel nesta versao do iLux.
+
+        A base homologada do Luciano usa ``PROPRIETARIO``. Algumas versoes
+        antigas documentam o mesmo dado como ``TFPROPRIETARIO``; quando a
+        coluna nao existir, enviamos NULL sem quebrar toda a sincronizacao.
+        """
+        if not self._equipment_owner_column_loaded:
+            self._equipment_owner_column_loaded = True
+            con = None
+            try:
+                con = self.connect()
+                cur = con.cursor()
+                cur.execute(
+                    "select trim(rdb$field_name) from rdb$relation_fields "
+                    "where rdb$relation_name = 'IXLEQUIPAMENTO' "
+                    "and rdb$field_name in ('PROPRIETARIO', 'TFPROPRIETARIO') "
+                    "order by case rdb$field_name when 'PROPRIETARIO' then 0 else 1 end"
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    self._equipment_owner_column = str(row[0]).strip().upper()
+            except Exception as exc:
+                logging.warning("Nao foi possivel identificar a coluna de proprietario: %s", exc)
+            finally:
+                try:
+                    if con is not None:
+                        con.close()
+                except Exception:
+                    pass
+
+        if self._equipment_owner_column:
+            return f"eq.{self._equipment_owner_column} as PROPRIETARIO"
+        return "cast(null as varchar(20)) as PROPRIETARIO"
 
     def financial_document_index(self) -> FinancialDocumentIndex:
         if self._financial_index is None:
@@ -1284,19 +1321,34 @@ class FirebirdRepository:
             return bool(cur.fetchone()[0])
 
         has_status_o_catalog = catalog_has("IXLOSSTATUS", "CDSTATUS", "O")
+        has_status_zero_catalog = catalog_has("IXLOSSTATUS", "CDSTATUS", "0")
         has_defect_1001 = catalog_has("IXLOSDEFEITOTP", "CDDEFEITO", "1001")
-        # Algumas bases Softilux 2.5 nao possuem TPORCATEND1 nem a linha O na
-        # IXLOSSTATUS, mas o proprio desktop/integrador ja grava IXLOS em A/O
-        # com defeito 1001 (perfil confirmado na base do Luciano). Essa
-        # evidencia e mais confiavel que atrelar tres recursos independentes.
+        # O desktop/integrador pode gravar o perfil de abertura A/O ou A/0.
+        # Consultamos os dois perfis observados para respeitar a convencao da
+        # base, em vez de assumir que o codigo O existe em todas as versoes.
         cur.execute(
             "select count(*) from IXLOS "
             "where STATUS = 'A' and CDSTATUS = 'O' and CDDEFEITO = '1001'"
         )
         has_observed_ao_profile = bool(cur.fetchone()[0])
-        supports_official_codes = has_defect_1001 and (
-            has_status_o_catalog or has_observed_ao_profile
+        cur.execute(
+            "select count(*) from IXLOS "
+            "where STATUS = 'A' and CDSTATUS = '0'"
         )
+        has_observed_a0_profile = bool(cur.fetchone()[0])
+
+        if has_observed_a0_profile:
+            official_status, official_cd_status = "A", "0"
+        elif has_observed_ao_profile:
+            official_status, official_cd_status = "A", "O"
+        elif has_status_zero_catalog:
+            official_status, official_cd_status = "A", "0"
+        elif has_defect_1001 and has_status_o_catalog:
+            official_status, official_cd_status = "A", "O"
+        else:
+            official_status, official_cd_status = "E", "E1"
+
+        supports_official_codes = official_status == "A"
         official = supports_official_codes
         return {
             "serviceOrderTable": "IXLOS",
@@ -1304,8 +1356,10 @@ class FirebirdRepository:
             "tporcatend1": supports_official_column,
             "officialCodes": supports_official_codes,
             "observedAoProfile": has_observed_ao_profile,
+            "observedA0Profile": has_observed_a0_profile,
+            "statusCatalogZero": has_status_zero_catalog,
             "status": "A" if official else "E",
-            "cdStatus": "O" if official else "E1",
+            "cdStatus": official_cd_status,
             "defaultCdDefeito": "1001" if official else "MAN",
             "tfLiberado": "N" if official else "S",
         }
@@ -1460,11 +1514,45 @@ class FirebirdRepository:
         """
         yield from self._rows(sql, (cursor,))
 
+    def fetch_recently_updated_contacts(self, limit: int = 5000) -> Iterator[dict[str, Any]]:
+        """Reenvia clientes alterados no iLux Desktop.
+
+        O cursor de ``fetch_contacts`` usa apenas CDCLIENTE e, portanto, só
+        encontra clientes novos. Uma alteração posterior no cadastro (nome,
+        telefone, endereço etc.) precisa de uma leitura por ATUALIZADO para
+        voltar a entrar no CRM.
+        """
+        sql = f"""
+            select first {max(1, int(limit))}
+                cli.CDCLIENTE, cli.NMCLIENTE, cli.FANTASIA, cli.CPF, cli.CNPJ, cli.CIDADE, cli.UF, cli.CEP,
+                cli.ENDERECO, cli.NUM, cli.COMPLEMENTO, cli.BAIRRO, cli.DDD, cli.FONE1, cli.FONE2, cli.CELULAR, cli.FAX, cli.EMAIL, cli.CONTATO,
+                cli.INCLUSAO, cli.ATUALIZADO,
+                (
+                    select sum(
+                        coalesce(c.TR_VL_FIXO, 0) +
+                        coalesce((
+                            select sum(m.VALFRANQUIA)
+                            from IXLCONTRATOSMED m
+                            where m.SEQCONTRATO = c.SEQCONTRATO
+                              and coalesce(m.TFMEDIDORATIVO, 'S') <> 'N'
+                        ), 0)
+                    )
+                    from IXLCONTRATOSGRP g
+                    join IXLCONTRATOS c on c.SEQCONTRATOGRP = g.SEQCONTRATOGRP
+                    where g.CDCLIENTE = cli.CDCLIENTE
+                      and c.STATUS = 'G'
+                ) as TOTAL_MENSALIDADE
+            from ICLIENTES cli
+            where cli.ATUALIZADO is not null
+            order by cli.ATUALIZADO desc, cli.CDCLIENTE desc
+        """
+        yield from self._rows(sql, ())
+
     def fetch_equipments(self, cursor: int) -> Iterator[dict[str, Any]]:
         sql = f"""
             select
                 eq.CDEQUIPAMENTO, eq.CDCLIENTE, eq.CDPRODUTO, eq.SERIE, eq.MODELO, eq.FABRICANTE,
-                eq.SEQCONTRATO, eq.PATRIMONIO, eq.TFINATIVO,
+                eq.SEQCONTRATO, {self._equipment_owner_expression()}, eq.PATRIMONIO, eq.TFINATIVO,
                 eq.ENDERECO, eq.NUM, eq.BAIRRO, eq.COMPLEMENTO, eq.LOCALINSTAL, eq.DEPARTAMENTO, eq.CONTATO, eq.FONE, eq.DDD, eq.CIDADE, eq.UF,
                 eq.INCLUSAO, eq.ATUALIZADO,
                 p.NMPRODUTO as PRODUCT_NAME,
@@ -1472,6 +1560,8 @@ class FirebirdRepository:
             from IXLEQUIPAMENTO eq
             left join IPRODUTO p on p.CDPRODUTO = eq.CDPRODUTO
             where eq.CDEQUIPAMENTO > ?
+              and eq.SEQCONTRATO is not null
+              and eq.SEQCONTRATO > 0
             order by eq.CDEQUIPAMENTO
         """
         yield from self._rows(sql, (cursor,))
@@ -1487,7 +1577,7 @@ class FirebirdRepository:
         sql = f"""
             select first {max(1, int(limit))}
                 eq.CDEQUIPAMENTO, eq.CDCLIENTE, eq.CDPRODUTO, eq.SERIE, eq.MODELO, eq.FABRICANTE,
-                eq.SEQCONTRATO, eq.PATRIMONIO, eq.TFINATIVO,
+                eq.SEQCONTRATO, {self._equipment_owner_expression()}, eq.PATRIMONIO, eq.TFINATIVO,
                 eq.ENDERECO, eq.NUM, eq.BAIRRO, eq.COMPLEMENTO, eq.LOCALINSTAL, eq.DEPARTAMENTO, eq.CONTATO, eq.FONE, eq.DDD, eq.CIDADE, eq.UF,
                 eq.INCLUSAO, eq.ATUALIZADO,
                 p.NMPRODUTO as PRODUCT_NAME,
@@ -1495,6 +1585,8 @@ class FirebirdRepository:
             from IXLEQUIPAMENTO eq
             left join IPRODUTO p on p.CDPRODUTO = eq.CDPRODUTO
             where eq.ATUALIZADO is not null
+              and eq.SEQCONTRATO is not null
+              and eq.SEQCONTRATO > 0
             order by eq.ATUALIZADO desc
         """
         yield from self._rows(sql, ())
@@ -1502,7 +1594,10 @@ class FirebirdRepository:
     def fetch_equipment_ids(self) -> Iterator[dict[str, Any]]:
         """Lista completa e enxuta de CDEQUIPAMENTO para o snapshot de
         reconciliacao (desativa no CRM o que sumiu do iLux)."""
-        yield from self._rows("select CDEQUIPAMENTO from IXLEQUIPAMENTO", ())
+        yield from self._rows(
+            "select CDEQUIPAMENTO from IXLEQUIPAMENTO where SEQCONTRATO is not null and SEQCONTRATO > 0",
+            (),
+        )
 
     def _contracts_sql(
         self,
@@ -2390,7 +2485,7 @@ class FirebirdRepository:
                 os.CDCLIENTE, os.NMCLIENTE, os.CDEQUIPAMENTO, os.SEQOS,
                 os.DTINCLUSAO, os.HRINCLUSAO, os.DTATENDIMENTO, os.HRATENDIMENTO, os.DTFECHAMENTO,
                 {updated_column}
-                tp.NMOSTP, st.NMSTATUS, os.STATUS, os.NMSUPORTEA, os.NMSUPORTET, os.NMSUPORTEL,
+                tp.NMOSTP, st.NMSTATUS, os.STATUS, os.CDSTATUS, os.NMSUPORTEA, os.NMSUPORTET, os.NMSUPORTEL,
                 os.USUARIO_FECHAMENTO, os.OBSDEFEITOCLI, os.OBSDEFEITOATS,
                 os.DEPARTAMENTO, os.LOCALINSTAL, os.CIDADE, os.UF, os.ENDERECO, os.CEP,
                 os.DDD, os.FONE, os.CELULAR, os.EMAIL,
@@ -2540,7 +2635,16 @@ class FirebirdRepository:
         yield from self._rows(sql, ())
 
     def fetch_technicians(self) -> Iterator[dict[str, Any]]:
-        sql = "select NMSUPORTE, TFATIVO from IXLOSSUPORTE"
+        # IXLOSSUPORTE mistura tecnicos (TIPO=S) com atendentes/operadores
+        # (TIPO=O). O CRM usa esta lista para atribuir O.S.; somente o tipo
+        # tecnico deve chegar aqui. Mantemos TFATIVO para desativar tecnicos
+        # que continuam cadastrados, mas foram inativados no iLux.
+        sql = """
+            select NMSUPORTE, TFATIVO, TIPO
+              from IXLOSSUPORTE
+             where upper(trim(TIPO)) = 'S'
+             order by NMSUPORTE
+        """
         yield from self._rows(sql, ())
 
     def fetch_defect_types(self) -> Iterator[dict[str, Any]]:
@@ -2730,12 +2834,9 @@ class FirebirdRepository:
             fit_text(f"{now.strftime('%d/%m/%Y %H:%M:%S')} CA I", 25)
         )
 
-        # Existem ao menos duas geracoes do schema de O.S. do iLux em campo.
-        # A mais nova possui TPORCATEND1 e usa os codigos de integracao
-        # CDSTATUS=O / CDDEFEITO=1001; bases legadas (como a nossa de
-        # homologacao) nao possuem a coluna e usam E1 / MAN. A deteccao e
-        # feita na mesma conexao da gravacao para nunca enviar uma coluna ou
-        # um codigo que nao exista naquela instalacao.
+        # Existem varias convencoes do schema de O.S. do iLux em campo. A
+        # deteccao escolhe A/0 (base Luciano), A/O ou o legado E1/MAN na mesma
+        # conexao da gravacao, sem enviar coluna ou codigo inexistente.
         sql_base = """
                 insert into IXLOS (
                     SEQOS, CDCLIENTE, CDCLIENTEENT, CDEQUIPAMENTO, CDOSTP, DTINCLUSAO, HRINCLUSAO, STATUS, CDSTATUS, OBSDEFEITOCLI, NMSUPORTET, NMSUPORTEA,
@@ -2783,15 +2884,15 @@ class FirebirdRepository:
                     1,
                 )
 
-                status = "A" if official_profile else "E"
-                cd_status = "O" if official_profile else "E1"
-                cd_defeito = "1001" if official_profile else "MAN"
+                status = compatibility["status"]
+                cd_status = compatibility["cdStatus"]
+                cd_defeito = compatibility["defaultCdDefeito"]
                 requested_defect_code = fit_text(data.get("cdDefeito", ""), 10)
                 if requested_defect_code and catalog_has(
                     "IXLOSDEFEITOTP", "CDDEFEITO", requested_defect_code
                 ):
                     cd_defeito = requested_defect_code
-                tf_liberado = "N" if official_profile else "S"
+                tf_liberado = compatibility["tfLiberado"]
                 sql = sql_base.format(
                     tporcatend1_column="TPORCATEND1," if supports_official_column else "",
                     tporcatend1_value="'A'," if supports_official_column else "",
@@ -2918,6 +3019,14 @@ def normalize_equipment(record: dict[str, Any]) -> dict[str, Any]:
     left_contract = bool(seq_contrato) and instal_total > 0 and instal_ativa == 0
     contract_external_id = None if (not seq_contrato or left_contract) else seq_contrato
     tf_inativo = str(record.get("tfinativo") or "").strip().upper() == "S"
+    owner_code = first_non_empty(record.get("proprietario"), record.get("tfproprietario"))
+    owner_key = owner_code.upper() if owner_code else None
+    owner_type = {
+        "C": "CLIENTE",
+        "CLIENTE": "CLIENTE",
+        "E": "EMPRESA",
+        "EMPRESA": "EMPRESA",
+    }.get(owner_key, owner_code)
 
     return {
         "externalId": external_id,
@@ -2936,6 +3045,7 @@ def normalize_equipment(record: dict[str, Any]) -> dict[str, Any]:
         "contact": first_non_empty(record.get("contato")),
         "phone": compose_brazil_phone(record.get("ddd"), record.get("fone")) or normalize_phone(record.get("fone")),
         "contractExternalId": contract_external_id,
+        "ownerType": owner_type,
         "assetTag": first_non_empty(record.get("patrimonio")),
         "inactive": bool(tf_inativo or left_contract),
         "updatedAt": parse_firebird_timestamp(record.get("atualizado")),
@@ -3085,6 +3195,7 @@ def normalize_service_order(record: dict[str, Any]) -> dict[str, Any]:
     external_id = str(record["seqos"]).strip()
     client_external_id = str(record["cdcliente"]).strip() if record.get("cdcliente") is not None else None
     equipment_external_id = str(record["cdequipamento"]).strip() if record.get("cdequipamento") is not None else None
+    status_code = first_non_empty(record.get("cdstatus"), record.get("status_code"))
 
     return {
         "externalId": external_id,
@@ -3095,6 +3206,8 @@ def normalize_service_order(record: dict[str, Any]) -> dict[str, Any]:
         "manufacturer": first_non_empty(record.get("fabricante")),
         "serialNumber": first_non_empty(record.get("serie")),
         "status": first_non_empty(record.get("nmstatus"), record.get("status")),
+        "statusCode": status_code,
+        "cdStatus": status_code,
         "nmSuporteT": first_non_empty(record.get("nmsuportet")),
         "defect": first_non_empty(record.get("obsdefeitocli"), record.get("nmdefeito"), record.get("causa"), record.get("sintoma")),
         "action": first_non_empty(record.get("acao")),
@@ -3131,7 +3244,8 @@ def normalize_os_type(record: dict[str, Any]) -> dict[str, Any]:
 def normalize_technician(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": str(record["nmsuporte"]).strip(),
-        "inactive": record.get("tfativo") == "N"
+        "inactive": str(record.get("tfativo") or "").strip().upper() == "N",
+        "type": str(record.get("tipo") or "S").strip().upper(),
     }
 
 
@@ -3156,6 +3270,16 @@ def sync_static_entities(repo: FirebirdRepository, crm: CRMClient) -> None:
         if techs:
             crm.push("technicians", techs)
             logging.info("Sincronizados %s técnicos.", len(techs))
+        # A lista filtrada por TIPO=S tambem e a janela autoritativa. Isso
+        # desativa tecnicos antigos que foram importados quando a versao
+        # anterior ainda misturava atendentes (TIPO=O), inclusive quando a
+        # base nao possui nenhum tecnico atualmente.
+        crm.push("techniciansSnapshot", [{
+            "completeWindow": True,
+            "count": len(techs),
+            "externalIds": [item["name"] for item in techs if item.get("name")],
+            "capturedAt": datetime.now().isoformat(timespec="seconds"),
+        }])
 
         logging.info("Sincronizando tipos de defeito...")
         defect_types = [normalize_defect_type(row) for row in repo.fetch_defect_types()]
@@ -3508,6 +3632,13 @@ def sync_crm360_details(
     )
     if refresh_due:
         refresh_started_at = datetime.now()
+        # Clientes existentes nao aparecem novamente no cursor por CDCLIENTE
+        # quando sao editados no ILUX Desktop. Reenvia a janela por ATUALIZADO
+        # junto com os demais detalhes para manter nome, endereco e contatos
+        # sincronizados no CRM.
+        recent_contacts, _ = push_normalized_batches(
+            crm, "contacts", repo.fetch_recently_updated_contacts(5000), normalize_contact, batch_size
+        )
         recent_receivable_rows = list(repo.fetch_recent_receivables(1000))
         recent_receivables, _ = push_normalized_batches(
             crm, "receivables", recent_receivable_rows, normalize_receivable, batch_size
@@ -3582,10 +3713,22 @@ def sync_crm360_details(
         if equipment_ids:
             crm.push("equipmentsSnapshot", [{
                 "completeWindow": True,
+                "scope": "contracted",
                 "count": len(equipment_ids),
                 "minExternalId": equipment_ids[0],
                 "maxExternalId": equipment_ids[-1],
                 "externalIds": [str(value) for value in equipment_ids],
+                "capturedAt": datetime.now().isoformat(timespec="seconds"),
+            }])
+        else:
+            # Uma janela vazia tambem e valida: significa que a base nao tem
+            # equipamento com SEQCONTRATO. O backend desativa o espelho antigo
+            # em vez de manter equipamentos sem contrato visiveis no CRM.
+            crm.push("equipmentsSnapshot", [{
+                "completeWindow": True,
+                "scope": "contracted",
+                "count": 0,
+                "externalIds": [],
                 "capturedAt": datetime.now().isoformat(timespec="seconds"),
             }])
         # O marcador so e salvo depois de todos os pushes do ciclo. Se o
@@ -3594,7 +3737,8 @@ def sync_crm360_details(
         state.data["crm360_recent_refresh_at"] = refresh_started_at.isoformat(timespec="seconds")
         state.data["crm360_contracts_updated_at"] = refresh_started_at.isoformat(timespec="seconds")
         logging.info(
-            "CRM 360: atualizados %s titulo(s), %s conta(s) a pagar, %s medidor(es), %s equipamento(s) e %s contrato(s) recentes",
+            "CRM 360: atualizados %s cliente(s), %s titulo(s), %s conta(s) a pagar, %s medidor(es), %s equipamento(s) e %s contrato(s) recentes",
+            recent_contacts,
             recent_receivables + open_receivables,
             payables_total,
             recent_meters,
@@ -3778,9 +3922,17 @@ def run_cycle(
     # em dinheiro), e cada medidor do contrato pode ter uma taxa diferente --
     # somar essas taxas entre medidores nao produz nenhum valor real. Trocado
     # por min/max da taxa (por pagina) entre os medidores ativos do contrato.
-    contract_details_version = 6
+    # v7: equipamentos agora exigem SEQCONTRATO, carregam PROPRIETARIO e
+    # reconciliam o snapshot somente com a janela contratada.
+    contract_details_version = 7
+    # v1: O.S. passam a transportar tambem IXLOS.CDSTATUS. Uma unica carga
+    # historica atualiza os espelhos existentes; depois o cursor incremental
+    # segue normalmente.
+    service_order_details_version = 1
     receivable_details_version = 2
     refresh_contract_details = int(state.data.get("contract_details_version", 0) or 0) < contract_details_version
+    refresh_service_order_details = int(state.data.get("service_order_details_version", 0) or 0) < service_order_details_version
+    should_refresh_service_order_details = refresh_service_order_details and config.sync_service_orders
     refresh_receivable_details = int(state.data.get("receivable_details_version", 0) or 0) < receivable_details_version
 
     if full:
@@ -3804,6 +3956,13 @@ def run_cycle(
         state.set_cursor("equipmentMeters", 0)
         state.save()
 
+    if not full and should_refresh_service_order_details:
+        # Refaz o historico uma vez para preencher CDSTATUS nas O.S. antigas;
+        # o agente continua resumivel porque sync_entity salva o cursor a cada
+        # lote.
+        state.set_cursor("serviceOrders", 0)
+        state.save()
+
     if refresh_receivable_details:
         # A nova versao inclui NF, tipo de faturamento e vinculo do boleto.
         # Forca apenas a janela financeira recente/aberta, sem refazer o historico inteiro.
@@ -3819,7 +3978,7 @@ def run_cycle(
     sync_billing_statements(repo, crm, state)
 
     entities = ["contacts", "equipments", "contracts"]
-    if full:
+    if full or should_refresh_service_order_details:
         entities.append("serviceOrders")
 
     for entity in entities:
@@ -3838,6 +3997,11 @@ def run_cycle(
         state.data["contract_details_version"] = contract_details_version
         state.save()
         logging.info("Detalhes de contratos e equipamentos atualizados")
+
+    if should_refresh_service_order_details:
+        state.data["service_order_details_version"] = service_order_details_version
+        state.save()
+        logging.info("Detalhes de status das O.S. atualizados")
 
     sync_crm360_details(
         repo,

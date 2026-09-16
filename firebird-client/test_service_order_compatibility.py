@@ -4,9 +4,11 @@ from main import AppConfig, FirebirdRepository, normalize_defect_type
 
 
 class FakeCursor:
-    def __init__(self, *, official: bool, observed_ao: bool = False, os_type=(1, "2")):
+    def __init__(self, *, official: bool, observed_ao: bool = False, observed_a0: bool = False, status_zero: bool | None = None, os_type=(1, "2")):
         self.official = official
         self.observed_ao = observed_ao
+        self.observed_a0 = observed_a0
+        self.status_zero = False if status_zero is None else status_zero
         self.os_type = os_type
         self._row = None
         self.insert_sql = ""
@@ -20,11 +22,12 @@ class FakeCursor:
         elif "RDB$RELATION_FIELDS" in normalized:
             self._row = (1 if self.official else 0,)
         elif "FROM IXLOSSTATUS" in normalized:
-            self._row = (1 if self.official else 0,)
+            code = str(params[0]).strip() if params else "O"
+            self._row = (1 if (self.status_zero if code == "0" else self.official) else 0,)
         elif "FROM IXLOSDEFEITOTP" in normalized:
             self._row = (1 if self.official or self.observed_ao else 0,)
         elif "FROM IXLOS" in normalized and "STATUS = 'A'" in normalized:
-            self._row = (1 if self.observed_ao else 0,)
+            self._row = (1 if (self.observed_a0 if "CDSTATUS = '0'" in normalized else self.observed_ao) else 0,)
         elif "FROM IXLOSTP" in normalized:
             self._row = self.os_type
         elif "MAX(SEQOS)" in normalized:
@@ -62,8 +65,8 @@ class ServiceOrderCompatibilityTest(unittest.TestCase):
             "tfinativo": "N",
         }), {"code": "MAN", "name": "MANUTENCAO", "inactive": False})
 
-    def create(self, official, observed_ao=False):
-        cursor = FakeCursor(official=official, observed_ao=observed_ao)
+    def create(self, official, observed_ao=False, observed_a0=False, status_zero=None):
+        cursor = FakeCursor(official=official, observed_ao=observed_ao, observed_a0=observed_a0, status_zero=status_zero)
         connection = FakeConnection(cursor)
         repo = FirebirdRepository(AppConfig())
         repo.connect = lambda: connection
@@ -104,6 +107,12 @@ class ServiceOrderCompatibilityTest(unittest.TestCase):
         self.assertEqual(cursor.insert_params[7], "A")
         self.assertEqual(cursor.insert_params[8], "O")
         self.assertEqual(cursor.insert_params[-5:-1], ("2", 1, "N", "1001"))
+
+    def test_catalog_zero_profile_uses_a_zero(self):
+        seq, cursor, connection = self.create(False, status_zero=True)
+        self.assertEqual(seq, 1234)
+        self.assertEqual(cursor.insert_params[7], "A")
+        self.assertEqual(cursor.insert_params[8], "0")
 
 
 if __name__ == "__main__":
