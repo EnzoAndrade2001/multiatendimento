@@ -325,8 +325,13 @@ async function getConnectionState(url, key, instanceName, options = {}) {
 // interno (ex.: http://<servico>:8000) quando houver rota interna verificada --
 // tira DNS/proxy/TLS/internet do caminho, que e onde os soluços acontecem.
 function getWebhookCallbackUrl() {
+  let envUrl = process.env.EVOLUTION_WEBHOOK_URL;
+  if (envUrl && envUrl.includes('multiatendimento-nova-backend')) {
+    envUrl = envUrl.replace('http://multiatendimento-nova-backend', 'http://lcddigitalweb_multiatendimento-nova-backend');
+  }
+
   const base = String(
-    process.env.EVOLUTION_WEBHOOK_URL
+    envUrl
     || process.env.PUBLIC_URL
     || `http://localhost:${process.env.PORT || 3002}`,
   ).replace(/\/+$/, '');
