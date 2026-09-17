@@ -1365,7 +1365,7 @@ export const inboxStyles = {
   tabActive: { background: 'var(--rail-bg)', color: 'var(--rail-ink)', border: '1px solid var(--rail-line)', boxShadow: 'var(--shadow-xs)' },
   badge: {
     background: 'var(--rail-cyan)',
-    color: '#0B2B33',
+    color: '#FFFFFF',
     borderRadius: 'var(--radius-xs)',
     padding: '1px 6px',
     fontSize: '0.72rem',

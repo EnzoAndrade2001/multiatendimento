@@ -720,8 +720,8 @@ const styles = {
     fontSize: '0.8rem',
     letterSpacing: '0.04em',
   },
-  brand: { fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-main)' },
-  proTag: { color: 'var(--accent)', fontSize: '0.62rem', verticalAlign: 'top', marginLeft: '0.2rem' },
+  brand: { fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-main)', fontFamily: 'var(--font-display)' },
+  proTag: { color: 'var(--accent)', fontSize: '0.62rem', verticalAlign: 'top', marginLeft: '0.2rem', fontWeight: 800, fontFamily: 'var(--font-display)' },
   centerNav: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.65rem', justifyContent: 'center' },
   links: { display: 'flex', gap: '0.45rem', minWidth: 0, overflow: 'visible' },
   primaryLink: {
