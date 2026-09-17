@@ -1,16 +1,19 @@
 import axios from 'axios';
 
-// Em produção usa a URL do backend via variável de ambiente
-// Em desenvolvimento usa proxy do Vite (/api → localhost:3002)
+// Resolução da URL do backend:
+// 1. Domínio customizado (crm.lcddigital.com.br) → api-crm.lcddigital.com.br
+// 2. Host easypanel (*.easypanel.host) → usa VITE_API_URL (backend easypanel)
+// 3. Desenvolvimento → proxy Vite (/api) ou VITE_API_URL
 const DEFAULT_PRODUCTION_API_URL = 'https://api-crm.lcddigital.com.br';
-const isProductionCrm =
-  typeof window !== 'undefined' && (window.location.hostname === 'crm.lcddigital.com.br' || window.location.hostname.includes('lcddigital'));
+const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+const isCustomDomain = hostname === 'crm.lcddigital.com.br';
+const isEasypanelHost = hostname.includes('easypanel.host');
 
-export const BACKEND_URL = isProductionCrm
+export const BACKEND_URL = isCustomDomain
   ? DEFAULT_PRODUCTION_API_URL
-  : (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('easypanel.host')
-      ? import.meta.env.VITE_API_URL
-      : DEFAULT_PRODUCTION_API_URL);
+  : isEasypanelHost
+    ? (import.meta.env.VITE_API_URL || DEFAULT_PRODUCTION_API_URL)
+    : (import.meta.env.VITE_API_URL || DEFAULT_PRODUCTION_API_URL);
 const BASE_URL = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 const api = axios.create({ baseURL: BASE_URL });
 
