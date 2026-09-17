@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import api from '../services/api';
+import api, { BACKEND_URL } from '../services/api';
 import { Plus, Search, FileText, Settings, User, Calendar, X, Archive, History, MapPin, Hash, Clock, LoaderCircle } from 'lucide-react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { toast } from '../utils/toast';
-
-const BACKEND_URL = import.meta.env.VITE_API_URL || '';
 
 export default function ServiceOrders() {
   const isMobile = useIsMobile();

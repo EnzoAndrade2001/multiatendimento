@@ -4,9 +4,13 @@ import axios from 'axios';
 // Em desenvolvimento usa proxy do Vite (/api → localhost:3002)
 const DEFAULT_PRODUCTION_API_URL = 'https://api-crm.lcddigital.com.br';
 const isProductionCrm =
-  typeof window !== 'undefined' && window.location.hostname === 'crm.lcddigital.com.br';
+  typeof window !== 'undefined' && (window.location.hostname === 'crm.lcddigital.com.br' || window.location.hostname.includes('lcddigital'));
 
-export const BACKEND_URL = import.meta.env.VITE_API_URL || (isProductionCrm ? DEFAULT_PRODUCTION_API_URL : '');
+export const BACKEND_URL = isProductionCrm
+  ? DEFAULT_PRODUCTION_API_URL
+  : (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('easypanel.host')
+      ? import.meta.env.VITE_API_URL
+      : DEFAULT_PRODUCTION_API_URL);
 const BASE_URL = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 const api = axios.create({ baseURL: BASE_URL });
 
