@@ -1,9 +1,26 @@
 import axios from 'axios';
 
-// BACKEND_URL vem do VITE_API_URL configurado no container Easypanel em build-time.
-// Em desenvolvimento o Vite faz proxy de /api → localhost:3002, então BACKEND_URL fica vazio.
-// NUNCA usar um domínio hardcoded de fallback — cada ambiente tem seu próprio VITE_API_URL.
-export const BACKEND_URL = import.meta.env.VITE_API_URL || '';
+// BACKEND_URL é resolvido dinamicamente no navegador ou via VITE_API_URL.
+// Se estiver no Easypanel (*-frontend.*.easypanel.host), redireciona automaticamente para o backend correspondente.
+const resolveBackendUrl = () => {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const proto = window.location.protocol;
+    if (host.includes('-frontend.') && host.includes('easypanel.host')) {
+      return `${proto}//${host.replace('-frontend.', '-backend.')}`;
+    }
+    if (host === 'crm.lcddigital.com.br') {
+      return 'https://api-crm.lcddigital.com.br';
+    }
+  }
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && !envUrl.includes('kra79u')) {
+    return envUrl;
+  }
+  return '';
+};
+
+export const BACKEND_URL = resolveBackendUrl();
 
 const BASE_URL = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 const api = axios.create({ baseURL: BASE_URL });
