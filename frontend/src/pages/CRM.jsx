@@ -4,6 +4,9 @@ import {
   ChevronRight,
   ClipboardList,
   Database,
+  DollarSign,
+  Download,
+  FileText,
   Hash,
   MapPin,
   Phone,
@@ -202,11 +205,13 @@ function CustomerModal({
             onClick={() => setActiveTab('equipments')}
           />
           <Tab active={activeTab === 'raw'} icon={<Database size={15} />} label="Campos ILUX" onClick={() => setActiveTab('raw')} />
-          <Tab active={activeTab === 'os'} icon={<ClipboardList size={15} />} label="Historico O.S." onClick={() => setActiveTab('os')} />
+          <Tab active={activeTab === 'os'} icon={<ClipboardList size={15} />} label={`Histórico O.S. (${customer.os?.length || 0})`} onClick={() => setActiveTab('os')} />
+          <Tab active={activeTab === 'contracts'} icon={<FileText size={15} />} label={`Contratos (${customer.contratos?.length || 0})`} onClick={() => setActiveTab('contracts')} />
+          <Tab active={activeTab === 'finance'} icon={<DollarSign size={15} />} label={`Financeiro (${customer.boletos?.length || 0})`} onClick={() => setActiveTab('finance')} />
         </nav>
 
         <div style={s.modalBody}>
-          {loading ? <div style={s.loadingBox}>Carregando dados completos do ILUX...</div> : null}
+          {loading ? <div style={s.loadingBox}>Carregando dados completos do LCDDIGITALWEB...</div> : null}
 
           {activeTab === 'data' ? <CustomerDataTab customer={customer} /> : null}
           {activeTab === 'equipments' ? (
@@ -217,7 +222,9 @@ function CustomerModal({
             />
           ) : null}
           {activeTab === 'raw' ? <RawFieldsTab title="Campos originais do cliente no ILUX" raw={customer.raw} /> : null}
-          {activeTab === 'os' ? <OsTab /> : null}
+          {activeTab === 'os' ? <OsTab osList={customer.os || []} /> : null}
+          {activeTab === 'contracts' ? <ContractsTab contracts={customer.contratos || []} /> : null}
+          {activeTab === 'finance' ? <FinanceTab boletos={customer.boletos || []} /> : null}
         </div>
 
         <footer style={s.modalFooter}>
@@ -326,15 +333,107 @@ function RawFieldsTab({ title, raw, compact = false }) {
   );
 }
 
-function OsTab() {
+function OsTab({ osList }) {
+  if (!osList || osList.length === 0) {
+    return (
+      <div style={s.osEmpty}>
+        <ClipboardList size={28} />
+        <h3>Nenhuma O.S. encontrada</h3>
+        <p>Não há histórico de ordens de serviço para este cliente.</p>
+      </div>
+    );
+  }
+
   return (
-    <div style={s.osEmpty}>
-      <ClipboardList size={28} />
-      <h3>Historico de O.S. ainda nao importado</h3>
-      <p>
-        Pausamos esta parte de proposito. Antes de trazer O.S., precisamos definir a regra para abrir O.S. pelo nosso
-        sistema e salvar corretamente no ILUX.
-      </p>
+    <div style={s.listGrid}>
+      {osList.map(os => (
+        <div key={os.id} style={s.tabCard}>
+          <div style={s.tabCardHeader}>
+            <strong>O.S. #{os.numero}</strong>
+            <span style={{ ...s.statusChip, ...(os.status === 'CONCLUIDA' ? s.statusGreen : s.statusYellow) }}>
+              {os.status}
+            </span>
+          </div>
+          <p><strong>Abertura:</strong> {formatDate(os.dataAbertura)}</p>
+          {os.dataFechamento && <p><strong>Fechamento:</strong> {formatDate(os.dataFechamento)}</p>}
+          <div style={s.tabCardBody}>
+            <p><strong>Defeito:</strong> {os.defeito || 'Não informado'}</p>
+            <p><strong>Solução:</strong> {os.solucao || 'Não informado'}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ContractsTab({ contracts }) {
+  if (!contracts || contracts.length === 0) {
+    return (
+      <div style={s.osEmpty}>
+        <FileText size={28} />
+        <h3>Nenhum contrato</h3>
+        <p>Este cliente não possui contratos registrados.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={s.listGrid}>
+      {contracts.map(contract => (
+        <div key={contract.id} style={s.tabCard}>
+          <div style={s.tabCardHeader}>
+            <strong>Contrato #{contract.numero}</strong>
+            <span style={{ ...s.statusChip, ...(contract.status === 'ATIVO' ? s.statusGreen : s.statusRed) }}>
+              {contract.status}
+            </span>
+          </div>
+          <p><strong>Início:</strong> {formatDate(contract.dataInicial)}</p>
+          <p><strong>Fim:</strong> {formatDate(contract.dataFinal)}</p>
+          <p><strong>Valor Mensal:</strong> {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(contract.valorFixoMensal || 0)}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FinanceTab({ boletos }) {
+  if (!boletos || boletos.length === 0) {
+    return (
+      <div style={s.osEmpty}>
+        <DollarSign size={28} />
+        <h3>Nenhum histórico financeiro</h3>
+        <p>Não há contas a receber ou boletos recentes para este cliente.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={s.listGrid}>
+      {boletos.map(boleto => {
+        const isPaid = boleto.status === 'PAGA' || boleto.status === 'PAGO';
+        const isLate = boleto.status === 'ATRASADA' || boleto.status === 'ATRASADO';
+        const statusStyle = isPaid ? s.statusGreen : (isLate ? s.statusRed : s.statusYellow);
+
+        return (
+          <div key={boleto.id} style={s.tabCard}>
+            <div style={s.tabCardHeader}>
+              <strong>Doc: {boleto.nossoNumero || 'N/A'}</strong>
+              <span style={{ ...s.statusChip, ...statusStyle }}>
+                {boleto.status}
+              </span>
+            </div>
+            <p><strong>Vencimento:</strong> {formatDate(boleto.dataVencimento)}</p>
+            <p style={s.cardValue}>
+              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(boleto.valor || 0)}
+            </p>
+            {boleto.urlPdf && (
+              <a href={boleto.urlPdf} target="_blank" rel="noreferrer" style={s.downloadBtn}>
+                <Download size={14} /> Visualizar PDF
+              </a>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -446,6 +545,16 @@ const s = {
   equipmentCard: { display: 'grid', gap: '0.25rem', textAlign: 'left', background: 'var(--bg-base)', color: 'var(--text-main)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '0.9rem', cursor: 'pointer' },
   activeEquipmentCard: { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(220, 180, 48, 0.2) inset' },
   equipmentDetail: { background: 'rgba(8, 12, 22, 0.38)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '1rem' },
+  listGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem', marginTop: '0.5rem' },
+  tabCard: { display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '1.25rem', transition: 'transform 0.16s ease, border-color 0.16s ease' },
+  tabCardHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.5rem' },
+  tabCardBody: { background: 'var(--bg-surface)', padding: '0.75rem', borderRadius: '10px', marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' },
+  statusChip: { display: 'inline-flex', alignItems: 'center', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' },
+  statusGreen: { background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' },
+  statusYellow: { background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' },
+  statusRed: { background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' },
+  cardValue: { fontSize: '1.35rem', fontWeight: 900, color: 'var(--text-main)', margin: '0.5rem 0' },
+  downloadBtn: { display: 'inline-flex', alignItems: 'center', gap: '0.4rem', alignSelf: 'flex-start', padding: '0.5rem 0.8rem', background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 800, textDecoration: 'none', marginTop: '0.5rem' },
   rawPanel: { display: 'grid', gap: '0.9rem' },
   rawCompact: { marginTop: '1rem', display: 'grid', gap: '0.75rem' },
   rawTable: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.65rem' },

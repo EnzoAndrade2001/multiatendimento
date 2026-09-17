@@ -10,6 +10,9 @@ export const BACKEND_URL = import.meta.env.VITE_API_URL || (isProductionCrm ? DE
 const BASE_URL = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 const api = axios.create({ baseURL: BASE_URL });
 
+export const LCD_API_URL = import.meta.env.VITE_LCD_API_URL || 'http://localhost:3001/api';
+const lcdApi = axios.create({ baseURL: LCD_API_URL });
+
 export const getMediaUrl = (url) => {
   if (!url) return '';
   if (typeof url !== 'string') return '';
@@ -170,7 +173,7 @@ export const deleteContact = (id) => api.delete(`/contacts/${id}`);
 // CRM Firebird
 export const getCrmSummary = () => api.get('/crm/summary');
 export const getCrmCustomers = (params = {}) => api.get('/crm/customers', { params });
-export const getCrmCustomer = (id) => api.get(`/crm/customers/${id}`);
+export const getCrmCustomer = (id) => lcdApi.get(`/clientes/${id}/360`); // Usando o LCDDIGITALWEB
 export const getCrmEquipments = (params = {}) => api.get('/crm/equipments', { params });
 
 export default api;
