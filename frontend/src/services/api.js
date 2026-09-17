@@ -1,10 +1,9 @@
 import axios from 'axios';
 
-// BACKEND_URL é determinado em tempo de BUILD pelo VITE_API_URL do container.
-// Cada container (easypanel ou domínio customizado) tem seu próprio valor configurado.
-// NÃO usar window.location em runtime para evitar bugs de cache e fallback incorreto.
-const DEFAULT_PRODUCTION_API_URL = 'https://api-crm.lcddigital.com.br';
-export const BACKEND_URL = import.meta.env.VITE_API_URL || DEFAULT_PRODUCTION_API_URL;
+// BACKEND_URL vem do VITE_API_URL configurado no container Easypanel em build-time.
+// Em desenvolvimento o Vite faz proxy de /api → localhost:3002, então BACKEND_URL fica vazio.
+// NUNCA usar um domínio hardcoded de fallback — cada ambiente tem seu próprio VITE_API_URL.
+export const BACKEND_URL = import.meta.env.VITE_API_URL || '';
 
 const BASE_URL = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 const api = axios.create({ baseURL: BASE_URL });
