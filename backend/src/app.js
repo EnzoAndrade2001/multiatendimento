@@ -360,17 +360,23 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3002;
+const MIGRATION_STANDBY_MODE = String(process.env.MIGRATION_STANDBY_MODE || '').toLowerCase() === 'true';
 server.listen(PORT, () => {
   console.log(`[server] rodando na porta ${PORT}`);
   console.log(`[server] boot=${new Date(bootAt).toISOString()} pid=${process.pid}`);
-  scheduleProcessor.start();
-  require('./services/attendanceOperationsService').start(io);
-  campaignProcessor.start();
-  printGuardScheduler.start();
-  instanceHealthService.start();
+  if (MIGRATION_STANDBY_MODE) {
+    console.warn('[server] MIGRATION_STANDBY_MODE ativo: processadores, health-checks e sincronizacao de webhooks desativados.');
+  } else {
+    scheduleProcessor.start();
+    require('./services/attendanceOperationsService').start(io);
+    campaignProcessor.start();
+    printGuardScheduler.start();
+    instanceHealthService.start();
+  }
 
   // Auto-correção de URLs da Evolution inválidas (ex: contendo '@' ou emails)
   (async () => {
+    if (MIGRATION_STANDBY_MODE) return;
     try {
       const prisma = require('./lib/prisma');
       const { ensureProductCatalog } = require('./services/productCatalogSeedService');
