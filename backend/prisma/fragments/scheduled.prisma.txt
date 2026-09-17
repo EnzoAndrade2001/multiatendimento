@@ -1,0 +1,14 @@
+// Add these fields inside model ScheduledMessage (no new relations required).
+  instanceId        String?
+  status            String    @default("queued")
+  attempts          Int       @default(0)
+  nextAttemptAt     DateTime?
+  claimedAt         DateTime?
+  claimToken        String?
+  sentAt            DateTime?
+  lastError         String?
+  providerMessageId String?
+  deliveryUncertain Boolean   @default(false)
+
+  @@index([status, sendAt, nextAttemptAt])
+  @@index([tenantId, contactId, sendAt])

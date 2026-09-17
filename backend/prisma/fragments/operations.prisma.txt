@@ -1,0 +1,22 @@
+// Add to Tenant:
+// attendancePolicy AttendancePolicy?
+// Add to User:
+// attendanceAvailable Boolean @default(false)
+// attendanceHeartbeatAt DateTime?
+// Add to Ticket:
+// slaPolicyKey String?
+// slaWarnedAt DateTime?
+// slaBreachedAt DateTime?
+
+model AttendancePolicy {
+  id String @id @default(cuid())
+  tenantId String @unique
+  slaEnabled Boolean @default(false)
+  assignmentEnabled Boolean @default(false)
+  redistributeUnavailable Boolean @default(false)
+  maxActiveTickets Int @default(10)
+  unavailableMinutes Int @default(5)
+  rules Json @default("[]")
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}

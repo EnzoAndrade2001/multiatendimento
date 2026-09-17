@@ -1,0 +1,32 @@
+// Add `attendanceTasks AttendanceTask[]` to Tenant, Team, Contact, Ticket, ServiceOrder.
+// Add to User:
+// assignedAttendanceTasks AttendanceTask[] @relation("TaskAssignee")
+// createdAttendanceTasks AttendanceTask[] @relation("TaskCreator")
+model AttendanceTask {
+  id             String    @id @default(cuid())
+  tenantId       String
+  title          String
+  description    String?   @db.Text
+  kind           String    @default("task")
+  status         String    @default("open")
+  dueAt          DateTime?
+  completedAt    DateTime?
+  assigneeId     String
+  createdById    String
+  teamId         String?
+  contactId      String?
+  ticketId       String?
+  serviceOrderId String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee       User     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy      User     @relation("TaskCreator", fields: [createdById], references: [id])
+  team           Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  ticket         Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, assigneeId, status, dueAt])
+  @@index([tenantId, teamId, status, dueAt])
+}
