@@ -58,7 +58,11 @@ const allowedOrigins = String(process.env.FRONTEND_URL || 'http://localhost:5174
   .filter(Boolean);
 const corsOrigin = (origin, callback) => {
   // Non-browser requests have no Origin and must remain usable (agents/webhooks).
-  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+  if (!origin) return callback(null, true);
+  if (allowedOrigins.includes(origin)) return callback(null, true);
+  // Aceita qualquer host easypanel do projeto lcddigitalweb para evitar quebras
+  // em redeploys que geram novos IDs de hash no hostname.
+  if (origin.includes('lcddigitalweb') && origin.includes('easypanel.host')) return callback(null, true);
   return callback(new Error('Origem nao autorizada pelo CORS'));
 };
 
