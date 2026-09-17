@@ -296,7 +296,7 @@ export default function Connections() {
                               : connectionView.key === 'wrong_number' ? 'A sessão conectou num número diferente do cadastrado. Alguém leu o QR com o aparelho errado — recrie a sessão e leia o QR com o telefone certo.'
                                 : 'A Evolution não respondeu à última verificação.')}
                       </div>
-                      {connectionView.key === 'wrong_number' && !isOfficial ? (
+                      {(connectionView.key === 'wrong_number' || connectionView.key === 'degraded') && !isOfficial ? (
                         <div style={s.disconnectedActions}>
                           <button style={s.repairBtn} disabled={repairingId === inst.id} onClick={() => handleRepair(inst)}>
                             <RotateCcw size={16} /> {repairingId === inst.id ? 'Recriando...' : 'Recriar sessao'}
