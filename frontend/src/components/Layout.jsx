@@ -572,10 +572,10 @@ export default function Layout() {
         </div>
       )}
 
-      {(!realtimeConnected || disconnectedInstances.length > 0) && (
+      {disconnectedInstances.length > 0 && (
         <div className="layout-connection-banner" style={{
-          backgroundColor: !realtimeConnected ? 'var(--warning, #F59E0B)' : 'var(--danger, #EF4444)',
-          color: !realtimeConnected ? '#17130A' : '#fff',
+          backgroundColor: 'var(--danger, #EF4444)',
+          color: '#fff',
           padding: '0.65rem 1rem',
           textAlign: 'center',
           fontWeight: 700,
@@ -588,6 +588,25 @@ export default function Layout() {
           boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)'
         }}>
           ⚠️ Atenção: Você tem {disconnectedInstances.length === 1 ? 'uma conexão do WhatsApp desconectada' : `${disconnectedInstances.length} conexões do WhatsApp desconectadas`}! Clique em "Conexões" no menu para reconectar e voltar a receber mensagens.
+        </div>
+      )}
+
+      {!realtimeConnected && (
+        <div className="layout-connection-banner" style={{
+          backgroundColor: 'var(--warning, #F59E0B)',
+          color: '#17130A',
+          padding: '0.65rem 1rem',
+          textAlign: 'center',
+          fontWeight: 700,
+          fontSize: isMobile ? '0.8rem' : '0.9rem',
+          zIndex: 90,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 'var(--space-2)',
+          boxShadow: '0 4px 12px rgba(245, 158, 11, 0.2)'
+        }}>
+          ⚠️ Reconectando ao servidor em tempo real...
         </div>
       )}
 
