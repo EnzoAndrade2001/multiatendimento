@@ -11,7 +11,9 @@ const { getLatestCompanyProfile } = require('../services/companyProfileService')
 const { parseFirebirdDate } = require('../utils/firebirdDate');
 const {
   createServiceOrderInIluxWeb,
+  getCompanyProfileFromIluxWeb,
   isIluxWebConfigured,
+  listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
@@ -30,6 +32,15 @@ const ILUX_WEB_EQUIPMENT_SOURCES = new Set([
   'iluxweb',
   'lcddigitalweb',
 ]);
+
+const CRM_EXTERNAL_SOURCES = [
+  'firebird',
+  'LCDDIGITALWEB',
+  'ilux_web',
+  'ilux-web',
+  'iluxweb',
+  'lcddigitalweb',
+];
 
 function isIluxWebEquipment(equipment) {
   const source = String(equipment?.externalSource || '').trim().toLowerCase();
@@ -763,7 +774,7 @@ async function generatePdf(req, res) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           externalId: clientData.externalId
         }
       });
@@ -773,7 +784,7 @@ async function generatePdf(req, res) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           cpfCnpj: clientData.cpfCnpj
         }
       });
@@ -783,7 +794,7 @@ async function generatePdf(req, res) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           name: { contains: clientData.name.trim(), mode: 'insensitive' }
         }
       });
@@ -793,13 +804,37 @@ async function generatePdf(req, res) {
       crmEquipment = await prisma.crmEquipment.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           externalId: os.equipment.externalId
         }
       });
     }
   } catch (err) {
     console.error('[generatePdf] erro ao buscar dados estruturados adicionais:', err);
+  }
+
+  // O PDF deve refletir a mesma O.S. oficial que o ILUX WEB exibe. O contato
+  // do CRM pode ter externalId de WhatsApp; para consultar o ILUX usamos
+  // sempre o cliente sincronizado e guardamos a resposta para o histórico.
+  let iluxWebOrders = [];
+  let iluxWebOrder = null;
+  let iluxWebCompany = null;
+  try {
+    if (isIluxWebConfigured()) {
+      const iluxCustomerExternalId = String(
+        crmCustomer?.externalId
+        || os.contact.crmCustomer?.externalId
+        || ''
+      ).trim();
+      if (iluxCustomerExternalId) {
+        const result = await listServiceOrdersFromIluxWeb(iluxCustomerExternalId, { limit: 250 });
+        iluxWebOrders = Array.isArray(result?.items) ? result.items : [];
+        iluxWebOrder = iluxWebOrders.find((item) => String(item?.externalId || item?.numero || '') === String(os.externalId)) || null;
+      }
+      iluxWebCompany = await getCompanyProfileFromIluxWeb();
+    }
+  } catch (err) {
+    console.error('[generatePdf] erro ao carregar dados oficiais do ILUX WEB:', err);
   }
 
   let osPrintData = null;
@@ -836,18 +871,22 @@ async function generatePdf(req, res) {
 
     const normalizeHistoryItem = (item) => {
       const raw = item?.raw && typeof item.raw === 'object' ? item.raw : item || {};
+      const openedAt = item?.openedAt || item?.dataAbertura || item?.createdAt || item?.updatedAt || raw.dtinclusao || null;
+      const openedAtTime = openedAt && !raw.hrinclusao
+        ? new Date(openedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        : '';
       return {
         externalId: String(item?.externalId || raw.seqos || ''),
-        createdAt: item?.createdAt || item?.updatedAt || raw.dtinclusao || null,
-        time: raw.hrinclusao || '',
-        osType: raw.nmostp || item?.osType || '',
-        equipmentExternalId: String(item?.equipmentExternalId || raw.cdequipamento || ''),
+        createdAt: openedAt,
+        time: raw.hrinclusao || item?.time || openedAtTime,
+        osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
+        equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
         attendant: raw.nmsuportea || item?.attendant || '',
-        status: item?.status || raw.nmstatus || raw.status || '',
-        defect: item?.defect || raw.obsdefeitocli || '',
+        status: item?.statusLabel || item?.status || raw.nmstatus || raw.status || '',
+        defect: item?.defect || item?.description || raw.obsdefeitocli || '',
         closing: item?.closing || item?.observacao || raw.obsdefeitoats || '',
         closedBy: raw.usuario_fechamento || raw.nmsuportel || raw.nmsuportet || '',
-        technician: item?.nmSuporteT || raw.nmsuportet || raw.nmsuportel || '',
+        technician: item?.technician || item?.nmSuporteT || raw.nmsuportet || raw.nmsuportel || '',
       };
     };
 
@@ -855,10 +894,15 @@ async function generatePdf(req, res) {
       previousOrders = osPrintData.history.map(normalizeHistoryItem);
     }
 
+    if (iluxWebOrders.length > 0) {
+      previousOrders = [...previousOrders, ...iluxWebOrders.map(normalizeHistoryItem)];
+    }
+
     const clientExternalId = String(
       osPrintData?.serviceOrder?.cdcliente
-      || os.contact.externalId
       || crmCustomer?.externalId
+      || os.contact.crmCustomer?.externalId
+      || os.contact.externalId
       || ''
     );
     if (previousOrders.length === 0 && clientExternalId) {
@@ -874,9 +918,17 @@ async function generatePdf(req, res) {
       previousOrders = syncedHistory.map((item) => normalizeHistoryItem(item.payload));
     }
 
-    previousOrders = previousOrders
+    const uniqueOrders = new Map();
+    for (const item of previousOrders) {
+      if (item.externalId && !uniqueOrders.has(item.externalId)) uniqueOrders.set(item.externalId, item);
+    }
+    previousOrders = [...uniqueOrders.values()]
       .filter((item) => item.externalId && item.externalId !== String(os.externalId || ''))
-      .sort((left, right) => Number(right.externalId || 0) - Number(left.externalId || 0))
+      .sort((left, right) => {
+        const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
+        if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
+        return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
+      })
       .slice(0, 5);
   } catch (err) {
     console.error('[generatePdf] erro ao carregar histórico do ILUX WEB:', err);
@@ -935,11 +987,12 @@ async function generatePdf(req, res) {
     const firebirdCompany = {
       ...(cachedCompanyProfile || {}),
       ...(osPrintData?.company || {}),
+      ...(iluxWebCompany || {}),
     };
     const firstValue = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
     const joinAddress = (record = {}) => {
       const full = firstValue(record.addressFull);
-      const base = full || firstValue(record.endereco, record.address);
+      const base = full || firstValue(record.endereco, record.address, record.logradouro);
       return [
         base,
         full ? null : firstValue(record.num, record.numero),
@@ -962,17 +1015,18 @@ async function generatePdf(req, res) {
     // identidade de outra empresa em O.S. de tenants sem cadastro sincronizado.
     // Sem dado, os campos ficam vazios; so nome/marca usam o nome do tenant.
     const tenantName = firstValue(settings?.companyName, os.tenant?.name);
+    const officialCompany = iluxWebCompany || {};
     const company = {
-      brand: firstValue(firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
-      name: firstValue(firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
-      cnpj: firstValue(firebirdCompany.cnpj, settings?.companyCnpj),
-      ie: firstValue(firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
-      address: firstValue(joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
-      bairro: firstValue(firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
-      cep: firstValue(firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
-      city: firstValue(firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
-      state: firstValue(firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
-      phone: firstValue(joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
+      brand: firstValue(officialCompany.nomeFantasia, officialCompany.razaoSocial, firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.nomeFantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
+      name: firstValue(officialCompany.razaoSocial, firebirdCompany.nmempresa, firebirdCompany.name, firebirdCompany.razaoSocial, tenantName, 'Empresa'),
+      cnpj: firstValue(officialCompany.cnpj, firebirdCompany.cnpj, settings?.companyCnpj),
+      ie: firstValue(officialCompany.inscricaoEstadual, firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
+      address: firstValue(joinAddress(officialCompany), joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
+      bairro: firstValue(officialCompany.bairro, firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
+      cep: firstValue(officialCompany.cep, firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
+      city: firstValue(officialCompany.cidade, firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
+      state: firstValue(officialCompany.uf, firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
+      phone: firstValue(officialCompany.telefone, joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
     };
     // firstValue devolve undefined quando nada preenche; normaliza para string
     // vazia para nao imprimir "undefined" no cabecalho.
@@ -983,8 +1037,8 @@ async function generatePdf(req, res) {
     company.cityLine = [company.city, company.state && `(${company.state})`].filter(Boolean).join(' ');
 
     // Identificação do atendente com fallback para o usuário atual que está gerando o documento
-    let attendantName = firstValue(firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
-    if ((attendantName === 'N/A' || !os.user) && req.user?.userId) {
+    let attendantName = firstValue(iluxWebOrder?.attendant, firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
+    if ((attendantName === 'N/A' || (!os.user && !iluxWebOrder?.attendant)) && req.user?.userId) {
       const activeUser = await prisma.user.findUnique({
         where: { id: req.user.userId }
       });
@@ -1007,6 +1061,9 @@ async function generatePdf(req, res) {
       } else {
         displayOsType = `TIPO ${os.cdOstp}`;
       }
+    }
+    if (iluxWebOrder?.type || iluxWebOrder?.tipoAtendimento) {
+      displayOsType = firstValue(iluxWebOrder.type, iluxWebOrder.tipoAtendimento, displayOsType);
     }
 
     const printAttendances = Array.isArray(osPrintData?.attendances) ? osPrintData.attendances : [];
@@ -1094,58 +1151,81 @@ async function generatePdf(req, res) {
         ]];
 
     const currentPrintOrder = firebirdOrder;
+    const iluxOrderData = iluxWebOrder || {};
     const firstPrintAttendance = printAttendances[0] || {};
     const timeText = (value) => {
       if (!value) return '';
       const match = String(value).match(/(\d{2}:\d{2})/);
       return match ? match[1] : String(value);
     };
-    const visitDate = formatHistoryDate(
-      lastPrintAttendance.dtatendimento || lastPrintAttendance.datahora || currentPrintOrder.dtatendimento || ''
+    const localTimeFromDate = (value) => {
+      if (!value) return '';
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime())
+        ? ''
+        : parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    };
+    const iluxOpenedDate = iluxOrderData.openedAt ? formatHistoryDate(iluxOrderData.openedAt) : '';
+    const iluxOpenedTime = localTimeFromDate(iluxOrderData.openedAt);
+    const visitDate = (() => {
+      const legacyDate = lastPrintAttendance.dtatendimento || lastPrintAttendance.datahora || currentPrintOrder.dtatendimento || '';
+      return legacyDate ? formatHistoryDate(legacyDate) : (iluxOpenedDate || '');
+    })();
+    const visitStart = firstValue(timeText(firstPrintAttendance.hratendimento || firstPrintAttendance.datahora), iluxOpenedTime, '');
+    const visitEnd = firstValue(timeText(lastPrintAttendance.hratendimentofin || lastPrintAttendance.hratendimento1), iluxOpenedTime, '');
+    const clientExternalId = firstValue(
+      iluxOrderData.clientCodigoLegado,
+      currentPrintOrder.cdcliente,
+      firebirdClient.cdcliente,
+      crmCustomer?.externalId,
+      os.contact.crmCustomer?.externalId,
+      os.contact.externalId,
+      'N/A',
     );
-    const visitStart = timeText(firstPrintAttendance.hratendimento || firstPrintAttendance.datahora);
-    const visitEnd = timeText(lastPrintAttendance.hratendimentofin || lastPrintAttendance.hratendimento1);
-    const clientExternalId = firstValue(currentPrintOrder.cdcliente, firebirdClient.cdcliente, os.contact.externalId, crmCustomer?.externalId, 'N/A');
-    const clientName = firstValue(currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
-    const clientAddress = firstValue(joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
-    const clientNeighborhood = firstValue(currentPrintOrder.bairro, firebirdClient.bairro, crmCustomer?.neighborhood, 'N/A');
-    const clientZipCode = firstValue(currentPrintOrder.cep, firebirdClient.cep, crmCustomer?.zipCode, clientData.zipCode, 'N/A');
-    const clientCity = firstValue(currentPrintOrder.cidade, firebirdClient.cidade, crmCustomer?.city, clientData.city, 'N/A');
-    const clientState = firstValue(currentPrintOrder.uf, firebirdClient.uf, crmCustomer?.state, clientData.state, 'N/A');
-    const clientDocument = firstValue(firebirdClient.cnpj, firebirdClient.cpf, crmCustomer?.cpfCnpj, clientData.cpfCnpj, 'N/A');
-    const clientStateRegistration = firstValue(firebirdClient.inscest, firebirdClient.inscmun, 'N/A');
-    const clientContact = firstValue(currentPrintOrder.contato, firebirdClient.contato, crmCustomer?.contactName, solicitante, 'N/A');
-    const primaryClientPhone = firstValue(joinPhone(currentPrintOrder), joinPhone(firebirdClient), crmCustomer?.phone, os.contact.phone, 'N/A');
+    const clientName = firstValue(iluxOrderData.clientName, currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
+    const clientAddress = firstValue(iluxOrderData.clientAddress, joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
+    const clientNeighborhood = firstValue(iluxOrderData.clientNeighborhood, currentPrintOrder.bairro, firebirdClient.bairro, crmCustomer?.neighborhood, 'N/A');
+    const clientZipCode = firstValue(iluxOrderData.clientZipCode, currentPrintOrder.cep, firebirdClient.cep, crmCustomer?.zipCode, clientData.zipCode, 'N/A');
+    const clientCity = firstValue(iluxOrderData.clientCity, currentPrintOrder.cidade, firebirdClient.cidade, crmCustomer?.city, clientData.city, 'N/A');
+    const clientState = firstValue(iluxOrderData.clientState, currentPrintOrder.uf, firebirdClient.uf, crmCustomer?.state, clientData.state, 'N/A');
+    const clientDocument = firstValue(iluxOrderData.clientDocument, firebirdClient.cnpj, firebirdClient.cpf, crmCustomer?.cpfCnpj, clientData.cpfCnpj, 'N/A');
+    const clientStateRegistration = firstValue(iluxOrderData.clientStateRegistration, firebirdClient.inscest, firebirdClient.inscmun, 'N/A');
+    const clientContact = firstValue(iluxOrderData.clientContact, currentPrintOrder.contato, firebirdClient.contato, crmCustomer?.contactName, solicitante, 'N/A');
+    const primaryClientPhone = firstValue(iluxOrderData.clientPhone, joinPhone(currentPrintOrder), joinPhone(firebirdClient), crmCustomer?.phone, os.contact.phone, 'N/A');
     const clientCellPhone = currentPrintOrder.celular && !String(primaryClientPhone).includes(String(currentPrintOrder.celular))
       ? String(currentPrintOrder.celular)
       : '';
     const clientPhone = [primaryClientPhone, clientCellPhone].filter(Boolean).join(' ');
-    const equipmentExternalId = firstValue(currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
-    const equipmentModel = firstValue(firebirdEquipment.modelo, os.equipment.model, 'N/A');
-    const equipmentSerial = firstValue(firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
-    const equipmentAsset = firstValue(firebirdEquipment.patrimonio, 'N/A');
-    const contractType = firstValue(firebirdContract.cdcontratotp, firebirdEquipment.cdcontratotp, 'N/A');
-    const territory = firstValue(firebirdEquipment.cdterritorio, currentPrintOrder.cdterritorio, 'N/A');
+    const equipmentExternalId = firstValue(iluxOrderData.equipmentExternalId, currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
+    const equipmentModel = firstValue(iluxOrderData.equipmentModel, firebirdEquipment.modelo, os.equipment.model, 'N/A');
+    const equipmentSerial = firstValue(iluxOrderData.serialNumber, firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
+    const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, 'N/A');
+    const contractType = firstValue(iluxOrderData.contractType, firebirdContract.cdcontratotp, firebirdEquipment.cdcontratotp, 'N/A');
+    const territory = firstValue(iluxOrderData.territory, firebirdEquipment.cdterritorio, currentPrintOrder.cdterritorio, 'N/A');
     const department = currentPrintOrder.departamento
       || firebirdEquipment.departamento
+      || iluxOrderData.equipmentDepartment
       || crmEquipment?.raw?.departamento
       || crmEquipment?.raw?.DEPARTAMENTO
       || os.equipment.sector
       || 'N/A';
     const installLocation = currentPrintOrder.localinstal
       || firebirdEquipment.localinstal
+      || iluxOrderData.equipmentLocation
       || crmEquipment?.installLocation
       || crmEquipment?.raw?.localinstal
       || crmEquipment?.raw?.LOCALINSTAL
       || os.equipment.sector
       || 'N/A';
-    const currentOsDate = currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : dataOS;
-    const currentOsTime = timeText(currentPrintOrder.hrinclusao) || horaOS;
-    const currentTechnician = firstValue(currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
-    const currentDefect = firstValue(currentPrintOrder.obsdefeitocli, os.defect, '');
+    const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
+    const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
+    const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
+    const currentDefect = firstValue(iluxOrderData.defect, iluxOrderData.description, currentPrintOrder.obsdefeitocli, os.defect, '');
     const currentFollowUp = [currentPrintOrder.obsdefeitoats, followUpText].filter(Boolean).join('\n');
     const checkbox = (checked, label) => `${checked ? '[X]' : '[ ]'} ${label}`;
-    const isAttendance = ['A', 'ATENDIMENTO'].includes(String(currentPrintOrder.tporcatend || 'A').toUpperCase());
+    const isAttendance = iluxWebOrder
+      ? ['A', 'ATENDIMENTO'].includes(String(iluxOrderData.attendanceType || '').toUpperCase())
+      : ['A', 'ATENDIMENTO'].includes(String(currentPrintOrder.tporcatend || 'A').toUpperCase());
     const isWarranty = ['G', 'GARANTIA'].includes(String(currentPrintOrder.tpchamado || '').toUpperCase());
     const isBudget = ['2', 'O', 'ORCAMENTO'].includes(String(currentPrintOrder.tipo_os || '').toUpperCase());
 

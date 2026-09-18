@@ -1,5 +1,6 @@
 const DEFAULT_SYNC_PATH = '/api/assistencia/os/sincronizar-lcd';
 const DEFAULT_ORDERS_PATH = '/api/assistencia/os/integracao-crm/clientes';
+const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
 const REQUEST_TIMEOUT_MS = Math.max(
   5000,
   Number.parseInt(process.env.ILUX_WEB_REQUEST_TIMEOUT_MS, 10) || 30000,
@@ -90,8 +91,16 @@ async function listServiceOrdersFromIluxWeb(customerExternalId, { limit = 100 } 
   };
 }
 
+async function getCompanyProfileFromIluxWeb() {
+  if (!isIluxWebConfigured()) return null;
+  const path = process.env.ILUX_WEB_COMPANY_PATH || DEFAULT_COMPANY_PATH;
+  const data = await requestJson(path, { method: 'GET' });
+  return data?.empresa || data || null;
+}
+
 module.exports = {
   createServiceOrderInIluxWeb,
+  getCompanyProfileFromIluxWeb,
   isIluxWebConfigured,
   listServiceOrdersFromIluxWeb,
 };
