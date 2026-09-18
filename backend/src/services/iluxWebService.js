@@ -1,6 +1,7 @@
 const DEFAULT_SYNC_PATH = '/api/assistencia/os/sincronizar-lcd';
 const DEFAULT_ORDERS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
+const DEFAULT_DEFECT_TYPES_PATH = '/api/assistencia/os/integracao-crm/tipos-defeito';
 const REQUEST_TIMEOUT_MS = Math.max(
   5000,
   Number.parseInt(process.env.ILUX_WEB_REQUEST_TIMEOUT_MS, 10) || 30000,
@@ -98,9 +99,25 @@ async function getCompanyProfileFromIluxWeb() {
   return data?.empresa || data || null;
 }
 
+async function listDefectTypesFromIluxWeb() {
+  if (!isIluxWebConfigured()) return [];
+  const path = process.env.ILUX_WEB_DEFECT_TYPES_PATH || DEFAULT_DEFECT_TYPES_PATH;
+  const data = await requestJson(path, { method: 'GET' });
+  const items = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : []);
+  return items
+    .map((item) => ({
+      id: String(item?.id || item?.code || '').trim(),
+      code: String(item?.code || '').trim().toUpperCase(),
+      name: String(item?.name || item?.label || '').trim(),
+      inactive: Boolean(item?.inactive),
+    }))
+    .filter((item) => item.code && item.name && !item.inactive);
+}
+
 module.exports = {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
   isIluxWebConfigured,
+  listDefectTypesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 };

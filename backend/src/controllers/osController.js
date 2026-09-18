@@ -13,6 +13,7 @@ const {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
   isIluxWebConfigured,
+  listDefectTypesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
 
@@ -41,6 +42,11 @@ const CRM_EXTERNAL_SOURCES = [
   'iluxweb',
   'lcddigitalweb',
 ];
+
+function cleanLegacyDefect(value) {
+  const text = String(value || '').trim();
+  return text.replace(/^\s*\[Defeito\s+[^\]]+\]\s*/i, '').trim();
+}
 
 function isIluxWebEquipment(equipment) {
   const source = String(equipment?.externalSource || '').trim().toLowerCase();
@@ -397,7 +403,7 @@ async function createOS(req, res) {
     }
     const normalizedRequestKey = String(requestKey).trim().slice(0, 120);
 
-    const [ticket, contact, equipment, osType, defectType] = await Promise.all([
+    const [ticket, contact, equipment, osType, iluxDefectTypes] = await Promise.all([
       prisma.ticket.findFirst({ where: { id: ticketId, tenantId } }),
       prisma.contact.findFirst({
         where: { id: contactId, tenantId },
@@ -405,8 +411,9 @@ async function createOS(req, res) {
       }),
       prisma.equipment.findFirst({ where: { id: equipmentId, tenantId } }),
       prisma.crmOsType.findFirst({ where: { tenantId, code: String(cdOstp) } }),
-      prisma.crmDefectType.findFirst({ where: { tenantId, code: String(cdDefeito), inactive: false } }),
+      listDefectTypesFromIluxWeb(),
     ]);
+    const defectType = iluxDefectTypes.find((item) => item.code === String(cdDefeito).trim().toUpperCase());
 
     if (!ticket || ticket.contactId !== contactId) {
       return res.status(400).json({ error: 'O ticket não pertence ao cliente informado.' });
@@ -670,13 +677,10 @@ async function getOSTechnicians(req, res) {
 
 async function getOSDefectTypes(req, res) {
   try {
-    const types = await prisma.crmDefectType.findMany({
-      where: { tenantId: req.user.tenantId, inactive: false },
-      orderBy: [{ name: 'asc' }, { code: 'asc' }],
-    });
+    const types = await listDefectTypesFromIluxWeb();
     res.json(types);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: `Não foi possível carregar os tipos de defeito do ILUX WEB: ${err.message}` });
   }
 }
 
@@ -885,7 +889,7 @@ async function generatePdf(req, res) {
         equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
         attendant: raw.nmsuportea || item?.attendant || '',
         status,
-        defect: item?.defect || item?.description || raw.obsdefeitocli || '',
+        defect: cleanLegacyDefect(item?.defect || item?.description || raw.obsdefeitocli || ''),
         closing: item?.closing || item?.observacao || raw.obsdefeitoats || '',
         closedBy: raw.usuario_fechamento || raw.nmsuportel || raw.nmsuportet || item?.closedBy || (isClosed ? item?.technician : '') || '',
         technician: item?.technician || item?.nmSuporteT || raw.nmsuportet || raw.nmsuportel || '',
@@ -1221,7 +1225,19 @@ async function generatePdf(req, res) {
     const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
     const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
     const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
-    const currentDefect = firstValue(iluxOrderData.defect, iluxOrderData.description, currentPrintOrder.obsdefeitocli, os.defect, '');
+    const defectTypeName = firstValue(
+      iluxOrderData.defectTypeName,
+      iluxOrderData.defeitoTipoNome,
+      iluxOrderData.defectType?.name,
+      '',
+    );
+    const currentDefect = cleanLegacyDefect(firstValue(
+      iluxOrderData.defect,
+      iluxOrderData.description,
+      currentPrintOrder.obsdefeitocli,
+      os.defect,
+      '',
+    ));
     const currentFollowUp = [currentPrintOrder.obsdefeitoats, followUpText].filter(Boolean).join('\n');
     const checkbox = (checked, label) => `${checked ? '[X]' : '[ ]'} ${label}`;
     const isAttendance = iluxWebOrder
@@ -1230,7 +1246,9 @@ async function generatePdf(req, res) {
     const isWarranty = ['G', 'GARANTIA'].includes(String(currentPrintOrder.tpchamado || '').toUpperCase());
     const isBudget = ['2', 'O', 'ORCAMENTO'].includes(String(currentPrintOrder.tipo_os || '').toUpperCase());
 
-    const symptom = [...printAttendances].reverse().find((item) => item.sintoma)?.sintoma || '';
+    const symptom = iluxWebOrder
+      ? firstValue(iluxOrderData.symptom, iluxOrderData.sintoma, '')
+      : ([...printAttendances].reverse().find((item) => item.sintoma)?.sintoma || '');
     const meterAttendance = firstPrintAttendance;
     let logoDataUri = '';
     try {
@@ -1308,6 +1326,7 @@ async function generatePdf(req, res) {
         meterValue: meterAttendance.medidor ?? 0,
       },
       defect: currentDefect,
+      defectTypeName,
       symptom,
       cause: lastPrintAttendance.causa || '',
       action: lastPrintAttendance.acao || '',
@@ -1452,7 +1471,8 @@ async function generatePdf(req, res) {
             stack: [
               { text: `Data Visita: ${visitDate === '-' ? '' : visitDate}    Hora Inicial: ${visitStart}    Hora Final: ${visitEnd}`, bold: true, fontSize: 6.5 },
               { text: `Medidor 01: ${attendanceMeterCode}    Contador Medidor 01: ${lastPrintAttendance.medidor ?? (iluxWebOrder ? 0 : '')}`, bold: true, fontSize: 6.5 },
-              { text: [{ text: 'Defeito:   ', bold: true, fontSize: 7 }, { text: currentDefect, fontSize: 11 }], margin: [0, 9, 0, 4] },
+              { text: [{ text: 'Tipo de defeito: ', bold: true, fontSize: 7 }, { text: defectTypeName, fontSize: 7 }], margin: [0, 4, 0, 2] },
+              { text: [{ text: 'Defeito:   ', bold: true, fontSize: 7 }, { text: currentDefect, fontSize: 11 }], margin: [0, 5, 0, 4] },
               { text: [{ text: 'Sintoma:   ', bold: true }, lastPrintAttendance.sintoma || ''], fontSize: 7, margin: [0, 2, 0, 2] },
               { text: [{ text: 'Causa:     ', bold: true }, lastPrintAttendance.causa || ''], fontSize: 7, margin: [0, 2, 0, 2] },
               { text: [{ text: 'Ação:      ', bold: true }, lastPrintAttendance.acao || ''], fontSize: 7, margin: [0, 2, 0, 4] },
@@ -1699,8 +1719,9 @@ async function generatePdf(req, res) {
               [
                 {
                   stack: [
-                    { text: `Defeito: ${os.defect || 'Nenhum defeito reportado'}`, style: 'boxContent' },
-                    { text: `\nSintoma: ${lastPrintAttendance.sintoma || ''}`, style: 'boxContent' },
+                    { text: `Tipo de defeito: ${defectTypeName || ''}`, style: 'boxContent' },
+                    { text: `\nDefeito: ${currentDefect || 'Nenhum defeito reportado'}`, style: 'boxContent' },
+                    { text: `\nSintoma: ${symptom || ''}`, style: 'boxContent' },
                     { text: `\nCausa: ${lastPrintAttendance.causa || ''}`, style: 'boxContent' },
                     { text: `\nAção: ${lastPrintAttendance.acao || ''}`, style: 'boxContent' }
                   ],

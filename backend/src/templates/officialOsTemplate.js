@@ -125,7 +125,7 @@ function renderOfficialOsTemplate(model) {
     .description td, .followup td { border-left-color: ${accent}; border-right-color: ${accent}; }
     .description { min-height: 29mm; }
     .technical-notes { margin-top: 5px; }
-    .technical-note { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: 8px; min-height: 24px; }
+    .technical-note { display: grid; grid-template-columns: 100px minmax(0, 1fr); column-gap: 8px; min-height: 24px; }
     .technical-note b { padding-top: 5px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
     .technical-note span { min-width: 0; font-size: 19px; line-height: 1.24; overflow-wrap: anywhere; }
     .followup { min-height: 8mm; }
@@ -193,6 +193,7 @@ function renderOfficialOsTemplate(model) {
       <span class="label">Data Visita:</span> ${text(model.visit.date, '')} &nbsp;&nbsp; <span class="label">Hora Inicial:</span> ${text(model.visit.start, '')} &nbsp;&nbsp; <span class="label">Hora Final:</span> ${text(model.visit.end, '')}<br>
       <span class="label">Medidor 01:</span> ${text(model.visit.meterCode, '')} &nbsp;&nbsp; <span class="label">Contador Medidor 01:</span> ${text(model.visit.meterValue, '0')}<br><br>
       <div class="technical-notes">
+        <div class="technical-note"><b>Tipo de defeito:</b><span>${multiline(model.defectTypeName)}</span></div>
         <div class="technical-note"><b>Defeito:</b><span>${multiline(model.defect)}</span></div>
         <div class="technical-note"><b>Sintoma:</b><span>${multiline(model.symptom)}</span></div>
         <div class="technical-note"><b>Causa:</b><span>${multiline(model.cause)}</span></div>

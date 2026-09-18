@@ -344,10 +344,10 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               ))}
             </select>
 
-            <label style={s.label}>DEFEITO REPORTADO (Extraído pela IA)</label>
+            <label style={s.label}>RELATO DO CLIENTE (Extraído pela IA)</label>
             <textarea
               style={{...s.input, minHeight: '100px', resize: 'vertical'}}
-              placeholder="Descreva o defeito relatado pelo cliente..."
+              placeholder="Descreva o problema relatado pelo cliente..."
               value={formData.defect}
               onChange={e => updateFormData({...formData, defect: e.target.value})}
             />
