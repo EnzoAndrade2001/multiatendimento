@@ -1017,16 +1017,16 @@ async function generatePdf(req, res) {
     const tenantName = firstValue(settings?.companyName, os.tenant?.name);
     const officialCompany = iluxWebCompany || {};
     const company = {
-      brand: firstValue(officialCompany.nomeFantasia, officialCompany.razaoSocial, firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.nomeFantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
-      name: firstValue(officialCompany.razaoSocial, firebirdCompany.nmempresa, firebirdCompany.name, firebirdCompany.razaoSocial, tenantName, 'Empresa'),
-      cnpj: firstValue(officialCompany.cnpj, firebirdCompany.cnpj, settings?.companyCnpj),
-      ie: firstValue(officialCompany.inscricaoEstadual, firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
-      address: firstValue(joinAddress(officialCompany), joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
-      bairro: firstValue(officialCompany.bairro, firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
-      cep: firstValue(officialCompany.cep, firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
-      city: firstValue(officialCompany.cidade, firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
-      state: firstValue(officialCompany.uf, firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
-      phone: firstValue(officialCompany.telefone, joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
+      brand: firstValue(officialCompany.printBrand, officialCompany.nomeFantasia, officialCompany.razaoSocial, firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.nomeFantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
+      name: firstValue(officialCompany.printName, officialCompany.razaoSocial, firebirdCompany.nmempresa, firebirdCompany.name, firebirdCompany.razaoSocial, tenantName, 'Empresa'),
+      cnpj: firstValue(officialCompany.printCnpj, officialCompany.cnpj, firebirdCompany.cnpj, settings?.companyCnpj),
+      ie: firstValue(officialCompany.printStateRegistration, officialCompany.inscricaoEstadual, firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
+      address: firstValue(officialCompany.printAddress, joinAddress(officialCompany), joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
+      bairro: firstValue(officialCompany.printNeighborhood, officialCompany.bairro, firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
+      cep: firstValue(officialCompany.printZipCode, officialCompany.cep, firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
+      city: firstValue(officialCompany.printCity, officialCompany.cidade, firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
+      state: firstValue(officialCompany.printState, officialCompany.uf, firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
+      phone: firstValue(officialCompany.printPhone, officialCompany.telefone, joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
     };
     // firstValue devolve undefined quando nada preenche; normaliza para string
     // vazia para nao imprimir "undefined" no cabecalho.
