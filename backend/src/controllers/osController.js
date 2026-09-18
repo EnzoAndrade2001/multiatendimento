@@ -9,6 +9,10 @@ const { draftServiceOrder } = aiService;
 const { renderOfficialOsTemplate } = require('../templates/officialOsTemplate');
 const { getLatestCompanyProfile } = require('../services/companyProfileService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
+const {
+  createServiceOrderInIluxWeb,
+  isIluxWebConfigured,
+} = require('../services/iluxWebService');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -496,6 +500,64 @@ async function createOS(req, res) {
         },
         include: { contact: true, equipment: true },
       });
+    }
+
+    // Na operação da LCD o ILUX_WEB é a fonte oficial das O.S. O CRM mantém
+    // o espelho para ligar a ordem ao ticket/conversa, mas a confirmação
+    // definitiva vem deste POST, sem depender do agente Firebird.
+    if (isIluxWebConfigured()) {
+      try {
+        const clienteCodigoLegado = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
+        const equipamentoCodigoLegado = String(equipment.externalId || '').trim();
+        const respostaIlux = await createServiceOrderInIluxWeb({
+          origem: 'CRM',
+          ordemServicoId: os.id,
+          clienteCodigoLegado,
+          equipamentoCodigoLegado,
+          cdOstp: String(cdOstp),
+          cdDefeito: defectType.code,
+          nmsuportet: nmsuportet || null,
+          abertoPor: req.user.name || req.user.email || null,
+          solicitante: contact.name || null,
+          telefoneContato: contact.phone || contact.whatsapp || null,
+          tipoAtendimento: String(cdOstp) === '01' ? 'CONTRATOS' : 'CORRETIVA',
+          descricaoProblema: String(defect).trim(),
+          dataAbertura: os.createdAt?.toISOString?.() || undefined,
+        });
+        const externalId = String(
+          respostaIlux.seqos
+          || respostaIlux.numero
+          || respostaIlux.os?.numero
+          || '',
+        ).trim();
+        if (!/^\d+$/.test(externalId)) {
+          throw new Error('ILUX_WEB não devolveu o número definitivo da O.S.');
+        }
+
+        const confirmada = await prisma.serviceOrder.update({
+          where: { id: os.id, tenantId },
+          data: {
+            externalSource: 'ilux_web',
+            externalId,
+            externalUpdatedAt: new Date(),
+            status: 'PENDENTE',
+          },
+          include: { contact: true, equipment: true },
+        });
+        return res.status(201).json({ ...confirmada, confirmed: true, source: 'ilux_web' });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const erroIntegracao = await prisma.serviceOrder.update({
+          where: { id: os.id, tenantId },
+          data: { status: 'ERRO_INTEGRACAO' },
+          include: { contact: true, equipment: true },
+        });
+        console.error(`[createOS] falha ao abrir O.S. ${os.id} no ILUX_WEB:`, detail);
+        return res.status(502).json({
+          error: `Não foi possível abrir a O.S. no ILUX_WEB: ${detail}`,
+          serviceOrderId: erroIntegracao.id,
+        });
+      }
     }
 
     const confirmed = await waitForIluxConfirmation(os.id, tenantId);

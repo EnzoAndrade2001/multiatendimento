@@ -3,6 +3,7 @@ const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/
 const { hasPermission } = require('../auth/permissions');
 const billingDocuments = require('../services/billingDocumentService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
+const { listServiceOrdersFromIluxWeb } = require('../services/iluxWebService');
 
 const HISTORY_DEFAULT_LIMIT = 25;
 const HISTORY_MAX_LIMIT = 100;
@@ -63,13 +64,18 @@ function getCrmCapabilities(user) {
   };
 }
 
-function syncMetadata(settings, fallbackLastSyncedAt = null) {
-  const lastSyncedAt = asDate(settings?.firebirdLastSyncAt || fallbackLastSyncedAt);
+function syncMetadata(settings, fallbackLastSyncedAt = null, sourceOverride = null, errorOverride = null) {
+  const lastSyncedAt = asDate(sourceOverride
+    ? (fallbackLastSyncedAt || settings?.firebirdLastSyncAt)
+    : (settings?.firebirdLastSyncAt || fallbackLastSyncedAt));
+  const status = sourceOverride === 'ilux_web'
+    ? (errorOverride ? 'error' : (lastSyncedAt ? 'ok' : 'unknown'))
+    : (settings?.firebirdLastSyncStatus || (errorOverride ? 'error' : (lastSyncedAt ? 'ok' : 'unknown')));
   return {
-    source: 'firebird',
-    status: settings?.firebirdLastSyncStatus || (lastSyncedAt ? 'ok' : 'unknown'),
+    source: sourceOverride || 'firebird',
+    status,
     lastSyncedAt,
-    error: settings?.firebirdLastSyncError || null,
+    error: errorOverride || settings?.firebirdLastSyncError || null,
   };
 }
 
@@ -345,6 +351,34 @@ function normalizeLocalOrder(order) {
   };
 }
 
+function normalizeIluxWebOrder(order, customerExternalId) {
+  const externalId = text(order?.externalId || order?.number || order?.numero);
+  const closedAt = order?.closedAt || order?.dataFechamento || null;
+  return {
+    id: order?.id || `ilux-web-${externalId}`,
+    externalId,
+    number: externalId,
+    clientExternalId: text(order?.clientExternalId || order?.clienteCodigoLegado || customerExternalId),
+    equipmentExternalId: text(order?.equipmentExternalId || order?.equipamentoCodigoLegado),
+    equipmentModel: text(order?.equipmentModel || order?.equipamento?.modelo),
+    serialNumber: text(order?.serialNumber || order?.equipamento?.numeroSerie),
+    type: text(order?.type || order?.tipoAtendimento || order?.cdOstp),
+    status: normalizeOrderStatus(order?.status, closedAt, order?.closing || order?.solucaoTecnica),
+    statusLabel: text(order?.status),
+    statusCode: text(order?.statusCode || order?.cdDefeito),
+    defect: text(order?.defect || order?.descricaoProblema),
+    value: asNumber(order?.value || order?.totalValue) || 0,
+    closing: text(order?.closing || order?.solucaoTecnica),
+    technician: first(order?.technician, order?.tecnicoResponsavel, order?.nmsuportet),
+    attendant: first(order?.attendant, order?.abertoPor),
+    openedAt: order?.openedAt || order?.dataAbertura || null,
+    attendedAt: order?.attendedAt || order?.dataAtendimento || null,
+    closedAt,
+    updatedAt: order?.updatedAt || order?.atualizadoEm || order?.dataAbertura || null,
+    source: 'ilux-web',
+  };
+}
+
 // Indicador operacional escolhido para o CRM: uma O.S. deixa de "aguardar
 // atendimento" assim que o iLux informa DTATENDIMENTO, mesmo que continue
 // sem DTFECHAMENTO para faturamento ou outras etapas internas.
@@ -476,7 +510,7 @@ async function loadCustomerOrderCatalog(tenantId, customer, sourceLimit = null) 
   const printClientFilters = [{ path: ['serviceOrder', 'cdcliente'], equals: externalId }];
   if (numericExternalId !== null) printClientFilters.push({ path: ['serviceOrder', 'cdcliente'], equals: numericExternalId });
 
-  const [syncedRecords, printRecords, localOrders] = await Promise.all([
+  const [syncedRecords, printRecords, localOrders, iluxWebResult] = await Promise.all([
     externalId
       ? prisma.externalSyncRecord.findMany({
         where: {
@@ -524,6 +558,13 @@ async function loadCustomerOrderCatalog(tenantId, customer, sourceLimit = null) 
       orderBy: { createdAt: 'desc' },
       ...(sourceLimit ? { take: sourceLimit } : {}),
     }),
+    externalId
+      ? listServiceOrdersFromIluxWeb(externalId, { limit: sourceLimit || HISTORY_MAX_LIMIT })
+        .catch((error) => {
+          console.warn(`[CRM 360] Não foi possível consultar O.S. do ILUX_WEB para o cliente ${externalId}:`, error.message);
+          return { items: [], lastSyncedAt: null, source: 'ilux_web', syncError: error.message };
+        })
+      : { items: [], lastSyncedAt: null, source: null },
   ]);
 
   const synced = syncedRecords.map((record) => normalizeExternalOrder(record.payload, {
@@ -546,11 +587,20 @@ async function loadCustomerOrderCatalog(tenantId, customer, sourceLimit = null) 
     .filter(Boolean)
     .map((date) => new Date(date).getTime())
     .filter(Number.isFinite);
+  const iluxWebOrders = (iluxWebResult.items || []).map((order) => normalizeIluxWebOrder(order, externalId));
+  if (iluxWebResult.lastSyncedAt) {
+    const iluxDate = new Date(iluxWebResult.lastSyncedAt).getTime();
+    if (Number.isFinite(iluxDate)) externalSyncDates.push(iluxDate);
+  }
   return {
-    orders: mergeOrders(synced, snapshots, localOrders.map(normalizeLocalOrder)),
+    // O ILUX_WEB é a fonte operacional oficial; por isso entra por último e
+    // prevalece sobre o espelho local quando o mesmo número já foi confirmado.
+    orders: mergeOrders(synced, snapshots, localOrders.map(normalizeLocalOrder), iluxWebOrders),
     lastSyncedAt: externalSyncDates.length
       ? new Date(Math.max(...externalSyncDates)).toISOString()
       : null,
+    source: iluxWebResult.source || 'firebird',
+    syncError: iluxWebResult.syncError || null,
   };
 }
 
@@ -1138,7 +1188,7 @@ async function getCustomerServiceOrders(req, res) {
   res.json({
     ...page,
     generatedAt: new Date().toISOString(),
-    sync: syncMetadata(settings, catalog.lastSyncedAt),
+    sync: syncMetadata(settings, catalog.lastSyncedAt, catalog.source, catalog.syncError),
     capabilities: getCrmCapabilities(req.user),
   });
 }
@@ -1152,9 +1202,9 @@ async function getCustomer360(req, res) {
   const equipmentExternalIds = customer.equipments.map((equipment) => text(equipment.externalId)).filter(Boolean);
   const canViewFinancial = hasPermission(req.user, 'crm.financial.view');
   const capabilities = getCrmCapabilities(req.user);
-  const [contracts, orders, settings, tickets, receivableRecords, meterRecords] = await Promise.all([
+  const [contracts, orderCatalog, settings, tickets, receivableRecords, meterRecords] = await Promise.all([
     loadContracts(tenantId, customer.externalId),
-    loadCustomerOrders(tenantId, customer, HISTORY_MAX_LIMIT),
+    loadCustomerOrderCatalog(tenantId, customer, HISTORY_MAX_LIMIT),
     prisma.tenantSettings.findUnique({
       where: { tenantId },
       select: {
@@ -1208,8 +1258,9 @@ async function getCustomer360(req, res) {
         select: { id: true, externalId: true, payload: true, receivedAt: true, syncedAt: true },
         orderBy: { receivedAt: 'desc' },
       })
-      : [],
+    : [],
   ]);
+  const orders = orderCatalog.orders;
 
   const receivables = receivableRecords.map(normalizeReceivable)
     .filter((item) => !item.isCancelled)
@@ -1382,7 +1433,7 @@ async function getCustomer360(req, res) {
 
   res.json({
     generatedAt: new Date().toISOString(),
-    sync: syncMetadata(settings),
+    sync: syncMetadata(settings, orderCatalog.lastSyncedAt, orderCatalog.source, orderCatalog.syncError),
     capabilities,
     sla: {
       targetHours: slaTargetHours,
