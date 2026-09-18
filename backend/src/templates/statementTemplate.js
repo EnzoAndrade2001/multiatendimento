@@ -250,7 +250,7 @@ function buildStatementDocDefinition(model = {}) {
 
   if (lines.length === 0) {
     content.push({
-      text: 'Contrato com valor fixo — o iLux não detalha produção neste demonstrativo.',
+      text: 'Contrato com valor fixo — o ILUX WEB não detalha produção neste demonstrativo.',
       italics: true, fontSize: 7, color: '#555555', margin: [0, 4, 0, 6],
     });
   }
@@ -346,7 +346,7 @@ function buildStatementDocDefinition(model = {}) {
   }
 
   content.push({
-    text: 'Documento gerado pelo CRM a partir dos valores fechados no iLux. Confira o boleto para o valor a pagar.',
+    text: 'Documento gerado pelo CRM a partir dos valores fechados no ILUX WEB. Confira o boleto para o valor a pagar.',
     fontSize: 5.5, italics: true, color: '#999999', margin: [0, 6, 0, 0],
   });
 

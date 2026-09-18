@@ -728,7 +728,7 @@ async function correctBinding(tenantId, eventId, { customerId, equipmentId } = {
     prisma.crmEquipment.findFirst({ where: { tenantId, id: equipmentId } }),
   ]);
   if (!customer || !equipment) { const e = new Error('Cliente ou equipamento nao encontrado nesta empresa.'); e.statusCode = 404; throw e; }
-  if (equipment.customerId && equipment.customerId !== customer.id) { const e = new Error('O equipamento pertence a outro cliente no iLux.'); e.statusCode = 409; throw e; }
+  if (equipment.customerId && equipment.customerId !== customer.id) { const e = new Error('O equipamento pertence a outro cliente no ILUX WEB.'); e.statusCode = 409; throw e; }
 
   const existing = event.bindingId
     ? await prisma.printGuardBinding.findFirst({ where: { tenantId, id: event.bindingId } })
@@ -1048,7 +1048,7 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
   if (!contact) { const e = new Error('Contato do equipamento nao encontrado.'); e.statusCode = 409; throw e; }
 
   const osType = await prisma.crmOsType.findFirst({ where: { tenantId, code: String(cdOstp).trim() } });
-  if (!osType) { const e = new Error('Tipo de O.S. nao sincronizado no iLux.'); e.statusCode = 409; throw e; }
+  if (!osType) { const e = new Error('Tipo de O.S. nao sincronizado no ILUX WEB.'); e.statusCode = 409; throw e; }
 
   const items = events.map((ev) => `${ev.eventType} (${ev.serialNumber || 's/serie'})`).join('; ');
   const body = String(defect || `PrintGuard — consolidado: ${items}`).slice(0, 4000);

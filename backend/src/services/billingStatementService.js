@@ -205,7 +205,7 @@ async function renderStatementPdf({ tenantId, receivable, customerName }) {
 
   const statement = await resolveStatement(tenantId, receivable);
   if (!statement) {
-    throw billingError('Demonstrativo ainda nao sincronizado do iLux para este titulo.', 501);
+    throw billingError('Demonstrativo ainda nao sincronizado do ILUX WEB para este titulo.', 501);
   }
 
   const [company, customer, lines] = await Promise.all([

@@ -36,7 +36,7 @@ function classifyResponseOrigin({ found = false, equipmentCount = 0, currentNote
 function formatResponseOrigin(origin) {
   const labels = {
     [RESPONSE_ORIGINS.RAG]: 'RAG',
-    [RESPONSE_ORIGINS.ILUX_DATA]: 'Dados do iLux',
+    [RESPONSE_ORIGINS.ILUX_DATA]: 'Dados do ILUX WEB',
     [RESPONSE_ORIGINS.LLM_GENERAL]: 'Conhecimento geral da IA',
     [RESPONSE_ORIGINS.MIXED]: 'Misto',
   };

@@ -96,7 +96,7 @@ async function classifyQuestion(settings, pergunta) {
 
 async function phraseAnswer(settings, { pergunta, intent, data, customerName }) {
   const systemPrompt = [
-    'Você é o Assistente iLux, voltado a consultas internas e gerenciais.',
+    'Você é o Assistente ILUX WEB, voltado a consultas internas e gerenciais.',
     'Responda em português do Brasil, de forma direta. Use SOMENTE o JSON fornecido.',
     'Nunca invente, estime ou altere números. Se hasData=false, explique que os dados ainda não estão sincronizados.',
     `Escopo: ${customerName || 'empresa inteira'}. Intenção: ${intent}. Dados: ${JSON.stringify(data)}`,
@@ -169,7 +169,7 @@ function normalizePayable(record) {
 }
 async function fetchPayablesData(tenantId, period) {
   const rows = await prisma.externalSyncRecord.findMany({ where: { tenantId, source: 'firebird', entity: 'payables' }, select: { externalId: true, payload: true, receivedAt: true }, take: 20000 });
-  if (!rows.length) return { hasData: false, summary: 'As contas a pagar ainda não foram sincronizadas por este agente iLux.' };
+  if (!rows.length) return { hasData: false, summary: 'As contas a pagar ainda não foram sincronizadas pelo ILUX WEB.' };
   const open = rows.map(normalizePayable).filter((item) => !item.cancelled && !item.paidAt && item.openValue > 0 && inPeriod(item.dueAt, period));
   const total = open.reduce((sum, item) => sum + item.openValue, 0);
   return { hasData: true, periodo: { inicio: formatDate(period.start), fim: formatDate(period.end) }, quantidade: open.length, valorTotal: total, summary: `${open.length} conta(s) a pagar, total de R$ ${total.toFixed(2)}.`, contas: open.sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt)).slice(0, 15).map((item) => ({ fornecedor: item.supplier, vencimento: formatDate(item.dueAt), valor: item.openValue })) };
@@ -202,7 +202,7 @@ async function fetchCustomerSummary(tenantId, customer) {
     return { hasData: true, nome: full.name, fantasia: full.fantasyName, cpfCnpj: full.cpfCnpj, telefone: full.phone, email: full.email, endereco: [full.address, full.city, full.state].filter(Boolean).join(', '), equipamentos: full.equipments?.length || 0, summary: `Cadastro de ${full.fantasyName || full.name}.` };
   }
   const total = await prisma.crmCustomer.count({ where: { tenantId } });
-  return { hasData: true, totalClientes: total, summary: `${total} cliente(s) cadastrados no CRM iLux.` };
+  return { hasData: true, totalClientes: total, summary: `${total} cliente(s) cadastrados no CRM.` };
 }
 
 async function answerQuestion({ tenantId, settings, pergunta, crmCustomerId, canViewFinancial }) {

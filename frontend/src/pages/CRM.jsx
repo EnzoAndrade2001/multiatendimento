@@ -1586,7 +1586,7 @@ function Empty({ icon, title, text }) {
 
 function TabSkeleton({ tab }) {
   const labels = { os: 'Carregando histórico de O.S.', financial: 'Carregando títulos financeiros', contracts: 'Carregando contratos', units: 'Carregando unidades', contacts: 'Carregando contatos' };
-  return <div style={s.tabSkeleton} role="status" aria-live="polite"><span style={s.skeletonLineWide} /><span style={s.skeletonLine} /><span style={s.skeletonLineWide} /><small>{labels[tab] || 'Carregando informações atualizadas do ILUX'}…</small></div>;
+  return <div style={s.tabSkeleton} role="status" aria-live="polite"><span style={s.skeletonLineWide} /><span style={s.skeletonLine} /><span style={s.skeletonLineWide} /><small>{labels[tab] || 'Carregando informações atualizadas do ILUX WEB'}…</small></div>;
 }
 
 function ResourceError({ onRetry }) {

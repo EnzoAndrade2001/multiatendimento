@@ -40,7 +40,7 @@ function checkbox(label, checked) {
 
 function renderHistory(history) {
   if (!Array.isArray(history) || history.length === 0) {
-    return '<tr><td class="history-empty" colspan="2">Nenhum chamado anterior encontrado para este código de cliente iLux.</td></tr>';
+    return '<tr><td class="history-empty" colspan="2">Nenhum chamado anterior encontrado para este código de cliente ILUX WEB.</td></tr>';
   }
 
   return history.slice(0, 5).map((item) => `
@@ -173,7 +173,7 @@ function renderOfficialOsTemplate(model) {
 
     <div class="section-title">Cliente &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Equipamento</div>
     <table><tr><td class="info-cell" style="width:54%">
-      <span class="label">Código iLux:</span> ${text(model.client.code)} &nbsp; <span class="cabecalho-destaque"><span class="label">Cliente:</span> ${text(model.client.name)}</span><br>
+      <span class="label">Código ILUX WEB:</span> ${text(model.client.code)} &nbsp; <span class="cabecalho-destaque"><span class="label">Cliente:</span> ${text(model.client.name)}</span><br>
       <span class="cabecalho-destaque"><span class="label">Endereço:</span> ${text(model.client.address)}</span><br>
       <span class="label">Bairro:</span> ${text(model.client.neighborhood)} &nbsp; <span class="label">CEP:</span> ${text(model.client.zipCode)}<br>
       <span class="label">Cidade:</span> ${text(model.client.city)} (${text(model.client.state, '')}) &nbsp; <span class="label">U.F.:</span> ${text(model.client.state)}<br>

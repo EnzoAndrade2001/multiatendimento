@@ -17,7 +17,7 @@ async function sendManagerCopy(req, res) {
     });
 
     if (!order) return res.status(404).json({ error: 'O.S. não encontrada no Multiatendimento.' });
-    if (!order.externalId) return res.status(409).json({ error: 'A O.S. ainda não foi confirmada pelo iLux.' });
+    if (!order.externalId) return res.status(409).json({ error: 'A O.S. ainda não foi confirmada pelo ILUX WEB.' });
 
     const result = await sendServiceOrderManagerCopy(tenantId, order.id, { force: true });
     if (result.skipped === 'incomplete-settings') {

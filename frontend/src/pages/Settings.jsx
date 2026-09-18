@@ -1981,7 +1981,7 @@ export default function Settings() {
                     </p>
                     <p style={{ ...s.hint, color: form.plugBoletoConfigSyncedAt ? 'var(--success)' : 'var(--text-dim)' }}>
                       {form.plugBoletoConfigSyncedAt
-                        ? `Credencial sincronizada automaticamente do iLux em ${new Date(form.plugBoletoConfigSyncedAt).toLocaleString('pt-BR')}.`
+                        ? `Credencial sincronizada automaticamente do ILUX WEB em ${new Date(form.plugBoletoConfigSyncedAt).toLocaleString('pt-BR')}.`
                         : form.plugBoletoTokenSet
                           ? 'Credencial configurada manualmente.'
                           : 'O agente envia CNPJ e token do cedente (CE_CEDENTE / CE_PARAM_CONFIG) a cada sincronização. Os campos abaixo são só para override manual.'}
@@ -1994,7 +1994,7 @@ export default function Settings() {
                       style={s.input}
                       value={form.plugBoletoCedenteCnpj || ''}
                       onChange={(e) => setForm({ ...form, plugBoletoCedenteCnpj: e.target.value })}
-                      placeholder="Só números — CE_CEDENTE.CEDENTECPFCNPJ no iLux"
+                      placeholder="Só números — CE_CEDENTE.CEDENTECPFCNPJ no ILUX WEB"
                     />
                   </div>
 
@@ -2005,7 +2005,7 @@ export default function Settings() {
                       type="password"
                       value={form.plugBoletoToken || ''}
                       onChange={(e) => setForm({ ...form, plugBoletoToken: e.target.value })}
-                      placeholder={form.plugBoletoTokenSet ? '•••••••• configurado — digite para trocar' : 'CE_CEDENTE.TOKEN_CEDENTE no iLux'}
+                      placeholder={form.plugBoletoTokenSet ? '•••••••• configurado — digite para trocar' : 'CE_CEDENTE.TOKEN_CEDENTE no ILUX WEB'}
                     />
                     <p style={s.hint}>Guardado cifrado. Não é exibido depois de salvo.</p>
                   </div>
@@ -2044,7 +2044,7 @@ export default function Settings() {
                       </label>
                     </div>
                     <p style={s.hint}>
-                      Com isto ligado, o CRM gera o PDF do demonstrativo a partir dos valores fechados no iLux
+                      Com isto ligado, o CRM gera o PDF do demonstrativo a partir dos valores fechados no ILUX WEB
                       (IXLDEMOFAT + IXLCONTRATOSFAT sincronizados pelo agente), sem exigir o PDF oficial na pasta monitorada.
                       Os números vêm do ERP — o CRM não recalcula franquia nem excedente. Se o demonstrativo ainda não
                       tiver sido sincronizado, o agente/pasta continua sendo o fallback.
@@ -2061,7 +2061,7 @@ export default function Settings() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
               <div>
                 <h2 style={{ ...s.cardTitle, marginBottom: '0.35rem' }}>Central do Agente Local</h2>
-                <p style={{ ...s.hint, margin: 0 }}>Instalação, atualização e suporte do aplicativo que conecta o CRM ao iLux.</p>
+                <p style={{ ...s.hint, margin: 0 }}>Instalação, atualização e suporte do aplicativo que conecta o CRM ao ILUX WEB.</p>
               </div>
               <button type="button" style={s.iconButton} onClick={handleRefreshAgentInfo} disabled={agentInfoLoading} title="Atualizar informações">
                 {agentInfoLoading ? '...' : 'Atualizar'}
@@ -2163,7 +2163,7 @@ export default function Settings() {
               <div style={s.integrationGuide}>
                 <strong style={s.integrationGuideTitle}>Instalação rápida</strong>
                 <ol style={s.guideList}>
-                  <li>Baixe o executável e salve-o no servidor do iLux.</li>
+                  <li>Baixe o executável e salve-o no servidor do ILUX WEB.</li>
                   <li>Abra o agente, informe o token salvo nesta tela e configure o Firebird.</li>
                   <li>Defina as pastas de Documentos financeiros e teste a conexão.</li>
                   <li>Configure a tarefa automática do Windows abaixo para o agente iniciar mesmo sem login.</li>
@@ -2237,7 +2237,7 @@ export default function Settings() {
             </div>
 
             <ol style={s.guideList}>
-              <li>Abra o PowerShell como Administrador no servidor do iLux.</li>
+              <li>Abra o PowerShell como Administrador no servidor do ILUX WEB.</li>
               <li>Execute a instalação abaixo e informe o mesmo usuário do Windows que acessa o Firebird e as pastas financeiras.</li>
               <li>Inicie a tarefa para testar sem reiniciar o servidor.</li>
               <li>Confirme o processo e acompanhe o arquivo <code>logs\client.log</code>.</li>

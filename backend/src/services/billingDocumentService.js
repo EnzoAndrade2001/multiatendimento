@@ -140,7 +140,7 @@ async function listDocumentStates({ tenantId, receivable, customerName }) {
 async function queueDocumentRequest({ tenantId, receivable, customerName, documentType }) {
   assertDocumentType(documentType);
   if (!documentAvailability(receivable, documentType)) {
-    const error = new Error(`${DOCUMENT_LABELS[documentType]} nao esta vinculado a este titulo no iLux.`);
+    const error = new Error(`${DOCUMENT_LABELS[documentType]} nao esta vinculado a este titulo no ILUX WEB.`);
     error.statusCode = 409;
     throw error;
   }
@@ -203,13 +203,13 @@ async function waitForDocument(requestId, timeoutMs = REQUEST_TIMEOUT_MS) {
       return current.payload;
     }
     if (current?.payload?.status === 'failed') {
-      const error = new Error(current.payload.error || 'Nao foi possivel recuperar o documento no iLux.');
+      const error = new Error(current.payload.error || 'Nao foi possivel recuperar o documento no ILUX WEB.');
       error.statusCode = 502;
       throw error;
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  const error = new Error('O agente do iLux nao devolveu o documento no tempo esperado. Confirme se ele esta atualizado e em execucao.');
+  const error = new Error('O agente do ILUX WEB nao devolveu o documento no tempo esperado. Confirme se ele esta atualizado e em execucao.');
   error.statusCode = 504;
   throw error;
 }

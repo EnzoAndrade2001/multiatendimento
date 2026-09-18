@@ -1076,7 +1076,7 @@ function csvEscape(value) {
 async function exportCustomers(req, res) {
   const result = await queryCustomers(req.user.tenantId, req.query, { forExport: true });
   const columns = [
-    ['Código ILUX', (customer) => customer.externalId],
+    ['Código ILUX WEB', (customer) => customer.externalId],
     ['Nome fantasia', (customer) => customer.fantasyName || customer.name],
     ['Razão social', (customer) => customer.name],
     ['CNPJ/CPF', (customer) => customer.cpfCnpj],
@@ -1342,7 +1342,7 @@ async function getCustomer360(req, res) {
     relationshipContacts.push(entry);
   };
   addRelationshipContact({
-    id: 'ilux-main', role: 'Contato principal', source: 'Cadastro iLux',
+    id: 'ilux-main', role: 'Contato principal', source: 'Cadastro ILUX WEB',
     name: customer.contactName, phone: customer.phone, email: customer.email,
   });
   for (const contact of customer.whatsappContacts) addRelationshipContact({
@@ -1502,10 +1502,10 @@ async function getReceivableBoleto(req, res) {
     return res.status(404).json({ error: 'Titulo financeiro nao pertence a este cliente.' });
   }
   if (normalized.isCancelled) {
-    return res.status(410).json({ error: 'Este titulo foi cancelado ou removido no iLux.' });
+    return res.status(410).json({ error: 'Este titulo foi cancelado ou removido no ILUX WEB.' });
   }
   if (!normalized.hasBoleto) {
-    return res.status(409).json({ error: 'Este titulo nao possui boleto vinculado no iLux.' });
+    return res.status(409).json({ error: 'Este titulo nao possui boleto vinculado no ILUX WEB.' });
   }
 
   const requestExternalId = String(receivable.externalId);
@@ -1563,7 +1563,7 @@ async function getReceivableBoleto(req, res) {
   }
 
   return res.status(504).json({
-    error: 'O agente do iLux nao devolveu o boleto no tempo esperado. Confirme se ele esta atualizado e em execucao.',
+    error: 'O agente do ILUX WEB nao devolveu o boleto no tempo esperado. Confirme se ele esta atualizado e em execucao.',
   });
 }
 
@@ -1610,7 +1610,7 @@ async function resolveCustomerReceivable(req) {
     throw error;
   }
   if (receivable.isCancelled) {
-    const error = new Error('Este titulo foi cancelado ou removido no iLux e nao pode ser aberto ou reenviado.');
+    const error = new Error('Este titulo foi cancelado ou removido no ILUX WEB e nao pode ser aberto ou reenviado.');
     error.statusCode = 410;
     throw error;
   }
