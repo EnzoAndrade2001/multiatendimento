@@ -875,6 +875,8 @@ async function generatePdf(req, res) {
       const openedAtTime = openedAt && !raw.hrinclusao
         ? new Date(openedAt).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
         : '';
+      const status = item?.statusLabel || item?.status || raw.nmstatus || raw.status || '';
+      const isClosed = /CONCL|FECH|FINALIZ/i.test(String(status));
       return {
         externalId: String(item?.externalId || raw.seqos || ''),
         createdAt: openedAt,
@@ -882,10 +884,10 @@ async function generatePdf(req, res) {
         osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
         equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
         attendant: raw.nmsuportea || item?.attendant || '',
-        status: item?.statusLabel || item?.status || raw.nmstatus || raw.status || '',
+        status,
         defect: item?.defect || item?.description || raw.obsdefeitocli || '',
         closing: item?.closing || item?.observacao || raw.obsdefeitoats || '',
-        closedBy: raw.usuario_fechamento || raw.nmsuportel || raw.nmsuportet || '',
+        closedBy: raw.usuario_fechamento || raw.nmsuportel || raw.nmsuportet || item?.closedBy || (isClosed ? item?.technician : '') || '',
         technician: item?.technician || item?.nmSuporteT || raw.nmsuportet || raw.nmsuportel || '',
       };
     };
@@ -1199,7 +1201,7 @@ async function generatePdf(req, res) {
     const equipmentExternalId = firstValue(iluxOrderData.equipmentExternalId, currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
     const equipmentModel = firstValue(iluxOrderData.equipmentModel, firebirdEquipment.modelo, os.equipment.model, 'N/A');
     const equipmentSerial = firstValue(iluxOrderData.serialNumber, firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
-    const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, 'N/A');
+    const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, iluxWebOrder ? '' : 'N/A');
     const contractType = firstValue(iluxOrderData.contractType, firebirdContract.cdcontratotp, firebirdEquipment.cdcontratotp, 'N/A');
     const territory = firstValue(iluxOrderData.territory, firebirdEquipment.cdterritorio, currentPrintOrder.cdterritorio, 'N/A');
     const department = currentPrintOrder.departamento
@@ -1215,8 +1217,7 @@ async function generatePdf(req, res) {
       || crmEquipment?.installLocation
       || crmEquipment?.raw?.localinstal
       || crmEquipment?.raw?.LOCALINSTAL
-      || os.equipment.sector
-      || 'N/A';
+      || (iluxWebOrder ? '' : (os.equipment.sector || 'N/A'));
     const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
     const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
     const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
@@ -1256,9 +1257,9 @@ async function generatePdf(req, res) {
       time: currentOsTime,
       openedBy: String(attendantName).toUpperCase(),
       technician: String(currentTechnician).toUpperCase(),
-      expectedDate: currentPrintOrder.dtpreventrega ? formatHistoryDate(currentPrintOrder.dtpreventrega) : '',
+      expectedDate: currentPrintOrder.dtpreventrega ? formatHistoryDate(currentPrintOrder.dtpreventrega) : (iluxWebOrder ? currentOsDate : ''),
       expectedTime: timeText(currentPrintOrder.hrpreventrega),
-      priority: currentPrintOrder.prioridade || '',
+      priority: currentPrintOrder.prioridade || (iluxWebOrder ? '1' : ''),
       type: String(displayOsType).toUpperCase(),
       isAttendance,
       isWarranty,
@@ -1303,7 +1304,7 @@ async function generatePdf(req, res) {
         date: visitDate === '-' ? '' : visitDate,
         start: visitStart,
         end: visitEnd,
-        meterCode: meterAttendance.cdmedidor || '',
+        meterCode: meterAttendance.cdmedidor || (iluxWebOrder ? 'TOTAL' : ''),
         meterValue: meterAttendance.medidor ?? 0,
       },
       defect: currentDefect,
