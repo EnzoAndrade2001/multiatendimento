@@ -1070,7 +1070,7 @@ async function generatePdf(req, res) {
 
     const printAttendances = Array.isArray(osPrintData?.attendances) ? osPrintData.attendances : [];
     const lastPrintAttendance = printAttendances[printAttendances.length - 1] || {};
-    const attendanceMeterCode = String(lastPrintAttendance.cdmedidor || '').toUpperCase();
+    const attendanceMeterCode = String(lastPrintAttendance.cdmedidor || (iluxWebOrder ? 'TOTAL' : '')).toUpperCase();
     if (lastPrintAttendance.medidor !== undefined && lastPrintAttendance.medidor !== null) {
       if (attendanceMeterCode.includes('COR')) meters.color = lastPrintAttendance.medidor;
       else if (attendanceMeterCode.includes('SCAN')) meters.scan = lastPrintAttendance.medidor;
@@ -1201,7 +1201,7 @@ async function generatePdf(req, res) {
     const equipmentExternalId = firstValue(iluxOrderData.equipmentExternalId, currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
     const equipmentModel = firstValue(iluxOrderData.equipmentModel, firebirdEquipment.modelo, os.equipment.model, 'N/A');
     const equipmentSerial = firstValue(iluxOrderData.serialNumber, firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
-    const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, iluxWebOrder ? '' : 'N/A');
+    const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, iluxWebOrder ? '-' : 'N/A');
     const contractType = firstValue(iluxOrderData.contractType, firebirdContract.cdcontratotp, firebirdEquipment.cdcontratotp, 'N/A');
     const territory = firstValue(iluxOrderData.territory, firebirdEquipment.cdterritorio, currentPrintOrder.cdterritorio, 'N/A');
     const department = currentPrintOrder.departamento
@@ -1217,7 +1217,7 @@ async function generatePdf(req, res) {
       || crmEquipment?.installLocation
       || crmEquipment?.raw?.localinstal
       || crmEquipment?.raw?.LOCALINSTAL
-      || (iluxWebOrder ? '' : (os.equipment.sector || 'N/A'));
+      || (iluxWebOrder ? '-' : (os.equipment.sector || 'N/A'));
     const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
     const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
     const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
@@ -1378,7 +1378,7 @@ async function generatePdf(req, res) {
                 { text: `Hora: ${currentOsTime}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico abertura: ${attendantName.toUpperCase()}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico atendimento: ${String(currentTechnician).toUpperCase()}`, bold: true, fontSize: 6.5 },
-                { text: `Atendimento Prev: ${formatHistoryDate(currentPrintOrder.dtpreventrega)} ${timeText(currentPrintOrder.hrpreventrega)}   Priorid. ${currentPrintOrder.prioridade || ''}`, bold: true, fontSize: 6.3 },
+                { text: `Atendimento Prev: ${currentPrintOrder.dtpreventrega ? formatHistoryDate(currentPrintOrder.dtpreventrega) : (iluxWebOrder ? currentOsDate : '-')} ${timeText(currentPrintOrder.hrpreventrega)}   Priorid. ${currentPrintOrder.prioridade || (iluxWebOrder ? '1' : '')}`, bold: true, fontSize: 6.3 },
                 { text: `Tipo O.S.: ${displayOsType}`, bold: true, fontSize: 6.3 },
                 { text: `${checkbox(isAttendance, 'Atendimento')}   ${checkbox(isWarranty, 'Garantia')}\n${checkbox(isBudget, 'Orçamento')}`, fontSize: 6.3 },
               ],
@@ -1451,7 +1451,7 @@ async function generatePdf(req, res) {
           body: [[{
             stack: [
               { text: `Data Visita: ${visitDate === '-' ? '' : visitDate}    Hora Inicial: ${visitStart}    Hora Final: ${visitEnd}`, bold: true, fontSize: 6.5 },
-              { text: `Medidor 01: ${attendanceMeterCode}    Contador Medidor 01: ${lastPrintAttendance.medidor ?? ''}`, bold: true, fontSize: 6.5 },
+              { text: `Medidor 01: ${attendanceMeterCode}    Contador Medidor 01: ${lastPrintAttendance.medidor ?? (iluxWebOrder ? 0 : '')}`, bold: true, fontSize: 6.5 },
               { text: [{ text: 'Defeito:   ', bold: true, fontSize: 7 }, { text: currentDefect, fontSize: 11 }], margin: [0, 9, 0, 4] },
               { text: [{ text: 'Sintoma:   ', bold: true }, lastPrintAttendance.sintoma || ''], fontSize: 7, margin: [0, 2, 0, 2] },
               { text: [{ text: 'Causa:     ', bold: true }, lastPrintAttendance.causa || ''], fontSize: 7, margin: [0, 2, 0, 2] },
