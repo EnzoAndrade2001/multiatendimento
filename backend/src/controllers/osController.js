@@ -873,7 +873,7 @@ async function generatePdf(req, res) {
       const raw = item?.raw && typeof item.raw === 'object' ? item.raw : item || {};
       const openedAt = item?.openedAt || item?.dataAbertura || item?.createdAt || item?.updatedAt || raw.dtinclusao || null;
       const openedAtTime = openedAt && !raw.hrinclusao
-        ? new Date(openedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        ? new Date(openedAt).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
         : '';
       return {
         externalId: String(item?.externalId || raw.seqos || ''),
@@ -950,8 +950,8 @@ async function generatePdf(req, res) {
 
     pdfmake.setFonts(fonts);
     
-    const dataOS = os.createdAt.toLocaleDateString('pt-BR');
-    const horaOS = os.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const dataOS = os.createdAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const horaOS = os.createdAt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     const emissionDate = new Date().toLocaleString('pt-BR');
     
     let meters = {};
@@ -1163,7 +1163,7 @@ async function generatePdf(req, res) {
       const parsed = new Date(value);
       return Number.isNaN(parsed.getTime())
         ? ''
-        : parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        : parsed.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     };
     const iluxOpenedDate = iluxOrderData.openedAt ? formatHistoryDate(iluxOrderData.openedAt) : '';
     const iluxOpenedTime = localTimeFromDate(iluxOrderData.openedAt);
