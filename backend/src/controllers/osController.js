@@ -559,7 +559,10 @@ async function createOS(req, res) {
           nmsuportet: nmsuportet || null,
           abertoPor: req.user.name || req.user.email || null,
           solicitante: contact.name || null,
-          telefoneContato: contact.phone || contact.whatsapp || null,
+          // Para o documento, prevalece o telefone oficial do cliente ILUX
+          // sincronizado no CRM; o telefone do contato WhatsApp pode ser
+          // apenas o número do atendente/solicitante.
+          telefoneContato: contact.crmCustomer?.phone || contact.phone || contact.whatsapp || null,
           tipoAtendimento: String(cdOstp) === '01' ? 'CONTRATOS' : 'CORRETIVA',
           descricaoProblema: String(defect).trim(),
           dataAbertura: os.createdAt?.toISOString?.() || undefined,
