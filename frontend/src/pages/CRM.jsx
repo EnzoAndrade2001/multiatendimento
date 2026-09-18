@@ -301,7 +301,7 @@ export default function CRM() {
       <style>{crmResponsiveCss}</style>
       <div className="crm-page-header" style={s.header}>
         <div>
-          <p style={s.kicker}>Central de relacionamento ILUX</p>
+          <p style={s.kicker}>Central de relacionamento CRM · ILUX WEB</p>
           <h1 style={s.title}>CRM operacional</h1>
           <p style={s.subtitle}>Informações comerciais e técnicas reunidas para agilizar o atendimento.</p>
         </div>
@@ -309,7 +309,7 @@ export default function CRM() {
           <div style={s.syncNotice}>
             <Database size={16} />
             <div>
-              <strong style={{ color: 'var(--text-main)' }}>Sincronizado com o ILUX</strong>
+              <strong style={{ color: 'var(--text-main)' }}>Sincronizado com o ILUX WEB</strong>
               <span>Consulta operacional</span>
             </div>
           </div>
@@ -420,7 +420,7 @@ export default function CRM() {
           style={s.searchInput}
           value={q}
           onChange={(event) => setQ(event.target.value)}
-          placeholder="Busque por cliente, CNPJ, telefone, série, patrimônio, endereço ou código ILUX"
+          placeholder="Busque por cliente, CNPJ, telefone, série, patrimônio, endereço ou código ILUX WEB"
         />
         {q ? <button type="button" style={s.clearSearch} onClick={clearSearch} aria-label="Limpar busca"><X size={16} /></button> : null}
         <button type="submit" style={s.searchBtn} disabled={loading}>{loading ? 'Buscando...' : 'Buscar'}</button>
@@ -505,7 +505,7 @@ export default function CRM() {
               {metrics.contracted === 0 && metrics.contracts === 0 ? <span style={s.statusPill}><AlertCircle size={12} /> Sem contrato</span> : null}
             </div>
             <div style={s.metaGrid}>
-              <Meta icon={<Hash size={14} />} text={customer.cpfCnpj || `ILUX ${customer.externalId || '—'}`} />
+              <Meta icon={<Hash size={14} />} text={customer.cpfCnpj || `ILUX WEB ${customer.externalId || '—'}`} />
               <Meta icon={<Phone size={14} />} text={customer.phone || 'Telefone não informado'} />
               <Meta icon={<MapPin size={14} />} text={joinLocation(customer) || 'Localização não informada'} wide />
             </div>
@@ -675,7 +675,7 @@ function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoad
           <div style={s.modalIdentity}>
             <div style={s.modalAvatar}><Building2 size={22} /></div>
             <div>
-              <p style={s.modalKicker}>Cliente ILUX #{customer.externalId || '—'}</p>
+              <p style={s.modalKicker}>Cliente ILUX WEB #{customer.externalId || '—'}</p>
               <h2 id="crm-profile-title" style={s.modalTitle}>{customer.fantasyName || customer.name}</h2>
               <div style={s.headerMeta}>
                 {customer.cpfCnpj ? <span>{customer.cpfCnpj}</span> : null}
@@ -751,7 +751,7 @@ function OverviewTab({ customer, equipments, contracts, serviceOrders, customer3
         <div style={s.infoGrid}>
           <Info label="Razão social" value={customer.name} wide />
           <Info label="Nome fantasia" value={customer.fantasyName} />
-          <Info label="Código ILUX" value={customer.externalId} />
+          <Info label="Código ILUX WEB" value={customer.externalId} />
           <Info label="CNPJ / CPF" value={customer.cpfCnpj} />
           <Info label="Inscrição estadual" value={pick(customer, 'stateRegistration', 'inscEst', 'ie') || pick(customer.raw || {}, 'INSCEST', 'inscest')} />
         </div>
@@ -897,7 +897,7 @@ function UnitsTab({ units }) {
 }
 
 function ContactsTab({ contacts, quickActions, onOpenConversation }) {
-  if (!contacts.length) return <Empty icon={<Phone size={28} />} title="Nenhum contato identificado" text="Os responsáveis aparecerão conforme os cadastros do iLux e WhatsApp forem vinculados." />;
+  if (!contacts.length) return <Empty icon={<Phone size={28} />} title="Nenhum contato identificado" text="Os responsáveis aparecerão conforme os cadastros do ILUX WEB e WhatsApp forem vinculados." />;
   return (
     <div style={s.contactsGrid}>
       {contacts.map((contact) => (
@@ -990,7 +990,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
   // Sem isso, o usuário via "Acesso restrito" por um instante antes dos dados reais.
   if (!financial && loading) return <div style={s.loadingInline}><RefreshCw size={16} className="spin" /> Carregando dados financeiros...</div>;
   if (!financial?.allowed) return <Empty icon={<CreditCard size={28} />} title="Acesso financeiro restrito" text={financial?.reason || 'Esta área está disponível apenas para administradores.'} />;
-  if (!financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Aguardando sincronização financeira" text="Atualize o agente Firebird para carregar os títulos recentes do iLux." />;
+  if (!financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Aguardando sincronização financeira" text="Atualize a integração do ILUX WEB para carregar os títulos recentes." />;
 
   const documents = normalizeBillingDocuments(documentsData?.documents, selected);
   const delivery = documentsData?.delivery || {};
@@ -1033,7 +1033,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
       }
       const mediaUrl = getMediaUrl(prepared.mediaUrl);
       if (!mediaUrl) throw new Error(prepared.status === 'pending'
-        ? 'O documento está sendo preparado pelo agente iLux. Tente novamente em instantes.'
+        ? 'O documento está sendo preparado pelo ILUX WEB. Tente novamente em instantes.'
         : 'O servidor não devolveu o arquivo solicitado.');
       if (mode === 'open') {
         if (preview) preview.location.replace(mediaUrl);
@@ -1168,7 +1168,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
                 <Info label="Forma de pagamento" value={selected.paymentMethod} />
                 <Info label="Situação do boleto" value={selected.boletoStatus} />
                 <Info label="Nosso número" value={selected.ourNumber} />
-                <Info label="Contrato ILUX" value={selected.contractExternalId} />
+                <Info label="Contrato ILUX WEB" value={selected.contractExternalId} />
               </div>
               {selected.digitableLine ? (
                 <div style={s.digitableLineBox}><span>Linha digitável</span><strong>{selected.digitableLine}</strong></div>
@@ -1189,7 +1189,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
                 </div>
 
                 {documentsError ? <div style={s.documentError}><AlertCircle size={16} /><span>{documentsError}</span></div> : null}
-                {documentsLoading && !documentsData ? <div style={s.documentsLoading}><RefreshCw size={16} className="spin" /> Consultando NF, demonstrativo e boleto no iLux...</div> : null}
+                {documentsLoading && !documentsData ? <div style={s.documentsLoading}><RefreshCw size={16} className="spin" /> Consultando NF, demonstrativo e boleto no ILUX WEB...</div> : null}
 
                 <div style={s.documentList}>
                   {documents.map((document) => {
@@ -1302,7 +1302,7 @@ function EquipmentDetail({ equipment, evolution }) {
   return (
     <div style={s.detailPanel}>
       <div style={s.detailHeader}>
-        <div style={{ minWidth: 0 }}><p style={s.detailKicker}>Equipamento ILUX #{equipment.externalId || '—'}</p><h3 style={s.detailTitle}>{equipment.model || 'Equipamento sem modelo'}</h3></div>
+        <div style={{ minWidth: 0 }}><p style={s.detailKicker}>Equipamento ILUX WEB #{equipment.externalId || '—'}</p><h3 style={s.detailTitle}>{equipment.model || 'Equipamento sem modelo'}</h3></div>
         <span style={equipment.isActive === false ? s.statusInactive : s.statusActive}>{equipment.isActive === false ? 'Inativo' : 'Ativo'}</span>
       </div>
       <InfoSection title="Identificação" icon={<Printer size={17} />} compact>
@@ -1313,7 +1313,7 @@ function EquipmentDetail({ equipment, evolution }) {
           <Info label="Patrimônio" value={equipment.assetTag} />
           <Info label="Tipo" value={equipment.type} />
           <Info label="Proprietário" value={equipmentOwnerLabel(equipment)} />
-          <Info label="Contrato ILUX" value={equipment.contractExternalId} />
+                <Info label="Contrato ILUX WEB" value={equipment.contractExternalId} />
         </div>
       </InfoSection>
       <div style={s.locationPanel}>
@@ -1422,7 +1422,7 @@ function ContractsTab({ contracts }) {
             <div style={s.contractHeader}>
               <div style={s.contractIcon}><FileText size={19} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={s.detailKicker}>Contrato ILUX #{pick(contract, 'contractNumber', 'number', 'externalId', 'seqContrato') || '—'}</p>
+                <p style={s.detailKicker}>Contrato ILUX WEB #{pick(contract, 'contractNumber', 'number', 'externalId', 'seqContrato') || '—'}</p>
                 <h3 style={s.contractTitle}>{pick(contract, 'name', 'typeName', 'contractType', 'type', 'description') || 'Contrato de equipamentos'}</h3>
               </div>
               <span style={active ? s.statusActive : s.statusInactive}>{active ? 'Ativo' : 'Inativo'}</span>
@@ -1512,7 +1512,7 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
     }
   }
 
-  if (!orders.length) return <Empty icon={<ClipboardList size={28} />} title="Nenhuma O.S. sincronizada" text="O histórico aparecerá aqui assim que a sincronização incremental importar os chamados do ILUX." />;
+  if (!orders.length) return <Empty icon={<ClipboardList size={28} />} title="Nenhuma O.S. sincronizada" text="O histórico aparecerá aqui assim que o ILUX WEB disponibilizar os chamados." />;
   return (
     <div style={s.sectionStack}>
       <div style={s.osToolbar}>
@@ -1539,12 +1539,12 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
                 <div style={s.osMeta}>
                   <span><Printer size={13} /> {pick(order, 'equipmentModel', 'equipment', 'model') || `Equip. ${pick(order, 'equipmentExternalId', 'equipmentId', 'cdequipamento') || '—'}`}</span>
                   <span><Wrench size={13} /> {pick(order, 'technicianName', 'technician', 'assignedTo') || 'Técnico não informado'}</span>
-                  {pick(order, 'statusCode', 'cdStatus', 'cdstatus') ? <span>Status ILUX: {pick(order, 'statusCode', 'cdStatus', 'cdstatus')}</span> : null}
+                  {pick(order, 'statusCode', 'cdStatus', 'cdstatus') ? <span>Status ILUX WEB: {pick(order, 'statusCode', 'cdStatus', 'cdstatus')}</span> : null}
                   {pick(order, 'closedAt', 'finishedAt') ? <span><CalendarDays size={13} /> Fechada em {formatDate(pick(order, 'closedAt', 'finishedAt'))}</span> : null}
                 </div>
                 {closed && pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing') ? <div style={s.resolution}><strong>Fechamento:</strong> {pick(order, 'resolution', 'closingNotes', 'solution', 'fechamento', 'closing')}</div> : null}
                 <div style={s.osActions}>
-                  <button type="button" style={s.osActionBtn} disabled={!printable} title={printable ? '' : 'Aguardando confirmacao do iLux'} onClick={() => openPdf(order)}><FileText size={14} /> Abrir O.S. / Reimprimir</button>
+                  <button type="button" style={s.osActionBtn} disabled={!printable} title={printable ? '' : 'Aguardando confirmação do ILUX WEB'} onClick={() => openPdf(order)}><FileText size={14} /> Abrir O.S. / Reimprimir</button>
                   <button type="button" style={s.osActionPrimary} disabled={!printable || Boolean(sendingId)} onClick={() => sendToManager(order)}>
                     {sending ? <RefreshCw size={14} /> : <Send size={14} />} {sending ? 'Enviando...' : 'Enviar ao gestor'}
                   </button>
@@ -1800,7 +1800,7 @@ function documentLoadingPageHtml(label) {
 function billingDocumentStatus(document) {
   if (document.error) return document.error;
   if (document.available === false || document.status === 'unavailable') return 'Não vinculado a esta cobrança';
-  if (document.status === 'pending') return 'Aguardando o agente iLux';
+  if (document.status === 'pending') return 'Aguardando o ILUX WEB';
   if (document.status === 'failed') return 'Falha ao gerar — tente novamente';
   if (document.status === 'ready') return 'Pronto para visualizar e enviar';
   return 'Disponível para gerar';

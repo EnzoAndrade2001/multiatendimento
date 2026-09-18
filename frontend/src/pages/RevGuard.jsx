@@ -299,8 +299,8 @@ export default function RevGuard() {
       <header style={s.header}>
         <div style={s.headerInfo}>
           <div style={s.kickerGroup}>
-            <span style={s.kicker}>iLux Sentinela</span>
-            <span style={s.intelligenceBadge}>Inteligência sobre dados reais do iLux</span>
+            <span style={s.kicker}>ILUX WEB Sentinela</span>
+            <span style={s.intelligenceBadge}>Inteligência sobre dados reais do ILUX WEB</span>
           </div>
           <h1 style={s.title}>Cockpit de Operações e Receita</h1>
           <p style={s.subtitle}>Decida sobre o parque, acompanhe O.S., proteja SLAs e melhore a qualidade dos atendimentos.</p>
@@ -314,7 +314,7 @@ export default function RevGuard() {
       {syncState && (
         <div style={{ ...s.syncBanner, ...(syncState.stale ? s.syncBannerStale : {}) }}>
           <div>
-            <strong>{syncState.stale ? 'Atenção: os indicadores podem estar desatualizados.' : 'Dados operacionais sincronizados do iLux.'}</strong>
+            <strong>{syncState.stale ? 'Atenção: os indicadores podem estar desatualizados.' : 'Dados operacionais sincronizados do ILUX WEB.'}</strong>
             <span>
               {syncState.lastSyncedAt
                 ? ` Última leitura: ${new Date(syncState.lastSyncedAt).toLocaleString('pt-BR')}.`
@@ -366,7 +366,7 @@ export default function RevGuard() {
             <div style={s.spinner} /> Carregando riscos de receita e SLA...
           </div>
         ) : !crisisData ? (
-          <div style={s.errorBox}>Erro ao carregar dados do iLux Sentinela.</div>
+          <div style={s.errorBox}>Erro ao carregar dados do ILUX WEB Sentinela.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             {/* KPI Grid */}
@@ -424,7 +424,7 @@ export default function RevGuard() {
                   <span style={s.kpiHint}>
                     {crisisData.stalledEstimatesValue > 0
                       ? `${formatCurrency(crisisData.stalledEstimatesValue)} aguardando aprovação do cliente`
-                      : 'Aguardando aprovação do cliente (iLux)'}
+                      : 'Aguardando aprovação do cliente (ILUX WEB)'}
                   </span>
                 </div>
               </div>
@@ -1092,7 +1092,7 @@ export default function RevGuard() {
             
             <div style={s.modalBody}>
               {drilldownLoading ? (
-                <div style={s.loadingBox}><div style={s.spinner} /> Buscando detalhamento direto do banco iLux...</div>
+                <div style={s.loadingBox}><div style={s.spinner} /> Buscando detalhamento direto do banco ILUX WEB...</div>
               ) : drilldownData.length === 0 ? (
                 <p style={s.emptyHint}>Nenhum registro encontrado para esta métrica no momento.</p>
               ) : (

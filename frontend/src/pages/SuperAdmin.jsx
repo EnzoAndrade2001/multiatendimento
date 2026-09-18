@@ -227,7 +227,7 @@ export default function SuperAdmin() {
   const operationalAlerts = useMemo(() => {
     const alerts = [];
     for (const agent of fbAgents?.agents || []) {
-      if (!agent.online) alerts.push({ key: `agent-offline-${agent.id}`, severity: 'critical', title: 'Agente iLux offline', detail: `${agent.tenantName || 'Empresa'} · ${agent.hostname || agent.installId}` });
+      if (!agent.online) alerts.push({ key: `agent-offline-${agent.id}`, severity: 'critical', title: 'Agente ILUX WEB offline', detail: `${agent.tenantName || 'Empresa'} · ${agent.hostname || agent.installId}` });
       else if (agent.updateAvailable) alerts.push({ key: `agent-version-${agent.id}`, severity: 'warning', title: 'Agente desatualizado', detail: `${agent.tenantName || 'Empresa'} · versão ${agent.version || 'desconhecida'}` });
     }
     for (const tenant of tenants) {
@@ -708,7 +708,7 @@ function AgentReleasesModal({ onClose }) {
   }
 
   const formatSize = (bytes) => bytes == null ? 'Tamanho indisponível' : `${(bytes / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
-  return <ModalShell kicker="Distribuição controlada" title="Versões do agente iLux" onClose={onClose} maxWidth="58rem">
+  return <ModalShell kicker="Distribuição controlada" title="Versões do agente ILUX WEB" onClose={onClose} maxWidth="58rem">
     <div style={s.form}>
       <div style={s.companyMeta}>Use o download manual para a primeira instalação da versão 1.2.0. Depois disso, as atualizações podem ser enviadas pela Central de Agentes.</div>
       {!catalog ? <div style={s.empty}>Carregando versões...</div> : (catalog.releases || []).map((release) => <div key={release.version} style={s.loginRow}>

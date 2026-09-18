@@ -362,7 +362,7 @@ export default function Layout() {
     { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard', permission: 'dashboard.view', feature: 'dashboard', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/inbox', icon: <MessageSquare size={18} />, label: 'Chat', permission: 'inbox.view', feature: 'inbox', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/crm', icon: <Database size={18} />, label: 'CRM', permission: 'crm.view', feature: 'crm', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/revenue', icon: <Coins size={18} />, label: 'iLux Sentinela', permission: 'revenue.view', feature: 'ilux_sentinel', roles: ['admin', 'superadmin'] },
+    { to: '/revenue', icon: <Coins size={18} />, label: 'ILUX WEB Sentinela', permission: 'revenue.view', feature: 'ilux_sentinel', roles: ['admin', 'superadmin'] },
     // Operação › Clientes & conversas
     { section: 'Clientes & conversas', action: () => setIsChatOpen(true), icon: <MessageCircle size={18} />, label: 'Chat Interno', permission: 'internal_chat.view', feature: 'internal_chat', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', feature: 'contacts', roles: ['admin', 'agent', 'superadmin'] },
@@ -373,7 +373,7 @@ export default function Layout() {
     { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', feature: 'lead_generation', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Inteligência & gestão
     { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', feature: 'ai_knowledge', roles: ['admin', 'agent', 'superadmin'] },
-    { section: 'Inteligência & gestão', to: '/assistente-ilux', icon: <Bot size={18} />, label: 'Assistente iLux', permission: 'ai.assistant.query', feature: 'ai_assistant', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/assistente-ilux', icon: <Bot size={18} />, label: 'Assistente ILUX WEB', permission: 'ai.assistant.query', feature: 'ai_assistant', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', feature: 'telemetry', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', feature: 'billing_reports', roles: ['admin', 'superadmin'] },
     // Operação › Sistema

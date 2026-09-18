@@ -376,7 +376,7 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
               return (
               <div key={os.id} style={s.osCard}>
                 <div>
-                  <div style={s.osTitle}>{printable ? `O.S. #${os.externalId}` : 'O.S. aguardando confirmacao do iLux'}</div>
+                  <div style={s.osTitle}>{printable ? `O.S. #${os.externalId}` : 'O.S. aguardando confirmação do ILUX WEB'}</div>
                   <div style={s.osMeta}>Data: {new Date(os.createdAt).toLocaleDateString()}</div>
                   <div style={s.osDefect}>Defeito: {os.defect}</div>
                 </div>

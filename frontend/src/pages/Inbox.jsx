@@ -1292,7 +1292,7 @@ export default function Inbox() {
               toast.error('A confirmação da O.S. não foi enviada porque os dados não correspondem a esta conversa.');
               return;
             }
-            toast.success(`O.S. ${os.externalId} criada no iLux!`);
+            toast.success(`O.S. ${os.externalId} criada no ILUX WEB!`);
             try {
               await sendMessage(
                 ticketId,

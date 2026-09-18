@@ -27,7 +27,7 @@ import ModalShell from '../components/ui/ModalShell';
 
 const EMPTY_FORM = { question: '', answer: '', tags: '', active: true };
 const EMPTY_DOCUMENT = { title: '', description: '', category: 'MANUAL', audience: 'CUSTOMER', manufacturer: '', equipmentModel: '', version: '', language: 'pt-BR', supersedesId: '', file: null };
-const AUDIT_ORIGIN_LABELS = { RAG: 'RAG', ILUX_DATA: 'Dados do iLux', LLM_GENERAL: 'Conhecimento geral da IA', MIXED: 'Misto' };
+const AUDIT_ORIGIN_LABELS = { RAG: 'RAG', ILUX_DATA: 'Dados do ILUX WEB', LLM_GENERAL: 'Conhecimento geral da IA', MIXED: 'Misto' };
 
 function formatAuditOrigin(origin) {
   return AUDIT_ORIGIN_LABELS[origin] || 'Não identificado';
@@ -281,7 +281,7 @@ export default function KnowledgeBase() {
             <select style={s.input} value={auditOrigin} onChange={(event) => setAuditOrigin(event.target.value)}>
               <option value="">Todas as origens</option>
               <option value="RAG">RAG (base de conhecimento)</option>
-              <option value="ILUX_DATA">Dados do iLux</option>
+                      <option value="ILUX_DATA">Dados do ILUX WEB</option>
               <option value="LLM_GENERAL">Conhecimento geral da IA</option>
               <option value="MIXED">Misto</option>
             </select>
@@ -307,7 +307,7 @@ export default function KnowledgeBase() {
                     <div style={s.auditSources}>
                       {sourceSnapshot.assistantMode === 'TECHNICIAN' ? <span>Assistente tecnico interno{sourceSnapshot.actorUserId ? ' autorizado' : ''}</span> : null}
                       <span>{item.found ? 'Correspondência encontrada na consulta' : 'Nenhuma correspondência oficial encontrada'}</span>
-                      {sourceSnapshot.equipmentCount ? <span>{sourceSnapshot.equipmentCount} equipamento(s) do iLux no contexto</span> : null}
+                      {sourceSnapshot.equipmentCount ? <span>{sourceSnapshot.equipmentCount} equipamento(s) do ILUX WEB no contexto</span> : null}
                       {sourceSnapshot.hasNotes ? <span>Observações do cliente no contexto</span> : null}
                       {sourceItems.length ? <span>{sourceItems.length} fonte(s) disponibilizada(s)</span> : null}
                     </div>
@@ -392,7 +392,7 @@ export default function KnowledgeBase() {
             <input style={s.input} value={form.question} onChange={(event) => setForm({ ...form, question: event.target.value })} placeholder="Ex: O que fazer quando aparecer o erro SC 542?" required />
             <span style={s.fieldHelp}>Inclua o código, modelo ou termo que o cliente normalmente usaria.</span>
             <label style={s.label}>Resposta oficial</label>
-            <textarea style={{ ...s.input, minHeight: 170, resize: 'vertical' }} value={form.answer} onChange={(event) => setForm({ ...form, answer: event.target.value })} placeholder="Escreva o procedimento aprovado, com limites claros e sem promessas que dependam do iLux." required />
+                    <textarea style={{ ...s.input, minHeight: 170, resize: 'vertical' }} value={form.answer} onChange={(event) => setForm({ ...form, answer: event.target.value })} placeholder="Escreva o procedimento aprovado, com limites claros e sem promessas que dependam do ILUX WEB." required />
             <label style={s.label}>Palavras-chave (opcional)</label>
             <input style={s.input} value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="sc542, fusor, ricoh, erro de impressão" />
             <label style={s.activeOption}>

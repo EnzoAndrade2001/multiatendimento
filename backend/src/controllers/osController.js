@@ -23,6 +23,19 @@ const OS_DRAFT_TIMEOUT_MS = Math.max(
   Math.min(Number.parseInt(process.env.OS_DRAFT_TIMEOUT_MS, 10) || 20_000, 60_000)
 );
 
+const ILUX_WEB_EQUIPMENT_SOURCES = new Set([
+  'firebird',
+  'ilux_web',
+  'ilux-web',
+  'iluxweb',
+  'lcddigitalweb',
+]);
+
+function isIluxWebEquipment(equipment) {
+  const source = String(equipment?.externalSource || '').trim().toLowerCase();
+  return Boolean(equipment?.externalId && ILUX_WEB_EQUIPMENT_SOURCES.has(source));
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -389,14 +402,14 @@ async function createOS(req, res) {
     }
     if (!contact) return res.status(404).json({ error: 'Cliente não encontrado.' });
     if (!contact.externalId && !contact.crmCustomer?.externalId) {
-      return res.status(400).json({ error: 'Vincule a conversa a um cliente do iLux antes de abrir a O.S.' });
+      return res.status(400).json({ error: 'Vincule a conversa a um cliente do ILUX WEB antes de abrir a O.S.' });
     }
     if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
-    if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do iLux.' });
-    if (equipment.externalSource !== 'firebird' || !equipment.externalId) {
-      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o iLux.' });
+    if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do ILUX WEB.' });
+    if (!isIluxWebEquipment(equipment)) {
+      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o ILUX WEB.' });
     }
-    // O vínculo confiável é a identidade do cliente no iLux, não Equipment.contactId:
+    // O vínculo confiável é a identidade do cliente no ILUX WEB, não Equipment.contactId:
     // Equipment é uma linha por máquina (única por externalId) e esse contactId é
     // reescrito toda vez que QUALQUER contato do mesmo cliente abre este modal
     // (syncCrmEquipmentsToEquipment). Comparar por contactId fazia dois atendentes
@@ -404,7 +417,11 @@ async function createOS(req, res) {
     let equipmentBelongsToCustomer = equipment.contactId === contactId;
     if (!equipmentBelongsToCustomer) {
       const crmEquip = await prisma.crmEquipment.findFirst({
-        where: { tenantId, externalSource: 'firebird', externalId: equipment.externalId },
+        where: {
+          tenantId,
+          externalId: equipment.externalId,
+          externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
+        },
         select: { customerId: true, customer: { select: { externalId: true } } },
       });
       const contactCustomerId = contact.crmCustomerId || null;
@@ -418,13 +435,13 @@ async function createOS(req, res) {
     if (!equipmentBelongsToCustomer) {
       return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
     }
-    if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do iLux.' });
+    if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do ILUX WEB.' });
 
     if (nmsuportet) {
       const technician = await prisma.crmTechnician.findFirst({
         where: { tenantId, name: nmsuportet, isActive: true },
       });
-      if (!technician) return res.status(400).json({ error: 'O técnico selecionado não está ativo no iLux.' });
+      if (!technician) return res.status(400).json({ error: 'O técnico selecionado não está ativo no ILUX WEB.' });
     }
 
     let os = await prisma.serviceOrder.findFirst({
@@ -448,7 +465,7 @@ async function createOS(req, res) {
         where: {
           tenantId,
           ticketId,
-          externalSource: 'firebird',
+          externalSource: { in: ['firebird', 'ilux_web'] },
           externalId: null,
           status: { in: ['AGUARDANDO_ILUX', 'PROCESSANDO_ILUX', 'ERRO_INTEGRACAO'] },
         },
@@ -494,7 +511,7 @@ async function createOS(req, res) {
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
-          externalSource: 'firebird',
+          externalSource: 'ilux_web',
           externalId: null,
           requestKey: normalizedRequestKey,
         },
@@ -507,13 +524,16 @@ async function createOS(req, res) {
     // definitiva vem deste POST, sem depender do agente Firebird.
     if (isIluxWebConfigured()) {
       try {
-        const clienteCodigoLegado = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
-        const equipamentoCodigoLegado = String(equipment.externalId || '').trim();
+        const clienteIdentificador = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
+        const equipamentoIdentificador = String(equipment.externalId || '').trim();
         const respostaIlux = await createServiceOrderInIluxWeb({
           origem: 'CRM',
           ordemServicoId: os.id,
-          clienteCodigoLegado,
-          equipamentoCodigoLegado,
+          clienteIdentificador,
+          equipamentoIdentificador,
+          // Compatibilidade com o contrato antigo, quando os IDs eram numéricos.
+          clienteCodigoLegado: clienteIdentificador,
+          equipamentoCodigoLegado: equipamentoIdentificador,
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
@@ -568,7 +588,7 @@ async function createOS(req, res) {
         && confirmed.equipmentId === equipmentId
         && /^\d+$/.test(String(confirmed.externalId));
       if (!matchesRequestedContext) {
-        console.error('[createOS] confirmação do iLux rejeitada por contexto divergente', {
+        console.error('[createOS] confirmação do ILUX WEB rejeitada por contexto divergente', {
           serviceOrderId: confirmed.id,
           requested: { ticketId, contactId, equipmentId },
           confirmed: {
@@ -579,7 +599,7 @@ async function createOS(req, res) {
           },
         });
         return res.status(409).json({
-          error: 'O iLux confirmou uma O.S. com dados diferentes desta conversa. Nenhuma confirmação foi enviada ao cliente.',
+          error: 'O ILUX WEB confirmou uma O.S. com dados diferentes desta conversa. Nenhuma confirmação foi enviada ao cliente.',
           serviceOrderId: confirmed.id,
         });
       }
@@ -587,12 +607,12 @@ async function createOS(req, res) {
     }
     if (confirmed.status === 'ERRO_INTEGRACAO') {
       return res.status(502).json({
-        error: 'O agente encontrou um erro e a abertura não foi confirmada no iLux.',
+        error: 'O agente encontrou um erro e a abertura não foi confirmada no ILUX WEB.',
         serviceOrderId: confirmed.id,
       });
     }
     return res.status(504).json({
-      error: 'O agente do iLux não confirmou a abertura dentro do tempo esperado. Verifique o agente antes de tentar novamente.',
+      error: 'O ILUX WEB não confirmou a abertura dentro do tempo esperado. Verifique a integração antes de tentar novamente.',
       serviceOrderId: confirmed.id,
       status: confirmed.status,
     });
@@ -685,7 +705,7 @@ async function generatePdf(req, res) {
 
   if (!os.externalId || os.status === 'ERRO_INTEGRACAO') {
     return res.status(409).json({
-      error: 'Esta O.S. ainda nao foi confirmada pelo iLux e nao pode ser impressa.',
+      error: 'Esta O.S. ainda nao foi confirmada pelo ILUX WEB e nao pode ser impressa.',
     });
   }
 
@@ -857,7 +877,7 @@ async function generatePdf(req, res) {
       .sort((left, right) => Number(right.externalId || 0) - Number(left.externalId || 0))
       .slice(0, 5);
   } catch (err) {
-    console.error('[generatePdf] erro ao carregar histórico do iLux:', err);
+    console.error('[generatePdf] erro ao carregar histórico do ILUX WEB:', err);
     previousOrders = [];
   }
 
@@ -1062,7 +1082,7 @@ async function generatePdf(req, res) {
         ])
       : [[
           {
-            text: 'Nenhum chamado anterior encontrado para este cliente no iLux.',
+            text: 'Nenhum chamado anterior encontrado para este cliente no ILUX WEB.',
             colSpan: 2,
             alignment: 'center',
             color: '#666',
@@ -1305,7 +1325,7 @@ async function generatePdf(req, res) {
           body: [[
             {
               stack: [
-                { text: [{ text: 'Código iLux: ', bold: true }, String(clientExternalId), { text: '   Cliente: ', bold: true }, String(clientName)] },
+                { text: [{ text: 'Código ILUX WEB: ', bold: true }, String(clientExternalId), { text: '   Cliente: ', bold: true }, String(clientName)] },
                 { text: [{ text: 'Endereço: ', bold: true }, String(clientAddress)] },
                 { text: [{ text: 'Bairro: ', bold: true }, String(clientNeighborhood), { text: '   CEP: ', bold: true }, String(clientZipCode)] },
                 { text: [{ text: 'Cidade: ', bold: true }, String(clientCity), { text: '   U.F.: ', bold: true }, String(clientState)] },

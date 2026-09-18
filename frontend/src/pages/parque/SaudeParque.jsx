@@ -122,7 +122,7 @@ function Cobertura() {
   return (
     <>
       <div style={s.kpis}>
-        <div style={s.kpi} title="Equipamentos ativos do iLux com vínculo PrintGuard confirmado"><span style={s.kpiV}>{int(sum.total)}</span><span style={s.kpiL}>Vinculadas ao PrintGuard</span></div>
+        <div style={s.kpi} title="Equipamentos ativos do ILUX WEB com vínculo PrintGuard confirmado"><span style={s.kpiV}>{int(sum.total)}</span><span style={s.kpiL}>Vinculadas ao PrintGuard</span></div>
         <div style={s.kpi} title="Percentual dos equipamentos vinculados que enviou sinal nas últimas 48 horas"><span style={{ ...s.kpiV, color: 'var(--accent)' }}>{sum.coveragePct ?? 0}%</span><span style={s.kpiL}>Com sinal recente</span></div>
         <div style={s.kpi}><span style={{ ...s.kpiV, color: 'var(--warning-text)' }}>{int(sum.offline)}</span><span style={s.kpiL}>Offline &gt; 48h</span></div>
         <div style={s.kpi}><span style={{ ...s.kpiV, color: 'var(--critical)' }}>{int(sum.noSignal)}</span><span style={s.kpiL}>Sem sinal</span></div>
@@ -138,7 +138,7 @@ function Cobertura() {
                 <tr key={r.id}>
                   <td style={s.td}><b>{r.model}</b><span style={s.small}><span style={s.mono}>{r.serialNumber || '—'}</span></span></td>
                   <td style={s.td}>{r.customerName || '—'}</td>
-                  <td style={s.td}><span style={{ ...s.pill, ...(r.status === 'offline' ? s.pillWarn : s.pillCrit) }}>{r.status === 'offline' ? `offline ${r.ageDays}d` : r.status === 'inativo' ? 'inativo no iLux' : 'sem sinal'}</span></td>
+                  <td style={s.td}><span style={{ ...s.pill, ...(r.status === 'offline' ? s.pillWarn : s.pillCrit) }}>{r.status === 'offline' ? `offline ${r.ageDays}d` : r.status === 'inativo' ? 'inativo no ILUX WEB' : 'sem sinal'}</span></td>
                   <td style={s.td}>{r.lastSignalAt ? new Date(r.lastSignalAt).toLocaleString('pt-BR') : 'nunca'}</td>
                 </tr>
               ))}

@@ -108,7 +108,7 @@ export default function Dashboard() {
         subtitle="Indicadores em tempo real para acompanhar eficiência, qualidade e capacidade da equipe."
         actions={(
           <div style={s.headerActions}>
-            <div style={{ ...s.statusBadge, ...healthStatus.badge }} title="Status calculado a partir das instâncias WhatsApp e da última sincronização do iLux">
+            <div style={{ ...s.statusBadge, ...healthStatus.badge }} title="Status calculado a partir das instâncias WhatsApp e da última sincronização do ILUX WEB">
               <span style={{ ...s.dot, background: healthStatus.color, boxShadow: `0 0 10px ${healthStatus.glow}` }} /> {healthStatus.label}
             </div>
             <button type="button" style={s.refreshBtn} onClick={() => load(periodDays, { silent: true, force: true })} disabled={refreshing}>
@@ -143,7 +143,7 @@ export default function Dashboard() {
       <div style={s.healthRow} aria-label="Saúde das integrações">
         <span style={s.updatedAt}><Clock size={13} /> Atualizado às {formatDateTime(lastUpdatedAt)}</span>
         <span style={{ ...s.healthChip, ...whatsappHealth.chip }}><CheckCircle2 size={13} /> WhatsApp: {whatsappHealth.label}</span>
-        <span style={{ ...s.healthChip, ...firebirdHealth.chip }}><Database size={13} /> iLux: {firebirdHealth.label}</span>
+        <span style={{ ...s.healthChip, ...firebirdHealth.chip }}><Database size={13} /> ILUX WEB: {firebirdHealth.label}</span>
         <span style={s.queueHint}>Fila: {kpis.activeTickets || 0} abertas · {kpis.pendingTickets || 0} aguardando</span>
       </div>
 

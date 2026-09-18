@@ -176,7 +176,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
       completeOrder(res.data);
     } catch (e) {
       setPendingOrderId(e.response?.data?.serviceOrderId || '');
-      setError(e.response?.data?.error || 'Não foi possível confirmar a abertura no iLux. Tente novamente.');
+      setError(e.response?.data?.error || 'Não foi possível confirmar a abertura no ILUX WEB. Tente novamente.');
     } finally {
       setSaving(false);
     }
@@ -189,7 +189,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     try {
       const { data } = await api.get(`/os/${pendingOrderId}/status`);
       if (!data.externalId) {
-        setError('A abertura ainda não foi confirmada pelo agente do iLux. Aguarde alguns segundos e tente novamente.');
+        setError('A abertura ainda não foi confirmada pelo ILUX WEB. Aguarde alguns segundos e tente novamente.');
         return;
       }
       completeOrder(data);
@@ -224,12 +224,12 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         {createdOrder ? (
           <div style={{ textAlign: 'center', padding: 'var(--space-6) var(--space-2) var(--space-2)' }}>
             <CheckCircle2 size={48} color="var(--success)" style={{ marginBottom: 'var(--space-3)' }} />
-            <h3 style={{ margin: '0 0 8px', color: 'var(--text-main)' }}>O.S. criada no iLux</h3>
+            <h3 style={{ margin: '0 0 8px', color: 'var(--text-main)' }}>O.S. criada no ILUX WEB</h3>
             <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 900, color: 'var(--accent)', marginBottom: 'var(--space-2)', fontVariantNumeric: 'tabular-nums' }}>
               Nº {createdOrder.externalId}
             </div>
             <p style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-5)' }}>
-              O número acima foi confirmado diretamente pelo banco do iLux.
+              O número acima foi confirmado diretamente pelo banco do ILUX WEB.
             </p>
             <div style={s.btnGroup}>
               <a
@@ -363,7 +363,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               {pendingOrderId ? (
                 <>
                   <button style={{ ...s.saveBtn, opacity: saving ? 0.65 : 1 }} onClick={checkStatus} disabled={saving}>
-                    {saving ? 'Consultando...' : 'Verificar no iLux'}
+                    {saving ? 'Consultando...' : 'Verificar no ILUX WEB'}
                   </button>
                   <button style={{ ...s.saveBtn, opacity: saving ? 0.65 : 1 }} onClick={handleSave} disabled={saving}>
                     Tentar novamente
@@ -371,7 +371,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                 </>
               ) : (
                 <button style={{ ...s.saveBtn, opacity: saving ? 0.65 : 1 }} onClick={handleSave} disabled={saving}>
-                  {saving ? <><LoaderCircle size={16} style={{ verticalAlign: 'middle', marginRight: '8px' }} />Abrindo no iLux...</> : (openOrders.length > 0 ? 'Abrir outra mesmo assim' : 'Abrir O.S. no iLux')}
+                  {saving ? <><LoaderCircle size={16} style={{ verticalAlign: 'middle', marginRight: '8px' }} />Abrindo no ILUX WEB...</> : (openOrders.length > 0 ? 'Abrir outra mesmo assim' : 'Abrir O.S. no ILUX WEB')}
                 </button>
               )}
             </div>
