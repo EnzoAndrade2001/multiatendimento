@@ -3,7 +3,7 @@ const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/
 const { hasPermission } = require('../auth/permissions');
 const billingDocuments = require('../services/billingDocumentService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
-const { listServiceOrdersFromIluxWeb } = require('../services/iluxWebService');
+const { listReceivablesFromIluxWeb, listServiceOrdersFromIluxWeb } = require('../services/iluxWebService');
 
 const HISTORY_DEFAULT_LIMIT = 25;
 const HISTORY_MAX_LIMIT = 100;
@@ -1221,7 +1221,7 @@ async function getCustomer360(req, res) {
   const equipmentExternalIds = customer.equipments.map((equipment) => text(equipment.externalId)).filter(Boolean);
   const canViewFinancial = hasPermission(req.user, 'crm.financial.view');
   const capabilities = getCrmCapabilities(req.user);
-  const [contracts, orderCatalog, settings, tickets, receivableRecords, meterRecords] = await Promise.all([
+  const [contracts, orderCatalog, settings, tickets, receivableRecords, iluxFinancialResult, meterRecords] = await Promise.all([
     loadContracts(tenantId, customer.externalId),
     loadCustomerOrderCatalog(tenantId, customer, HISTORY_MAX_LIMIT),
     prisma.tenantSettings.findUnique({
@@ -1264,6 +1264,13 @@ async function getCustomer360(req, res) {
         take: 120,
       })
       : [],
+    canViewFinancial && customer.externalId
+      ? listReceivablesFromIluxWeb(customer.externalId, { limit: 250 })
+        .catch((error) => {
+          console.warn(`[CRM 360] Não foi possível consultar o financeiro do ILUX_WEB para o cliente ${customer.externalId}:`, error.message);
+          return { items: [], lastSyncedAt: null, source: 'ilux_web', syncError: error.message };
+        })
+      : { items: [], lastSyncedAt: null, source: null },
     equipmentExternalIds.length
       ? prisma.externalSyncRecord.findMany({
         where: {
@@ -1281,7 +1288,33 @@ async function getCustomer360(req, res) {
   ]);
   const orders = orderCatalog.orders;
 
-  const receivables = receivableRecords.map(normalizeReceivable)
+  // O ILUX WEB é a fonte financeira oficial. O espelho Firebird continua como
+  // fallback temporário para não deixar a Visão 360 vazia durante uma
+  // indisponibilidade da integração.
+  const iluxFinancialAvailable = iluxFinancialResult.source === 'ilux_web'
+    && !iluxFinancialResult.syncError
+    && Boolean(iluxFinancialResult.lastSyncedAt);
+  const financialRecords = iluxFinancialAvailable ? iluxFinancialResult.items : receivableRecords;
+  const localFinancialSyncDates = receivableRecords
+    .map((record) => new Date(record.syncedAt || record.receivedAt || 0).getTime())
+    .filter(Number.isFinite);
+  const financialSync = iluxFinancialAvailable
+    ? {
+      source: 'ilux_web',
+      status: 'ok',
+      lastSyncedAt: iluxFinancialResult.lastSyncedAt,
+      error: null,
+    }
+    : {
+      source: iluxFinancialResult.source || 'firebird',
+      status: iluxFinancialResult.syncError ? 'error' : (receivableRecords.length ? 'ok' : 'unknown'),
+      lastSyncedAt: localFinancialSyncDates.length
+        ? new Date(Math.max(...localFinancialSyncDates)).toISOString()
+        : null,
+      error: iluxFinancialResult.syncError || null,
+    };
+
+  const receivables = financialRecords.map(normalizeReceivable)
     .filter((item) => !item.isCancelled)
     .sort((a, b) => {
       const issuedComparison = String(b.issuedAt || '').localeCompare(String(a.issuedAt || ''));
@@ -1480,7 +1513,8 @@ async function getCustomer360(req, res) {
     },
     financial: canViewFinancial ? {
       allowed: true,
-      synchronized: receivables.length > 0,
+      synchronized: financialSync.status === 'ok',
+      sync: financialSync,
       totalOpen: openReceivables.reduce((total, item) => total + item.openValue, 0),
       overdueAmount: overdueReceivables.reduce((total, item) => total + item.openValue, 0),
       overdueCount: overdueReceivables.length,
