@@ -425,7 +425,7 @@ async function createOS(req, res) {
         select: { customerId: true, customer: { select: { externalId: true } } },
       });
       const contactCustomerId = contact.crmCustomerId || null;
-      const contactCustomerExternalId = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
+      const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
       equipmentBelongsToCustomer = Boolean(
         (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
         || (crmEquip?.customer?.externalId && contactCustomerExternalId
@@ -524,7 +524,9 @@ async function createOS(req, res) {
     // definitiva vem deste POST, sem depender do agente Firebird.
     if (isIluxWebConfigured()) {
       try {
-        const clienteIdentificador = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
+        // O contato pode ter externalId igual ao JID do WhatsApp. Para o ILUX WEB,
+        // a identidade oficial é sempre o identificador do cliente sincronizado.
+        const clienteIdentificador = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
         const equipamentoIdentificador = String(equipment.externalId || '').trim();
         const respostaIlux = await createServiceOrderInIluxWeb({
           origem: 'CRM',
