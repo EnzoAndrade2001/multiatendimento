@@ -3,6 +3,44 @@ const pdfmake = require('pdfmake');
 const path = require('path');
 const fs = require('fs');
 const { draftServiceOrder } = require('../services/geminiService');
+const evolutionService = require('../services/evolutionService');
+
+// WhatsApp pessoal do Robson: recebe aviso de toda O.S. aberta pelo CRM
+const ROBSON_WHATSAPP = '555194414291';
+
+async function notifyRobsonNewOS(tenantId, os) {
+  try {
+    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
+    if (!settings?.evolutionUrl || !settings?.evolutionKey) {
+      console.log('[notifyRobsonNewOS] Evolution não configurada, aviso não enviado.');
+      return;
+    }
+
+    const instance = await prisma.waInstance.findFirst({
+      where: { tenantId, status: 'connected' }
+    });
+    if (!instance) {
+      console.log('[notifyRobsonNewOS] Nenhuma instância de WhatsApp conectada, aviso não enviado.');
+      return;
+    }
+
+    const clienteNome = os.contact?.fantasyName || os.contact?.name || 'Cliente não identificado';
+    const equipamento = [os.equipment?.manufacturer, os.equipment?.model].filter(Boolean).join(' ') || 'N/A';
+    const numeroOS = os.externalId || os.id.slice(-6).toUpperCase();
+
+    const texto = `🛠️ *NOVA O.S. ABERTA NO CRM*\n\n`
+      + `*Nº:* ${numeroOS}\n`
+      + `*Cliente:* ${clienteNome}\n`
+      + `*Equipamento:* ${equipamento}\n`
+      + `*Defeito:* ${os.defect || 'Não informado'}\n`
+      + `*Técnico:* ${os.nmsuportet || 'Não definido'}`;
+
+    await evolutionService.sendText(settings.evolutionUrl, settings.evolutionKey, instance.instanceName, ROBSON_WHATSAPP, texto);
+    console.log(`[notifyRobsonNewOS] Aviso de nova O.S. enviado para ${ROBSON_WHATSAPP}.`);
+  } catch (err) {
+    console.error('[notifyRobsonNewOS] erro ao notificar Robson:', err.message);
+  }
+}
 
 async function getEquipments(req, res) {
   const { contactId } = req.params;
@@ -125,9 +163,6 @@ async function createOS(req, res) {
   const { tenantId } = req.user;
 
   try {
-    const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } });
-    const isFirebird = equipment?.externalSource === 'firebird';
-
     const os = await prisma.serviceOrder.create({
       data: {
         tenantId,
@@ -139,12 +174,17 @@ async function createOS(req, res) {
         status: status || 'PENDENTE',
         cdOstp,
         nmsuportet,
-        externalSource: isFirebird ? 'firebird' : 'manual',
+        // Toda O.S. aberta pelo CRM é enviada para o CRM legado (Firebird) do Robson,
+        // independente da origem do equipamento.
+        externalSource: 'firebird',
         externalId: null
       },
       include: { contact: true, equipment: true }
     });
     res.json(os);
+
+    // Avisa o Robson no WhatsApp pessoal dele (não bloqueia a resposta da API)
+    notifyRobsonNewOS(tenantId, os);
   } catch (err) {
     console.error('[createOS] erro:', err.message);
     res.status(500).json({ error: 'Erro ao criar ordem de serviço.' });
