@@ -265,6 +265,56 @@ function normalizeReceivable(record) {
   };
 }
 
+/**
+ * Persiste o retrato financeiro recebido do iLux Web no PostgreSQL do CRM.
+ * O iLux continua sendo a fonte oficial; este espelho evita perder o título
+ * entre a abertura do 360 e o clique em Visualizar/Baixar.
+ */
+async function cacheIluxReceivables(tenantId, customerExternalId, result) {
+  if (!tenantId || !customerExternalId || result?.source !== 'ilux_web' || result?.syncError) return;
+  const now = new Date();
+  const writes = (Array.isArray(result.items) ? result.items : []).map((item) => {
+    const externalId = first(item?.externalId, item?.seqReceita, item?.id);
+    if (!externalId) return null;
+    const payload = {
+      ...item,
+      clientExternalId: first(item?.clientExternalId, item?.cdcliente, customerExternalId),
+    };
+    return prisma.externalSyncRecord.upsert({
+      where: {
+        tenantId_source_entity_externalId: {
+          tenantId,
+          source: 'ilux_web',
+          entity: 'receivables',
+          externalId: String(externalId),
+        },
+      },
+      update: { payload, syncedAt: now },
+      create: {
+        tenantId,
+        source: 'ilux_web',
+        entity: 'receivables',
+        externalId: String(externalId),
+        payload,
+        receivedAt: now,
+        syncedAt: now,
+      },
+    });
+  }).filter(Boolean);
+  if (!writes.length) return;
+  await prisma.$transaction(writes);
+}
+
+async function findIluxReceivable(customerExternalId, receivableExternalId) {
+  const result = await listReceivablesFromIluxWeb(customerExternalId, { limit: 500 });
+  const requested = String(receivableExternalId);
+  const item = (result.items || []).find((candidate) => {
+    const candidateId = first(candidate?.externalId, candidate?.seqReceita, candidate?.id);
+    return candidateId && String(candidateId) === requested;
+  });
+  return item ? { externalId: requested, payload: item } : null;
+}
+
 function normalizeEquipmentMeter(record) {
   const payload = record?.payload || record || {};
   return {
@@ -1299,6 +1349,10 @@ async function getCustomer360(req, res) {
       })
     : [],
   ]);
+  if (iluxFinancialResult?.source === 'ilux_web' && !iluxFinancialResult.syncError) {
+    cacheIluxReceivables(tenantId, customer.externalId, iluxFinancialResult)
+      .catch((error) => console.warn(`[CRM 360] Falha ao salvar espelho financeiro do ILUX WEB para ${customer.externalId}:`, error.message));
+  }
   const orders = orderCatalog.orders;
 
   // O ILUX WEB é a fonte financeira oficial. Não misture o espelho Firebird
@@ -1536,15 +1590,29 @@ async function getReceivableBoleto(req, res) {
   });
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado.' });
 
-  const receivable = await prisma.externalSyncRecord.findFirst({
+  let receivable = await prisma.externalSyncRecord.findFirst({
     where: {
       tenantId,
-      source: 'firebird',
+      source: 'ilux_web',
       entity: 'receivables',
       externalId: String(req.params.receivableId),
     },
     select: { externalId: true, payload: true },
   });
+  if (!receivable) {
+    receivable = await prisma.externalSyncRecord.findFirst({
+      where: {
+        tenantId,
+        source: 'firebird',
+        entity: 'receivables',
+        externalId: String(req.params.receivableId),
+      },
+      select: { externalId: true, payload: true },
+    });
+  }
+  if (!receivable && customer.externalId) {
+    receivable = await findIluxReceivable(customer.externalId, req.params.receivableId);
+  }
   if (!receivable) return res.status(404).json({ error: 'Titulo financeiro nao encontrado.' });
 
   const normalized = normalizeReceivable(receivable);
@@ -1639,15 +1707,33 @@ async function resolveCustomerReceivable(req) {
     throw error;
   }
 
-  const record = await prisma.externalSyncRecord.findFirst({
+  let record = await prisma.externalSyncRecord.findFirst({
     where: {
       tenantId,
-      source: 'firebird',
+      source: 'ilux_web',
       entity: 'receivables',
       externalId: String(req.params.receivableId),
     },
     select: { externalId: true, payload: true },
   });
+  if (!record) {
+    record = await prisma.externalSyncRecord.findFirst({
+      where: {
+        tenantId,
+        source: 'firebird',
+        entity: 'receivables',
+        externalId: String(req.params.receivableId),
+      },
+      select: { externalId: true, payload: true },
+    });
+  }
+  if (!record && customer.externalId) {
+    record = await findIluxReceivable(customer.externalId, req.params.receivableId);
+    if (record) {
+      cacheIluxReceivables(tenantId, customer.externalId, { source: 'ilux_web', items: [record.payload] })
+        .catch((error) => console.warn(`[CRM financeiro] Falha ao salvar título ${req.params.receivableId}:`, error.message));
+    }
+  }
   if (!record) {
     const error = new Error('Titulo financeiro nao encontrado.');
     error.statusCode = 404;

@@ -264,6 +264,7 @@ function directDocumentUrl(receivable, documentType) {
   if (documentType === 'fatura') return cleanText(receivable.faturaUrl);
   if (documentType === 'invoice') return cleanText(receivable.invoicePdfUrl);
   if (documentType === 'statement') return cleanText(receivable.statementUrl);
+  if (documentType === 'boleto') return cleanText(receivable.boletoUrl);
   return null;
 }
 
