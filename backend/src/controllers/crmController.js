@@ -3,7 +3,7 @@ const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/
 const { hasPermission } = require('../auth/permissions');
 const billingDocuments = require('../services/billingDocumentService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
-const { listServiceOrdersFromIluxWeb } = require('../services/iluxWebService');
+const { listContractsFromIluxWeb, listReceivablesFromIluxWeb, listServiceOrdersFromIluxWeb } = require('../services/iluxWebService');
 
 const HISTORY_DEFAULT_LIMIT = 25;
 const HISTORY_MAX_LIMIT = 100;
@@ -226,12 +226,24 @@ function normalizeReceivable(record) {
     openValue,
     invoiceNumber: first(rawValue(payload, 'invoiceNumber', 'numnf')),
     invoiceExternalId: first(rawValue(payload, 'invoiceExternalId', 'seqincnfs')),
+    invoiceId: first(rawValue(payload, 'invoiceId', 'nfseId')),
+    invoiceType: first(rawValue(payload, 'invoiceType', 'tipoNfse')),
+    invoiceStatus: first(rawValue(payload, 'invoiceStatus', 'nfseStatus')),
+    invoicePdfUrl: first(rawValue(payload, 'invoicePdfUrl', 'nfPdfUrl', 'urlNfse')),
+    invoiceXmlUrl: first(rawValue(payload, 'invoiceXmlUrl', 'nfXmlUrl', 'urlXmlNfse')),
     invoiceValue: asNumber(rawValue(payload, 'invoiceValue', 'valtotalnfs')) || value,
     invoiceCancelled: isTruthyIntegrationFlag(rawValue(payload, 'invoiceCancelled', 'tfnfscancelada')),
     sourceDeleted: isTruthyIntegrationFlag(rawValue(payload, 'sourceDeleted')),
     isCancelled,
     invoiceNotes: first(rawValue(payload, 'invoiceNotes', 'nf_obs')),
     statementExternalId: first(rawValue(payload, 'statementExternalId', 'seqdemonstrativo')),
+    statementUrl: first(rawValue(payload, 'statementUrl', 'demonstrativoUrl')),
+    faturaId: first(rawValue(payload, 'faturaId')),
+    faturaRef: first(rawValue(payload, 'faturaRef')),
+    faturaStatus: first(rawValue(payload, 'faturaStatus')),
+    faturaUrl: first(rawValue(payload, 'faturaUrl', 'invoiceUrl')),
+    hasFatura: Boolean(rawValue(payload, 'hasFatura') || rawValue(payload, 'faturaId', 'faturaRef', 'statementExternalId')),
+    hasNotaFiscal: Boolean(rawValue(payload, 'hasNotaFiscal') || rawValue(payload, 'invoiceNumber', 'invoiceExternalId', 'invoicePdfUrl')),
     billingType: first(rawValue(payload, 'billingType', 'faturamento_tipo')),
     billingPeriod: first(rawValue(payload, 'billingPeriod', 'faturamento_periodo')),
     contractExternalId: first(rawValue(payload, 'contractExternalId', 'seqixlcontratos', 'seqcontrato')),
@@ -510,17 +522,31 @@ async function findTenantCustomer(tenantId, id) {
 
 async function loadContracts(tenantId, customerExternalId) {
   if (!customerExternalId) return [];
-  const records = await prisma.externalSyncRecord.findMany({
-    where: {
-      tenantId,
-      source: 'firebird',
-      entity: 'contracts',
-      payload: { path: ['clientExternalId'], equals: String(customerExternalId) },
-    },
-    select: { id: true, externalId: true, payload: true, receivedAt: true, syncedAt: true },
-    orderBy: { receivedAt: 'desc' },
-  });
-  return records.map(normalizeContract).sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  const result = await listContractsFromIluxWeb(customerExternalId, { limit: 250 });
+  return result.items
+    .map((source) => ({
+      id: source.id || source.externalId || null,
+      externalId: first(source.externalId, source.id, source.contractNumber, source.number),
+      contractNumber: first(source.contractNumber, source.number, source.numero),
+      number: first(source.number, source.contractNumber, source.numero),
+      name: first(source.name, source.apelido, source.typeName, source.contractType, source.type),
+      type: first(source.type, source.typeName, source.contractType, source.apelido),
+      typeName: first(source.typeName, source.contractType, source.type, source.apelido),
+      status: source.status || null,
+      isActive: typeof source.isActive === 'boolean' ? source.isActive : contractIsActive(source.status, source.endsAt || source.endDate),
+      value: asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
+      monthlyValue: asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
+      fixedValue: asNumber(first(source.fixedValue, source.valorFixoMensal)) || 0,
+      franchiseValue: asNumber(first(source.franchiseValue, source.valorFranquia)) || 0,
+      totalValue: asNumber(source.totalValue) || asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
+      equipmentCount: Number(source.equipmentCount ?? source.equipmentsCount ?? (Array.isArray(source.equipments) ? source.equipments.length : 0)) || 0,
+      equipments: Array.isArray(source.equipments) ? source.equipments : [],
+      startsAt: asDate(first(source.startsAt, source.startDate, source.dataInicial)),
+      endsAt: asDate(first(source.endsAt, source.endDate, source.dataFinal)),
+      updatedAt: asDate(first(source.updatedAt, source.atualizadoEm, source.createdAt, source.criadoEm)),
+      source: 'ilux_web',
+    }))
+    .sort((a, b) => Number(b.isActive) - Number(a.isActive));
 }
 
 async function loadCustomerOrderCatalog(tenantId, customer, sourceLimit = null) {
@@ -1221,7 +1247,7 @@ async function getCustomer360(req, res) {
   const equipmentExternalIds = customer.equipments.map((equipment) => text(equipment.externalId)).filter(Boolean);
   const canViewFinancial = hasPermission(req.user, 'crm.financial.view');
   const capabilities = getCrmCapabilities(req.user);
-  const [contracts, orderCatalog, settings, tickets, receivableRecords, meterRecords] = await Promise.all([
+  const [contracts, orderCatalog, settings, tickets, iluxFinancialResult, meterRecords] = await Promise.all([
     loadContracts(tenantId, customer.externalId),
     loadCustomerOrderCatalog(tenantId, customer, HISTORY_MAX_LIMIT),
     prisma.tenantSettings.findUnique({
@@ -1252,18 +1278,12 @@ async function getCustomer360(req, res) {
       })
       : [],
     canViewFinancial && customer.externalId
-      ? prisma.externalSyncRecord.findMany({
-        where: {
-          tenantId,
-          source: 'firebird',
-          entity: 'receivables',
-          payload: { path: ['clientExternalId'], equals: String(customer.externalId) },
-        },
-        select: { id: true, externalId: true, payload: true, receivedAt: true, syncedAt: true },
-        orderBy: { receivedAt: 'desc' },
-        take: 120,
-      })
-      : [],
+      ? listReceivablesFromIluxWeb(customer.externalId, { limit: 250 })
+        .catch((error) => {
+          console.warn(`[CRM 360] Falha ao consultar o financeiro do ILUX WEB para ${customer.externalId}:`, error.message);
+          return { items: [], lastSyncedAt: null, source: 'ilux_web', syncError: error.message };
+        })
+      : { items: [], lastSyncedAt: null, source: null },
     equipmentExternalIds.length
       ? prisma.externalSyncRecord.findMany({
         where: {
@@ -1281,7 +1301,17 @@ async function getCustomer360(req, res) {
   ]);
   const orders = orderCatalog.orders;
 
-  const receivables = receivableRecords.map(normalizeReceivable)
+  // O ILUX WEB é a fonte financeira oficial. Não misture o espelho Firebird
+  // antigo com os títulos atuais: isso duplicava contas e escondia os PDFs.
+  const iluxFinancialAvailable = iluxFinancialResult.source === 'ilux_web'
+    && !iluxFinancialResult.syncError
+    && Boolean(iluxFinancialResult.lastSyncedAt);
+  const financialRecords = iluxFinancialAvailable ? iluxFinancialResult.items : [];
+  const financialSync = iluxFinancialAvailable
+    ? { source: 'ilux_web', status: 'ok', lastSyncedAt: iluxFinancialResult.lastSyncedAt, error: null }
+    : { source: 'ilux_web', status: iluxFinancialResult.syncError ? 'error' : 'unknown', lastSyncedAt: null, error: iluxFinancialResult.syncError || null };
+
+  const receivables = financialRecords.map(normalizeReceivable)
     .filter((item) => !item.isCancelled)
     .sort((a, b) => {
       const issuedComparison = String(b.issuedAt || '').localeCompare(String(a.issuedAt || ''));
@@ -1480,7 +1510,8 @@ async function getCustomer360(req, res) {
     },
     financial: canViewFinancial ? {
       allowed: true,
-      synchronized: receivables.length > 0,
+      synchronized: financialSync.status === 'ok',
+      sync: financialSync,
       totalOpen: openReceivables.reduce((total, item) => total + item.openValue, 0),
       overdueAmount: overdueReceivables.reduce((total, item) => total + item.openValue, 0),
       overdueCount: overdueReceivables.length,
@@ -1666,7 +1697,7 @@ async function getReceivableDocuments(req, res) {
     // (fila de long-poll + geração no ERP), o que podia levar quase 1 min.
     // Não bloqueia a resposta, não re-tenta documentos que já falharam ou
     // já estão em andamento (só os ainda nunca solicitados).
-    const documentsToPrewarm = documents.filter((doc) => doc.status === 'available' && ['invoice', 'statement'].includes(doc.type));
+    const documentsToPrewarm = documents.filter((doc) => doc.status === 'available' && ['invoice', 'fatura', 'statement'].includes(doc.type));
     if (documentsToPrewarm.length) {
       Promise.all(documentsToPrewarm.map((doc) => billingDocuments.queueDocumentRequest({
         tenantId: context.tenantId,

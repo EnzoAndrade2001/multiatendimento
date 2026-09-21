@@ -1169,6 +1169,8 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
                 <Info label="Situação do boleto" value={selected.boletoStatus} />
                 <Info label="Nosso número" value={selected.ourNumber} />
                 <Info label="Contrato ILUX WEB" value={selected.contractExternalId} />
+                <Info label="Fatura de locação" value={selected.faturaRef || selected.faturaId} />
+                <Info label="Nota fiscal" value={selected.invoiceNumber || selected.invoiceExternalId} />
               </div>
               {selected.digitableLine ? (
                 <div style={s.digitableLineBox}><span>Linha digitável</span><strong>{selected.digitableLine}</strong></div>
@@ -1732,6 +1734,7 @@ function formatRawValue(value) { if (!hasValue(value)) return 'Não informado'; 
 
 const BILLING_DOCUMENTS = [
   { type: 'invoice', label: 'Nota Fiscal' },
+  { type: 'fatura', label: 'Fatura de locação' },
   { type: 'statement', label: 'Demonstrativo' },
   { type: 'boleto', label: 'Boleto' },
 ];
@@ -1743,7 +1746,8 @@ function documentTypeLabel(type) {
 function normalizeBillingDocuments(documents, receivable) {
   const received = new Map(arrayOf(documents).map((item) => [item.type, item]));
   const fallbackAvailability = {
-    invoice: Boolean(receivable?.invoiceNumber),
+    invoice: Boolean(receivable?.invoiceNumber || receivable?.invoiceExternalId || receivable?.invoicePdfUrl),
+    fatura: Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.faturaRef || receivable?.faturaUrl),
     statement: Boolean(pick(receivable || {}, 'statementExternalId', 'demonstrativeExternalId', 'demonstrativoExternalId', 'billingPeriod')),
     boleto: Boolean(receivable?.hasBoleto),
   };
@@ -1817,11 +1821,13 @@ function billingDocumentStatusStyle(document) {
 
 function billingDocumentIcon(type) {
   if (type === 'boleto') return <CreditCard size={17} />;
+  if (type === 'fatura') return <Files size={17} />;
   if (type === 'statement') return <ClipboardList size={17} />;
   return <FileText size={17} />;
 }
 
 function billingDocumentSourceLabel(source) {
+  if (source === 'ilux-web-direct') return 'PDF oficial do iLux Web';
   if (source === 'crm-rerender') return 'gerado pelo CRM';
   if (source === 'ilux-export-folder') return 'arquivo da pasta';
   if (source === 'plugboleto') return 'API do banco';

@@ -1,5 +1,6 @@
 const DEFAULT_SYNC_PATH = '/api/assistencia/os/sincronizar-lcd';
 const DEFAULT_ORDERS_PATH = '/api/assistencia/os/integracao-crm/clientes';
+const DEFAULT_FINANCIAL_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_CONTRACTS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
 const DEFAULT_DEFECT_TYPES_PATH = '/api/assistencia/os/integracao-crm/tipos-defeito';
@@ -93,6 +94,19 @@ async function listServiceOrdersFromIluxWeb(customerExternalId, { limit = 100 } 
   };
 }
 
+async function listReceivablesFromIluxWeb(customerExternalId, { limit = 250 } = {}) {
+  if (!isIluxWebConfigured() || !customerExternalId) return { items: [], lastSyncedAt: null, source: null };
+  const basePath = process.env.ILUX_WEB_FINANCIAL_PATH || DEFAULT_FINANCIAL_PATH;
+  const path = `${basePath.replace(/\/+$/, '')}/${encodeURIComponent(String(customerExternalId))}/financeiro`;
+  const data = await requestJson(path, { method: 'GET' });
+  const items = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : []);
+  return {
+    items: items.slice(0, Math.max(1, Math.min(Number(limit) || 250, 500))),
+    lastSyncedAt: data.generatedAt || data.lastSyncedAt || new Date().toISOString(),
+    source: 'ilux_web',
+  };
+}
+
 async function listContractsFromIluxWeb(customerExternalId, { limit = 250 } = {}) {
   if (!isIluxWebConfigured() || !customerExternalId) return { items: [], lastSyncedAt: null, source: null };
   const basePath = process.env.ILUX_WEB_CONTRACTS_PATH || DEFAULT_CONTRACTS_PATH;
@@ -134,5 +148,6 @@ module.exports = {
   isIluxWebConfigured,
   listDefectTypesFromIluxWeb,
   listContractsFromIluxWeb,
+  listReceivablesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 };

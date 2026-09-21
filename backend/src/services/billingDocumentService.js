@@ -8,9 +8,10 @@ const plugBoletoService = require('./plugBoletoService');
 const billingStatementService = require('./billingStatementService');
 const { mediaPath } = require('../utils/uploads');
 
-const DOCUMENT_TYPES = Object.freeze(['invoice', 'statement', 'boleto']);
+const DOCUMENT_TYPES = Object.freeze(['invoice', 'fatura', 'statement', 'boleto']);
 const DOCUMENT_LABELS = Object.freeze({
   invoice: 'Nota Fiscal',
+  fatura: 'Fatura de locação',
   statement: 'Demonstrativo',
   boleto: 'Boleto',
 });
@@ -56,8 +57,9 @@ function assertDocumentType(documentType) {
 }
 
 function documentAvailability(receivable, type) {
-  if (type === 'invoice') return Boolean(receivable.invoiceExternalId || receivable.invoiceNumber);
-  if (type === 'statement') return Boolean(receivable.statementExternalId || receivable.invoiceExternalId);
+  if (type === 'invoice') return Boolean(receivable.invoiceExternalId || receivable.invoiceNumber || receivable.invoicePdfUrl);
+  if (type === 'fatura') return Boolean(receivable.hasFatura || receivable.faturaId || receivable.faturaRef || receivable.faturaUrl);
+  if (type === 'statement') return Boolean(receivable.statementExternalId || receivable.statementUrl);
   return Boolean(receivable.hasBoleto);
 }
 
@@ -65,6 +67,10 @@ function defaultFileName(type, receivable, customerName) {
   const customer = safePart(customerName, 'CLIENTE');
   const invoice = safePart(receivable.invoiceNumber || receivable.externalId, 'SEM NUMERO');
   if (type === 'invoice') return `NF ${invoice} - ${customer}.pdf`;
+  if (type === 'fatura') {
+    const period = safePart(receivable.billingPeriod, invoice);
+    return `FATURA ${period} - ${customer}.pdf`;
+  }
   if (type === 'statement') {
     const period = safePart(receivable.billingPeriod, invoice);
     return `DEMONSTRATIVO ${period} - ${customer}.pdf`;
@@ -100,9 +106,11 @@ function documentState(type, receivable, request, customerName) {
     label: DOCUMENT_LABELS[type],
     externalId: type === 'invoice'
       ? receivable.invoiceExternalId
-      : type === 'statement'
-        ? receivable.statementExternalId
-        : receivable.boletoId,
+      : type === 'fatura'
+        ? (receivable.faturaId || receivable.faturaRef)
+        : type === 'statement'
+          ? receivable.statementExternalId
+          : receivable.boletoId,
     available,
     status,
     mediaUrl: ready ? payload.mediaUrl : null,
@@ -115,6 +123,7 @@ function documentState(type, receivable, request, customerName) {
 // Rotulo curto de origem para a UI.
 const SOURCE_LABELS = Object.freeze({
   'crm-rerender': 'gerado pelo CRM',
+  'ilux-web-direct': 'PDF do iLux Web',
   'ilux-export-folder': 'arquivo da pasta',
   plugboleto: 'API do banco',
 });
@@ -164,7 +173,12 @@ async function queueDocumentRequest({ tenantId, receivable, customerName, docume
         documentType,
         invoiceNumber: receivable.invoiceNumber,
         invoiceExternalId: receivable.invoiceExternalId,
+        invoicePdfUrl: receivable.invoicePdfUrl,
+        faturaId: receivable.faturaId,
+        faturaRef: receivable.faturaRef,
+        faturaUrl: receivable.faturaUrl,
         statementExternalId: receivable.statementExternalId,
+        statementUrl: receivable.statementUrl,
         customerName,
         receivableValue: Number.isFinite(receivable.value) ? receivable.value : (Number.isFinite(receivable.openValue) ? receivable.openValue : null),
         fileName: defaultFileName(documentType, receivable, customerName),
@@ -182,7 +196,12 @@ async function queueDocumentRequest({ tenantId, receivable, customerName, docume
         documentType,
         invoiceNumber: receivable.invoiceNumber,
         invoiceExternalId: receivable.invoiceExternalId,
+        invoicePdfUrl: receivable.invoicePdfUrl,
+        faturaId: receivable.faturaId,
+        faturaRef: receivable.faturaRef,
+        faturaUrl: receivable.faturaUrl,
         statementExternalId: receivable.statementExternalId,
+        statementUrl: receivable.statementUrl,
         customerName,
         receivableValue: Number.isFinite(receivable.value) ? receivable.value : (Number.isFinite(receivable.openValue) ? receivable.openValue : null),
         fileName: defaultFileName(documentType, receivable, customerName),
@@ -237,6 +256,45 @@ async function tryPlugBoletoDirect(request, params) {
   }
 }
 
+// Fatura, NFS-e e demonstrativo já possuem uma URL oficial no iLux WEB. O
+// CRM baixa o PDF no backend e o guarda na mídia tenant-aware; assim o
+// navegador não precisa acessar o ILUX diretamente nem expor token de
+// integração, e os botões Visualizar/Baixar funcionam no 360.
+function directDocumentUrl(receivable, documentType) {
+  if (documentType === 'fatura') return cleanText(receivable.faturaUrl);
+  if (documentType === 'invoice') return cleanText(receivable.invoicePdfUrl);
+  if (documentType === 'statement') return cleanText(receivable.statementUrl);
+  return null;
+}
+
+async function tryDirectDocument(request, params) {
+  const url = directDocumentUrl(params.receivable, params.documentType);
+  if (!url) return false;
+  try {
+    const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`iLux WEB respondeu HTTP ${response.status}.`);
+    const pdf = Buffer.from(await response.arrayBuffer());
+    if (!pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('O iLux WEB não devolveu um PDF válido.');
+    if (pdf.length > MAX_PDF_SIZE) throw new Error('O PDF excedeu o limite de 20 MB.');
+    await completeDocumentRequest({
+      request,
+      success: true,
+      result: {
+        documentType: params.documentType,
+        pdfBase64: pdf.toString('base64'),
+        fileName: defaultFileName(params.documentType, params.receivable, params.customerName),
+        mimeType: 'application/pdf',
+        source: 'ilux-web-direct',
+        receivableValue: Number.isFinite(params.receivable.value) ? params.receivable.value : null,
+      },
+    });
+    return true;
+  } catch (error) {
+    console.warn(`[billing-documents] PDF direto (${params.documentType}) indisponível:`, error.message);
+    return false;
+  }
+}
+
 // Demonstrativo: quando o tenant tem statementRerenderEnabled e o demonstrativo
 // ja foi sincronizado (CrmBillingStatement), o CRM gera o PDF a partir desses
 // valores -- sem a pasta monitorada e sem round-trip com o agente. 501 (flag
@@ -263,6 +321,7 @@ async function getOrRequestDocument(params) {
   const request = await queueDocumentRequest(params);
   const alreadyDone = request.payload?.status === 'success' && publicFileExists(request.payload.mediaUrl);
   if (!alreadyDone) {
+    await tryDirectDocument(request, params);
     await tryPlugBoletoDirect(request, params);
     await tryStatementRerender(request, params);
   }

@@ -684,6 +684,8 @@ async function autoSendBilling(req, res) {
         externalId: String(receivableExternalId),
         invoiceNumber: receivableExternalId,
         invoiceExternalId: documentType === 'invoice' ? 'auto' : null,
+        faturaId: documentType === 'fatura' ? 'auto' : null,
+        hasFatura: documentType === 'fatura',
         statementExternalId: documentType === 'statement' ? 'auto' : null,
         hasBoleto: documentType === 'boleto',
       };
