@@ -1534,10 +1534,13 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
  */
 async function recordExternalMessage(req, res) {
   try {
-    const { instanceName, phone, body, externalId, mediaUrl, mediaType, fileName } = req.body || {};
+    const { instanceName, phone, body, externalId, mediaUrl, mediaType, fileName, mediaBase64, mimeType } = req.body || {};
 
-    if (!instanceName || !phone || !body) {
-      return res.status(400).json({ error: 'instanceName, phone e body são obrigatórios.' });
+    if (!instanceName || !phone) {
+      return res.status(400).json({ error: 'instanceName e phone são obrigatórios.' });
+    }
+    if (!body && !mediaUrl && !mediaBase64) {
+      return res.status(400).json({ error: 'Informe body, mediaUrl ou mediaBase64.' });
     }
 
     const waInstance = await prisma.waInstance.findFirst({ where: { instanceName } });
@@ -1585,14 +1588,14 @@ async function recordExternalMessage(req, res) {
     const message = await prisma.message.create({
       data: {
         ticketId: ticket.id,
-        body,
+        body: body || '',
         fromMe: true,
         fromBot: false,
         automationType: 'EXTERNAL_BILLING',
         externalId: externalId || null,
         mediaUrl: mediaUrl || null,
         mediaType: mediaType || null,
-        mediaStatus: mediaUrl ? 'ok' : null,
+        mediaStatus: mediaUrl ? 'ok' : (mediaBase64 ? 'pending' : null),
         fileName: fileName || null,
       },
     });
@@ -1606,6 +1609,25 @@ async function recordExternalMessage(req, res) {
     if (io) {
       io.to(tenant.id).emit('new_message', { ticket: freshTicket, message, contact });
       io.to(tenant.id).emit('ticket_updated', { ticketId: ticket.id });
+    }
+
+    // Anexo veio como base64 (ex.: PDF de boleto/fatura da LCDWEB) — salva no
+    // mesmo storage local que a mídia recebida de verdade usa, em segundo
+    // plano, e avisa o Inbox quando terminar. Não bloqueia a resposta: quem
+    // chamou (LCDWEB) já entregou a mensagem de verdade no WhatsApp.
+    if (mediaBase64 && mimeType) {
+      evolutionService.saveMediaFile(mediaBase64, mimeType, message.id)
+        .then(async (savedUrl) => {
+          const updated = await prisma.message.update({
+            where: { id: message.id },
+            data: { mediaUrl: savedUrl, mediaStatus: 'ok' },
+          });
+          if (io) io.to(tenant.id).emit('message_updated', { ticket: freshTicket, message: updated, contact });
+        })
+        .catch(async (err) => {
+          console.error('[external-message] falha ao salvar mídia:', err.message);
+          await prisma.message.update({ where: { id: message.id }, data: { mediaStatus: 'failed' } }).catch(() => {});
+        });
     }
 
     return res.json({ ok: true, ticketId: ticket.id, messageId: message.id });
