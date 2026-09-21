@@ -13,6 +13,7 @@ const {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
   isIluxWebConfigured,
+  listContractsFromIluxWeb,
   listDefectTypesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
@@ -250,11 +251,16 @@ async function getEquipments(req, res) {
     const externalIds = equipments
       .map((equipment) => equipment.externalId)
       .filter(Boolean);
+
+    // Os equipamentos migrados do LCDDIGITALWEB usam externalSource
+    // "LCDDIGITALWEB" (e os antigos usam "firebird"). O filtro anterior
+    // considerava somente firebird, então descartava justamente as máquinas
+    // que tinham endereço no vínculo do contrato.
     const crmEquipments = externalIds.length > 0
       ? await prisma.crmEquipment.findMany({
           where: {
             tenantId,
-            externalSource: 'firebird',
+            externalSource: { in: CRM_EXTERNAL_SOURCES },
             externalId: { in: externalIds },
           },
           select: {
@@ -270,17 +276,51 @@ async function getEquipments(req, res) {
       : [];
     const crmByExternalId = new Map(crmEquipments.map((equipment) => [equipment.externalId, equipment]));
 
+    // O endereço operacional é mantido no vínculo equipamento-contrato do
+    // iLux Web. Busca-o sob demanda para que a abertura da O.S. mostre a
+    // filial correta mesmo quando o cache antigo do CRM não tinha endereço.
+    const contractEquipmentByExternalId = new Map();
+    let crmCustomer = null;
+    if (contact.crmCustomerId) {
+      crmCustomer = await prisma.crmCustomer.findFirst({
+        where: { tenantId, id: contact.crmCustomerId },
+        select: { externalId: true, address: true, city: true, state: true },
+      });
+    }
+    if (crmCustomer?.externalId && isIluxWebConfigured()) {
+      try {
+        const contracts = await listContractsFromIluxWeb(crmCustomer.externalId, { limit: 250 });
+        for (const contract of contracts.items || []) {
+          for (const item of contract.equipments || []) {
+            const id = String(item.externalId || item.id || '').trim();
+            if (id && !contractEquipmentByExternalId.has(id)) contractEquipmentByExternalId.set(id, item);
+          }
+        }
+      } catch (error) {
+        // A falha transitória do iLux não impede abrir a O.S.; o cache local
+        // continua disponível como fallback.
+        console.warn('[getEquipments] endereço do vínculo indisponível:', error?.message || error);
+      }
+    }
+
     res.json(equipments.map((equipment) => {
       const crmEquipment = crmByExternalId.get(equipment.externalId);
+      const contractEquipment = contractEquipmentByExternalId.get(String(equipment.externalId || '').trim());
       const raw = crmEquipment?.raw && typeof crmEquipment.raw === 'object' ? crmEquipment.raw : {};
+      const address = contractEquipment?.address
+        || contractEquipment?.installLocation
+        || crmEquipment?.address
+        || equipment.address
+        || crmCustomer?.address
+        || null;
       return {
         ...equipment,
-        address: crmEquipment?.address || equipment.address || null,
-        city: crmEquipment?.city || raw.cidade || raw.CIDADE || null,
-        state: crmEquipment?.state || raw.uf || raw.UF || null,
-        complement: raw.complemento || raw.COMPLEMENTO || null,
-        department: raw.departamento || raw.DEPARTAMENTO || crmEquipment?.sector || equipment.sector || null,
-        installLocation: crmEquipment?.installLocation || raw.localinstal || raw.LOCALINSTAL || null,
+        address,
+        city: contractEquipment?.city || crmEquipment?.city || raw.cidade || raw.CIDADE || crmCustomer?.city || null,
+        state: contractEquipment?.state || crmEquipment?.state || raw.uf || raw.UF || crmCustomer?.state || null,
+        complement: contractEquipment?.complement || raw.complemento || raw.COMPLEMENTO || null,
+        department: contractEquipment?.department || raw.departamento || raw.DEPARTAMENTO || crmEquipment?.sector || equipment.sector || null,
+        installLocation: contractEquipment?.installLocation || crmEquipment?.installLocation || raw.localinstal || raw.LOCALINSTAL || null,
       };
     }));
   } catch (err) {
