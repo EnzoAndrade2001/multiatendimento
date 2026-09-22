@@ -627,6 +627,19 @@ async function createOS(req, res) {
           },
           include: { contact: true, equipment: true },
         });
+        // A confirmação direta pelo LCDDigitalWeb não passa pelo callback do
+        // agente Firebird, onde esta cópia já era disparada. Carregamos o
+        // serviço somente aqui para evitar o ciclo osController -> serviço ->
+        // generatePdfBuffer (exportado por este controller).
+        setImmediate(() => {
+          const { sendServiceOrderManagerCopy } = require('../services/serviceOrderManagerCopyService');
+          sendServiceOrderManagerCopy(tenantId, confirmada.id).catch((managerCopyError) => {
+            console.error(
+              `[createOS] O.S. ${externalId} confirmada, mas a cópia para o gestor não foi enviada:`,
+              managerCopyError.message,
+            );
+          });
+        });
         return res.status(201).json({ ...confirmada, confirmed: true, source: 'ilux_web' });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
