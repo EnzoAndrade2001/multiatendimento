@@ -93,6 +93,32 @@ function first(...values) {
   return null;
 }
 
+// Somente números humanos podem ser apresentados como O.S. O identificador
+// canônico (UUID) continua disponível para integração, mas nunca vira rótulo
+// visível no CRM.
+function humanOrderNumber(...values) {
+  for (const value of values) {
+    const normalized = text(value);
+    if (!normalized) continue;
+    if (/^\d+$/.test(normalized)) return normalized;
+    const labeled = normalized.match(/^O\.?S\.?\s*[-#:]*\s*(\d+)$/i);
+    if (labeled) return labeled[1];
+  }
+  return null;
+}
+
+// Marcadores de integração são úteis para reconciliação entre sistemas, mas
+// nunca devem aparecer como parte do texto apresentado ao usuário do CRM.
+function cleanServiceOrderText(value) {
+  const textValue = text(value);
+  if (!textValue) return null;
+  return textValue
+    .replace(/\s*\[(?:LCDWEB|ILUXWEB):[^\]]+\]\s*/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim() || null;
+}
+
 function rawValue(payload, ...keys) {
   const raw = payload?.raw && typeof payload.raw === 'object' ? payload.raw : {};
   for (const key of keys) {
@@ -360,10 +386,15 @@ function normalizeExternalOrder(payload, fallback = {}) {
   const rawStatus = first(rawValue(source, 'status', 'nmstatus'));
   const statusCode = first(rawValue(source, 'statusCode', 'cdStatus', 'cdstatus'));
   const value = asNumber(rawValue(source, 'value', 'totalValue', 'vl_total', 'valortotal', 'vl_os', 'valortotalos', 'valor_os', 'valorservico', 'valorpecas')) || 0;
+  const number = humanOrderNumber(
+    fallback.number,
+    rawValue(source, 'numero', 'number', 'legacyNumber', 'externalId', 'seqOs', 'seqos'),
+    fallback.externalId,
+  );
   return {
     id: null,
     externalId: first(fallback.externalId, rawValue(source, 'externalId', 'seqOs', 'seqos')),
-    number: first(fallback.externalId, rawValue(source, 'externalId', 'seqOs', 'seqos')),
+    number,
     clientExternalId: first(rawValue(source, 'clientExternalId', 'cdCliente', 'cdcliente')),
     equipmentExternalId: first(rawValue(source, 'equipmentExternalId', 'cdequipamento'), rawValue(equipment, 'cdequipamento')),
     equipmentModel: first(rawValue(source, 'equipmentModel', 'modeloe', 'modelo'), rawValue(equipment, 'modelo')),
@@ -372,7 +403,7 @@ function normalizeExternalOrder(payload, fallback = {}) {
     status: normalizeOrderStatus(rawStatus, closedAt, closing),
     statusLabel: rawStatus,
     statusCode,
-    defect: first(rawValue(source, 'defect', 'obsdefeitocli')),
+    defect: cleanServiceOrderText(first(rawValue(source, 'defect', 'obsdefeitocli'))),
     value,
     closing,
     technician: first(rawValue(source, 'nmSuporteT', 'nmsuportet', 'nmsuportel', 'technician')),
@@ -389,7 +420,7 @@ function normalizeLocalOrder(order) {
   return {
     id: order.id,
     externalId: text(order.externalId),
-    number: text(order.externalId),
+    number: humanOrderNumber(order.number, order.legacyNumber, order.externalId),
     clientExternalId: text(order.contact?.externalId),
     equipmentExternalId: text(order.equipment?.externalId),
     equipmentModel: text(order.equipment?.model),
@@ -398,7 +429,7 @@ function normalizeLocalOrder(order) {
     status: order.status,
     statusLabel: order.status,
     statusCode: text(order.sourceStatusCode),
-    defect: text(order.defect),
+    defect: cleanServiceOrderText(order.defect),
     value: 0, // Fallback for local orders without value
     closing: text(order.technicalNotes),
     technician: first(order.nmsuportet, order.closedBy?.name),
@@ -414,12 +445,26 @@ function normalizeLocalOrder(order) {
 }
 
 function normalizeIluxWebOrder(order, customerExternalId) {
-  const externalId = text(order?.externalId || order?.number || order?.numero);
+  // O UUID é a identidade canônica da O.S.; numero/legacyNumber é o rótulo
+  // humano. Nunca usar o UUID como número visível no histórico.
+  const canonicalId = text(order?.canonicalId || order?.id || order?.externalId);
+  const displayNumber = humanOrderNumber(
+    order?.legacyNumber,
+    order?.numero,
+    order?.number,
+    order?.seqos,
+    order?.seqOs,
+    order?.codigoLegado,
+    order?.externalId,
+  );
+  const externalId = canonicalId || displayNumber;
   const closedAt = order?.closedAt || order?.dataFechamento || null;
   return {
-    id: order?.id || `ilux-web-${externalId}`,
+    id: canonicalId || `ilux-web-${displayNumber}`,
     externalId,
-    number: externalId,
+    canonicalId,
+    legacyNumber: displayNumber,
+    number: displayNumber,
     clientExternalId: text(order?.clientExternalId || customerExternalId),
     clientCode: text(order?.clientCodigoLegado || order?.clientCode),
     clientName: text(order?.clientName || order?.clientLegalName),
@@ -447,7 +492,7 @@ function normalizeIluxWebOrder(order, customerExternalId) {
     statusCode: text(order?.statusCode),
     defectTypeCode: text(order?.defectTypeCode || order?.cdDefeito || order?.codigoDefeito),
     defectTypeName: text(order?.defectTypeName || order?.defeitoTipoNome || order?.defectType?.name),
-    defect: text(order?.defect || order?.descricaoProblema),
+    defect: cleanServiceOrderText(order?.defect || order?.descricaoProblema),
     value: asNumber(order?.value || order?.totalValue) || 0,
     closing: text(order?.closing || order?.solucaoTecnica),
     technician: first(order?.technician, order?.tecnicoResponsavel, order?.nmsuportet),

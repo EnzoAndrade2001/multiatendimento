@@ -505,7 +505,7 @@ export default function CRM() {
               {metrics.contracted === 0 && metrics.contracts === 0 ? <span style={s.statusPill}><AlertCircle size={12} /> Sem contrato</span> : null}
             </div>
             <div style={s.metaGrid}>
-              <Meta icon={<Hash size={14} />} text={customer.cpfCnpj || `ILUX WEB ${customer.externalId || '—'}`} />
+              <Meta icon={<Hash size={14} />} text={customer.cpfCnpj || 'Documento não informado'} />
               <Meta icon={<Phone size={14} />} text={customer.phone || 'Telefone não informado'} />
               <Meta icon={<MapPin size={14} />} text={joinLocation(customer) || 'Localização não informada'} wide />
             </div>
@@ -675,7 +675,7 @@ function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoad
           <div style={s.modalIdentity}>
             <div style={s.modalAvatar}><Building2 size={22} /></div>
             <div>
-              <p style={s.modalKicker}>Cliente ILUX WEB #{customer.externalId || '—'}</p>
+              <p style={s.modalKicker}>Cliente</p>
               <h2 id="crm-profile-title" style={s.modalTitle}>{customer.fantasyName || customer.name}</h2>
               <div style={s.headerMeta}>
                 {customer.cpfCnpj ? <span>{customer.cpfCnpj}</span> : null}
@@ -751,7 +751,6 @@ function OverviewTab({ customer, equipments, contracts, serviceOrders, customer3
         <div style={s.infoGrid}>
           <Info label="Razão social" value={customer.name} wide />
           <Info label="Nome fantasia" value={customer.fantasyName} />
-          <Info label="Código ILUX WEB" value={customer.externalId} />
           <Info label="CNPJ / CPF" value={customer.cpfCnpj} />
           <Info label="Inscrição estadual" value={pick(customer, 'stateRegistration', 'inscEst', 'ie') || pick(customer.raw || {}, 'INSCEST', 'inscest')} />
         </div>
@@ -1528,16 +1527,17 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
         {filtered.map((order, index) => {
           const closed = isOrderClosed(order);
           const identifier = order.id || order.externalId || order.number;
-          const printable = /^\d+$/.test(String(order.externalId || order.number || ''))
+          const displayNumber = getServiceOrderDisplayNumber(order);
+          const printable = Boolean(displayNumber)
             && order.status !== 'ERRO_INTEGRACAO';
           const sending = sendingId === identifier;
           return (
             <article key={order.id || order.externalId || index} style={s.osCard}>
               <div style={s.osStatusRail} />
-              <div style={s.osNumber}><span>O.S.</span><strong>#{pick(order, 'number', 'externalId', 'seqos', 'sequence') || '—'}</strong><small>{formatShortDate(pick(order, 'openedAt', 'createdAt', 'date', 'dtAbertura'))}</small></div>
+              <div style={s.osNumber}><span>O.S.</span><strong>#{displayNumber || '—'}</strong><small>{formatShortDate(pick(order, 'openedAt', 'createdAt', 'date', 'dtAbertura'))}</small></div>
               <div style={s.osContent}>
                 <div style={s.osTitleRow}><strong>{pick(order, 'typeName', 'serviceType', 'type', 'osType') || 'Atendimento técnico'}</strong><span style={closed ? s.statusClosed : s.statusOpen}>{closed ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{closed ? 'Fechada' : 'Em aberto'}</span></div>
-                <p>{pick(order, 'defect', 'description', 'problem', 'reportedIssue', 'chamado') || 'Defeito não informado'}</p>
+                <p>{cleanServiceOrderText(pick(order, 'defect', 'description', 'problem', 'reportedIssue', 'chamado')) || 'Defeito não informado'}</p>
                 <div style={s.osMeta}>
                   <span><Printer size={13} /> {pick(order, 'equipmentModel', 'equipment', 'model') || `Equip. ${pick(order, 'equipmentExternalId', 'equipmentId', 'cdequipamento') || '—'}`}</span>
                   <span><Wrench size={13} /> {pick(order, 'technicianName', 'technician', 'assignedTo') || 'Técnico não informado'}</span>
@@ -1615,6 +1615,26 @@ function pick(object, ...keys) {
   if (!object) return undefined;
   for (const key of keys) if (object[key] !== undefined && object[key] !== null && object[key] !== '') return object[key];
   return undefined;
+}
+
+function cleanServiceOrderText(value) {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .replace(/\s*\[(?:LCDWEB|ILUXWEB):[^\]]+\]\s*/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
+}
+
+function getServiceOrderDisplayNumber(order) {
+  const candidates = [order?.number, order?.legacyNumber, order?.seqos, order?.seqOs, order?.sequence];
+  for (const candidate of candidates) {
+    const value = String(candidate ?? '').trim();
+    if (/^\d+$/.test(value)) return value;
+    const labeled = value.match(/^O\.?S\.?\s*[-#:]*\s*(\d+)$/i);
+    if (labeled) return labeled[1];
+  }
+  return null;
 }
 
 function arrayOf(...values) {
