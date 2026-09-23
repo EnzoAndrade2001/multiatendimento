@@ -1303,7 +1303,7 @@ function EquipmentDetail({ equipment, evolution }) {
   return (
     <div style={s.detailPanel}>
       <div style={s.detailHeader}>
-        <div style={{ minWidth: 0 }}><p style={s.detailKicker}>Equipamento ILUX WEB #{equipment.externalId || '—'}</p><h3 style={s.detailTitle}>{equipment.model || 'Equipamento sem modelo'}</h3></div>
+        <div style={{ minWidth: 0 }}><p style={s.detailKicker}>Equipamento</p><h3 style={s.detailTitle}>{equipment.model || 'Equipamento sem modelo'}</h3></div>
         <span style={equipment.isActive === false ? s.statusInactive : s.statusActive}>{equipment.isActive === false ? 'Inativo' : 'Ativo'}</span>
       </div>
       <InfoSection title="Identificação" icon={<Printer size={17} />} compact>
@@ -1314,7 +1314,7 @@ function EquipmentDetail({ equipment, evolution }) {
           <Info label="Patrimônio" value={equipment.assetTag} />
           <Info label="Tipo" value={equipment.type} />
           <Info label="Proprietário" value={equipmentOwnerLabel(equipment)} />
-                <Info label="Contrato ILUX WEB" value={equipment.contractExternalId} />
+          <Info label="Contrato" value={humanOperationalCode(equipment.contractExternalId)} />
         </div>
       </InfoSection>
       <div style={s.locationPanel}>
@@ -1751,6 +1751,14 @@ function formatBillingPeriod(value) {
   return period ? `${period[2]}/${period[1]}` : String(value);
 }
 function formatRawValue(value) { if (!hasValue(value)) return 'Não informado'; return typeof value === 'object' ? JSON.stringify(value) : String(value); }
+
+function humanOperationalCode(value) {
+  const code = String(value ?? '').trim();
+  // UUIDs e chaves técnicas continuam disponíveis no payload para integração,
+  // mas não são informação operacional para quem atende o cliente.
+  if (!code || /^[0-9a-f]{8}(?:-[0-9a-f]{3,}){3,}$/i.test(code)) return null;
+  return code;
+}
 
 const BILLING_DOCUMENTS = [
   { type: 'invoice', label: 'Nota Fiscal' },

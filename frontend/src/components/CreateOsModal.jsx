@@ -4,6 +4,12 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, Loade
 import EquipmentPickerModal, { equipmentAddress, equipmentOperationalLocation } from './EquipmentPickerModal';
 import { toast } from '../utils/toast';
 
+function displayServiceOrderNumber(order) {
+  const candidates = [order?.number, order?.legacyNumber, order?.seqos, order?.seqOs, order?.sequence, order?.externalId];
+  const numeric = candidates.find((value) => /^\d+$/.test(String(value ?? '').trim()));
+  return numeric ? String(numeric).trim() : '';
+}
+
 export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const modalContext = useRef({ ticketId: ticket.id, contactId: ticket.contact?.id });
   const [equipments, setEquipments] = useState([]);
@@ -226,7 +232,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
             <CheckCircle2 size={48} color="var(--success)" style={{ marginBottom: 'var(--space-3)' }} />
             <h3 style={{ margin: '0 0 8px', color: 'var(--text-main)' }}>O.S. criada no ILUX WEB</h3>
             <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 900, color: 'var(--accent)', marginBottom: 'var(--space-2)', fontVariantNumeric: 'tabular-nums' }}>
-              Nº {createdOrder.externalId}
+              Nº {displayServiceOrderNumber(createdOrder) || 'confirmado'}
             </div>
             <p style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-5)' }}>
               O número acima foi confirmado diretamente pelo banco do ILUX WEB.
@@ -293,7 +299,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                 {openOrders.map((o) => (
                   <div key={o.id} style={s.openWarnRow}>
                     <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <strong>O.S. {o.externalId || o.id}</strong> — {[o.status, o.defect].filter(Boolean).join(' · ') || 'sem descrição'}
+                      <strong>{displayServiceOrderNumber(o) ? `O.S. ${displayServiceOrderNumber(o)}` : 'O.S. aguardando confirmação'}</strong> — {[o.status, o.defect].filter(Boolean).join(' · ') || 'sem descrição'}
                     </span>
                     <a href={`${BACKEND_URL}/api/os/${encodeURIComponent(o.externalId || o.id)}/pdf?token=${encodeURIComponent(localStorage.getItem('token') || '')}`}
                       target="_blank" rel="noreferrer" style={s.openWarnLink}>

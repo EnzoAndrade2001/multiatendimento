@@ -29,6 +29,12 @@ function text(value, fallback = '-') {
   return escapeHtml(result || fallback);
 }
 
+function humanIdentifier(value, fallback = 'PENDENTE') {
+  const result = String(value ?? '').trim();
+  // UUIDs são chaves de integração, não números operacionais para o PDF.
+  return result && !/^[0-9a-f]{8}(?:-[0-9a-f]{3,}){3,}$/i.test(result) ? result : fallback;
+}
+
 function multiline(value, fallback = '') {
   const result = String(value ?? '').trim();
   return escapeHtml(result || fallback).replace(/\r?\n/g, '<br>');
@@ -46,9 +52,9 @@ function renderHistory(history) {
   return history.slice(0, 5).map((item) => `
     <tr>
       <td class="history-date">${text(item.date, '')}<br>${text(item.time, '')}</td>
-      <td><b>O.S. ${text(item.number)}</b> &nbsp;
+      <td><b>O.S. ${text(humanIdentifier(item.number))}</b> &nbsp;
         <b>Tipo:</b> ${text(item.type)} &nbsp;
-        <b>Equip.:</b> ${text(item.equipment)} &nbsp;
+        <b>Equip.:</b> ${text(humanIdentifier(item.equipment))} &nbsp;
         <b>Abertura:</b> ${text(item.openedBy)} &nbsp;
         <b>Status:</b> ${text(item.status)}<br>
         <div class="history-summary">
@@ -79,14 +85,15 @@ function renderOfficialOsTemplate(model) {
   const logo = model.logoDataUri
     ? `<img class="logo-lcd" src="${model.logoDataUri}" alt="${logoInitials}">`
     : `<span class="logo-fallback">${logoInitials}</span>`;
-  const barcode = renderBarcode(model.number, model.barcodeEnabled !== false);
+  const displayNumber = humanIdentifier(model.number, '');
+  const barcode = renderBarcode(displayNumber, model.barcodeEnabled !== false);
 
   const html = `<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ordem de Serviço ${text(model.number, '')}</title>
+  <title>Ordem de Serviço ${text(displayNumber, '')}</title>
   <style>
     * { box-sizing: border-box; }
     @page { size: A4 portrait; margin: 4mm; }
@@ -159,7 +166,7 @@ function renderOfficialOsTemplate(model) {
         Fone: ${text(model.company.phone)} &nbsp; CEP: ${text(model.company.zipCode)}
       </td>
       <td class="title"><span class="title-label">ORDEM DE SERVIÇO</span>${barcode}</td>
-      <td class="meta"><div class="meta-top"><span><b>Número:</b> ${text(model.number)}</span><span><b>Data:</b> ${text(model.date, '')}</span></div>
+      <td class="meta"><div class="meta-top"><span><b>Número:</b> ${text(humanIdentifier(model.number))}</span><span><b>Data:</b> ${text(model.date, '')}</span></div>
         <b>Hora:</b> ${text(model.time, '')}<br>
         <b>Técnico abertura:</b> ${text(model.openedBy, '')}<br>
         <b>Técnico atendimento:</b> ${text(model.technician, '')}<br>
@@ -173,14 +180,14 @@ function renderOfficialOsTemplate(model) {
 
     <div class="section-title">Cliente &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Equipamento</div>
     <table><tr><td class="info-cell" style="width:54%">
-      <span class="label">Código ILUX WEB:</span> ${text(model.client.code)} &nbsp; <span class="cabecalho-destaque"><span class="label">Cliente:</span> ${text(model.client.name)}</span><br>
+      <span class="label">Código ILUX WEB:</span> ${text(humanIdentifier(model.client.code))} &nbsp; <span class="cabecalho-destaque"><span class="label">Cliente:</span> ${text(model.client.name)}</span><br>
       <span class="cabecalho-destaque"><span class="label">Endereço:</span> ${text(model.client.address)}</span><br>
       <span class="label">Bairro:</span> ${text(model.client.neighborhood)} &nbsp; <span class="label">CEP:</span> ${text(model.client.zipCode)}<br>
       <span class="label">Cidade:</span> ${text(model.client.city)} (${text(model.client.state, '')}) &nbsp; <span class="label">U.F.:</span> ${text(model.client.state)}<br>
       <span class="label">CNPJ/CPF:</span> ${text(model.client.document)} &nbsp; <span class="label">Insc.Estadual:</span> ${text(model.client.stateRegistration)}<br>
       <span class="label">Contato:</span> ${text(model.client.contact)} &nbsp; <span class="label">Fone:</span> ${text(model.client.phone)}
     </td><td class="info-cell">
-      <span class="label">Equipamento:</span> ${text(model.equipment.code)}<br>
+      <span class="label">Equipamento:</span> ${text(humanIdentifier(model.equipment.code))}<br>
       <span class="label">Modelo:</span> ${text(model.equipment.model)}<br>
       <span class="label">Série:</span> ${text(model.equipment.serial)} &nbsp; <span class="label">Patrimônio:</span> ${text(model.equipment.asset)}<br>
       <span class="label">Tipo de Contrato:</span> ${text(model.equipment.contractType)} &nbsp; <span class="label">Território:</span> ${text(model.equipment.territory)}<br>

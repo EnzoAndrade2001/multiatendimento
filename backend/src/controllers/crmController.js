@@ -229,6 +229,9 @@ function receivableIsCancelled(record) {
 
 function normalizeReceivable(record) {
   const payload = record?.payload || record || {};
+  const invoice = payload.invoice || payload.nfse || payload.notaFiscal || {};
+  const fatura = payload.fatura || payload.invoiceRecord || {};
+  const boleto = payload.boleto || payload.bankingSlip || {};
   const dueAt = asCalendarDate(rawValue(payload, 'dueAt', 'dtvectorec'));
   const paidAt = asCalendarDate(rawValue(payload, 'paidAt', 'dtpagtorec'));
   const value = asNumber(rawValue(payload, 'value', 'valreceita')) || 0;
@@ -250,34 +253,34 @@ function normalizeReceivable(record) {
     value,
     paidValue,
     openValue,
-    invoiceNumber: first(rawValue(payload, 'invoiceNumber', 'numnf')),
-    invoiceExternalId: first(rawValue(payload, 'invoiceExternalId', 'seqincnfs')),
-    invoiceId: first(rawValue(payload, 'invoiceId', 'nfseId')),
-    invoiceType: first(rawValue(payload, 'invoiceType', 'tipoNfse')),
-    invoiceStatus: first(rawValue(payload, 'invoiceStatus', 'nfseStatus')),
-    invoicePdfUrl: first(rawValue(payload, 'invoicePdfUrl', 'nfPdfUrl', 'urlNfse')),
-    invoiceXmlUrl: first(rawValue(payload, 'invoiceXmlUrl', 'nfXmlUrl', 'urlXmlNfse')),
+    invoiceNumber: first(rawValue(payload, 'invoiceNumber', 'numnf'), invoice.number, invoice.numero, invoice.numeroNfse),
+    invoiceExternalId: first(rawValue(payload, 'invoiceExternalId', 'seqincnfs'), invoice.externalId, invoice.referencia, invoice.id),
+    invoiceId: first(rawValue(payload, 'invoiceId', 'nfseId'), invoice.id),
+    invoiceType: first(rawValue(payload, 'invoiceType', 'tipoNfse'), invoice.type, invoice.tipo),
+    invoiceStatus: first(rawValue(payload, 'invoiceStatus', 'nfseStatus'), invoice.status),
+    invoicePdfUrl: first(rawValue(payload, 'invoicePdfUrl', 'nfPdfUrl', 'urlNfse'), invoice.pdfUrl, invoice.urlPdf, invoice.url),
+    invoiceXmlUrl: first(rawValue(payload, 'invoiceXmlUrl', 'nfXmlUrl', 'urlXmlNfse'), invoice.xmlUrl, invoice.urlXml),
     invoiceValue: asNumber(rawValue(payload, 'invoiceValue', 'valtotalnfs')) || value,
     invoiceCancelled: isTruthyIntegrationFlag(rawValue(payload, 'invoiceCancelled', 'tfnfscancelada')),
     sourceDeleted: isTruthyIntegrationFlag(rawValue(payload, 'sourceDeleted')),
     isCancelled,
     invoiceNotes: first(rawValue(payload, 'invoiceNotes', 'nf_obs')),
-    statementExternalId: first(rawValue(payload, 'statementExternalId', 'seqdemonstrativo')),
-    statementUrl: first(rawValue(payload, 'statementUrl', 'demonstrativoUrl')),
-    faturaId: first(rawValue(payload, 'faturaId')),
-    faturaRef: first(rawValue(payload, 'faturaRef')),
-    faturaStatus: first(rawValue(payload, 'faturaStatus')),
-    faturaUrl: first(rawValue(payload, 'faturaUrl', 'invoiceUrl')),
+    statementExternalId: first(rawValue(payload, 'statementExternalId', 'seqdemonstrativo'), fatura.statementExternalId, fatura.ref, fatura.id),
+    statementUrl: first(rawValue(payload, 'statementUrl', 'demonstrativoUrl'), fatura.statementUrl, fatura.demonstrativoUrl),
+    faturaId: first(rawValue(payload, 'faturaId'), fatura.id),
+    faturaRef: first(rawValue(payload, 'faturaRef'), fatura.ref),
+    faturaStatus: first(rawValue(payload, 'faturaStatus'), fatura.status),
+    faturaUrl: first(rawValue(payload, 'faturaUrl', 'invoiceUrl'), fatura.pdfUrl, fatura.urlPdf, fatura.url),
     hasFatura: Boolean(rawValue(payload, 'hasFatura') || rawValue(payload, 'faturaId', 'faturaRef', 'statementExternalId')),
     hasNotaFiscal: Boolean(rawValue(payload, 'hasNotaFiscal') || rawValue(payload, 'invoiceNumber', 'invoiceExternalId', 'invoicePdfUrl')),
     billingType: first(rawValue(payload, 'billingType', 'faturamento_tipo')),
     billingPeriod: first(rawValue(payload, 'billingPeriod', 'faturamento_periodo')),
     contractExternalId: first(rawValue(payload, 'contractExternalId', 'seqixlcontratos', 'seqcontrato')),
     paymentMethod: first(rawValue(payload, 'paymentMethod', 'nmformapagto')),
-    boletoId: first(rawValue(payload, 'boletoId', 'id_boleto')),
-    boletoIntegrationId: first(rawValue(payload, 'boletoIntegrationId', 'chave_integracao')),
-    boletoStatus: first(rawValue(payload, 'boletoStatus', 'boleto_situacao')),
-    boletoUrl: first(rawValue(payload, 'boletoUrl', 'urlboleto')),
+    boletoId: first(rawValue(payload, 'boletoId', 'id_boleto'), boleto.id),
+    boletoIntegrationId: first(rawValue(payload, 'boletoIntegrationId', 'chave_integracao'), boleto.integrationId),
+    boletoStatus: first(rawValue(payload, 'boletoStatus', 'boleto_situacao'), boleto.status),
+    boletoUrl: first(rawValue(payload, 'boletoUrl', 'urlboleto'), boleto.pdfUrl, boleto.urlPdf, boleto.url),
     boletoPdfProtocol: first(rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo')),
     ourNumber: first(rawValue(payload, 'ourNumber', 'titulonossonumero', 'nossonumero')),
     digitableLine: first(rawValue(payload, 'digitableLine', 'titulolinhadigitavel', 'linha_digitavel')),
@@ -1777,6 +1780,24 @@ async function resolveCustomerReceivable(req) {
     if (record) {
       cacheIluxReceivables(tenantId, customer.externalId, { source: 'ilux_web', items: [record.payload] })
         .catch((error) => console.warn(`[CRM financeiro] Falha ao salvar título ${req.params.receivableId}:`, error.message));
+    }
+  }
+
+  // O retrato local é apenas cache. Depois que o título foi criado/atualizado
+  // no LCD Web, ele pode continuar sem os IDs/URLs da NF por alguns ciclos do
+  // agente e o 360 mostrava "não vinculado" para sempre. Revalida o mesmo
+  // título na fonte oficial antes de preparar qualquer documento; se o LCD
+  // estiver momentaneamente indisponível, mantém o cache para não interromper
+  // a consulta do usuário.
+  if (customer.externalId) {
+    try {
+      const atual = await findIluxReceivable(customer.externalId, req.params.receivableId);
+      if (atual) {
+        record = atual;
+        await cacheIluxReceivables(tenantId, customer.externalId, { source: 'ilux_web', items: [atual.payload] });
+      }
+    } catch (error) {
+      console.warn(`[CRM financeiro] Não foi possível atualizar o título ${req.params.receivableId} agora:`, error.message);
     }
   }
   if (!record) {

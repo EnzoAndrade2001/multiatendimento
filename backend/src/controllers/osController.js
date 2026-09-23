@@ -91,6 +91,27 @@ function firstPdfValue(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
 }
 
+function numericPdfCode(...values) {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim();
+    if (/^\d+$/.test(normalized) && Number(normalized) > 0) return normalized;
+  }
+  return '';
+}
+
+function humanPdfCode(...values) {
+  const numeric = numericPdfCode(...values);
+  return numeric || 'PENDENTE';
+}
+
+function isSameOfficialOrder(item, order) {
+  const expected = new Set([order?.id, order?.externalId].filter(Boolean).map(String));
+  const candidates = [item?.id, item?.externalId, item?.numero, item?.seqos, item?.legacyNumber]
+    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    .map(String);
+  return candidates.some((candidate) => expected.has(candidate));
+}
+
 function pdfDate(value, fallback = new Date()) {
   if (!value) return fallback;
   return parseFirebirdDate(value) || fallback;
@@ -889,7 +910,10 @@ async function generatePdf(req, res) {
       if (iluxCustomerExternalId) {
         const result = await listServiceOrdersFromIluxWeb(iluxCustomerExternalId, { limit: 250 });
         iluxWebOrders = Array.isArray(result?.items) ? result.items : [];
-        iluxWebOrder = iluxWebOrders.find((item) => String(item?.externalId || item?.numero || '') === String(os.externalId)) || null;
+        // O iLux Web mantém o UUID em externalId e o número humano em
+        // numero/legacyNumber. Comparar somente externalId fazia a O.S. do
+        // CRM não ser encontrada e o PDF cair nos UUIDs do espelho local.
+        iluxWebOrder = iluxWebOrders.find((item) => isSameOfficialOrder(item, os)) || null;
       }
       iluxWebCompany = await getCompanyProfileFromIluxWeb();
     }
@@ -937,12 +961,26 @@ async function generatePdf(req, res) {
         : '';
       const status = item?.statusLabel || item?.status || raw.nmstatus || raw.status || '';
       const isClosed = /CONCL|FECH|FINALIZ/i.test(String(status));
+      const number = numericPdfCode(
+        item?.number,
+        item?.legacyNumber,
+        item?.numero,
+        item?.seqos,
+        raw.seqos,
+        item?.externalId,
+      );
+      const equipmentCode = numericPdfCode(
+        item?.equipmentCodigoLegado,
+        item?.equipmentCode,
+        raw.cdequipamento,
+      );
       return {
-        externalId: String(item?.externalId || raw.seqos || ''),
+        externalId: number,
+        sourceId: String(item?.externalId || raw.seqos || ''),
         createdAt: openedAt,
         time: raw.hrinclusao || item?.time || openedAtTime,
         osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
-        equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
+        equipmentExternalId: equipmentCode || firstPdfValue(item?.equipmentModel, item?.model, item?.serialNumber, 'PENDENTE'),
         attendant: raw.nmsuportea || item?.attendant || '',
         status,
         defect: cleanLegacyDefect(item?.defect || item?.description || raw.obsdefeitocli || ''),
@@ -982,10 +1020,11 @@ async function generatePdf(req, res) {
 
     const uniqueOrders = new Map();
     for (const item of previousOrders) {
-      if (item.externalId && !uniqueOrders.has(item.externalId)) uniqueOrders.set(item.externalId, item);
+      const identity = item.sourceId || item.externalId;
+      if (identity && !uniqueOrders.has(identity)) uniqueOrders.set(identity, item);
     }
     previousOrders = [...uniqueOrders.values()]
-      .filter((item) => item.externalId && item.externalId !== String(os.externalId || ''))
+      .filter((item) => item.externalId && item.externalId !== numericPdfCode(os.externalId, iluxWebOrder?.numero, iluxWebOrder?.legacyNumber))
       .sort((left, right) => {
         const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
         if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
@@ -1235,14 +1274,12 @@ async function generatePdf(req, res) {
     })();
     const visitStart = firstValue(timeText(firstPrintAttendance.hratendimento || firstPrintAttendance.datahora), iluxOpenedTime, '');
     const visitEnd = firstValue(timeText(lastPrintAttendance.hratendimentofin || lastPrintAttendance.hratendimento1), iluxOpenedTime, '');
-    const clientExternalId = firstValue(
+    const clientExternalId = humanPdfCode(
       iluxOrderData.clientCodigoLegado,
       currentPrintOrder.cdcliente,
       firebirdClient.cdcliente,
+      crmCustomer?.codigoLegado,
       crmCustomer?.externalId,
-      os.contact.crmCustomer?.externalId,
-      os.contact.externalId,
-      'N/A',
     );
     const clientName = firstValue(iluxOrderData.clientName, currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
     const clientAddress = firstValue(iluxOrderData.clientAddress, joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
@@ -1258,7 +1295,17 @@ async function generatePdf(req, res) {
       ? String(currentPrintOrder.celular)
       : '';
     const clientPhone = [primaryClientPhone, clientCellPhone].filter(Boolean).join(' ');
-    const equipmentExternalId = firstValue(iluxOrderData.equipmentExternalId, currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
+    const equipmentExternalId = humanPdfCode(
+      iluxOrderData.equipmentCodigoLegado,
+      currentPrintOrder.cdequipamento,
+      firebirdEquipment.cdequipamento,
+      crmEquipment?.assetTag,
+      crmEquipment?.raw?.codigoLegado,
+    );
+    const pdfOrderNumber = firstValue(
+      numericPdfCode(iluxOrderData.numero, iluxOrderData.legacyNumber, os.externalId, os.legacyNumber),
+      'PENDENTE',
+    );
     const equipmentModel = firstValue(iluxOrderData.equipmentModel, firebirdEquipment.modelo, os.equipment.model, 'N/A');
     const equipmentSerial = firstValue(iluxOrderData.serialNumber, firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
     const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, iluxWebOrder ? '-' : 'N/A');
@@ -1326,7 +1373,7 @@ async function generatePdf(req, res) {
       accentColor,
       accentTextColor,
       barcodeEnabled: settings?.osBarcodeEnabled !== false,
-      number: os.externalId || os.id.slice(-6).toUpperCase(),
+      number: pdfOrderNumber,
       date: currentOsDate,
       time: currentOsTime,
       openedBy: String(attendantName).toUpperCase(),
@@ -1404,7 +1451,7 @@ async function generatePdf(req, res) {
 
     if (typeof res.capturePdf !== 'function') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.setHeader('Content-Disposition', `inline; filename="OS_${os.externalId || os.id.substring(os.id.length - 6)}.html"`);
+      res.setHeader('Content-Disposition', `inline; filename="OS_${pdfOrderNumber}.html"`);
       return res.send(officialHtml);
     }
 
@@ -1449,7 +1496,7 @@ async function generatePdf(req, res) {
             { text: 'ORDEM DE SERVIÇO', fontSize: 8, alignment: 'center', margin: [0, 27, 0, 0] },
             {
               stack: [
-                { text: `Número: ${os.externalId || os.id.slice(-6).toUpperCase()}   Data: ${currentOsDate}`, bold: true, fontSize: 6.5 },
+                { text: `Número: ${pdfOrderNumber}   Data: ${currentOsDate}`, bold: true, fontSize: 6.5 },
                 { text: `Hora: ${currentOsTime}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico abertura: ${attendantName.toUpperCase()}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico atendimento: ${String(currentTechnician).toUpperCase()}`, bold: true, fontSize: 6.5 },
@@ -1681,7 +1728,7 @@ async function generatePdf(req, res) {
                         widths: ['*', '*'],
                         body: [
                           [{ text: 'Número:', style: 'miniLabel' }, { text: `Data: ${dataOS}`, style: 'miniLabel' }],
-                          [{ text: os.externalId || os.id.substring(os.id.length - 6).toUpperCase(), style: 'miniValue' }, { text: `Hora: ${horaOS}`, style: 'miniLabel' }],
+                          [{ text: pdfOrderNumber, style: 'miniValue' }, { text: `Hora: ${horaOS}`, style: 'miniLabel' }],
                           [{ text: `Atendente: ${attendantName.toUpperCase()}`, style: 'miniLabel', colSpan: 2 }, {}],
                           [{ text: `Técnico: ${(os.nmsuportet || 'N/A').toUpperCase()}`, style: 'miniLabel', colSpan: 2 }, {}],
                           [{ text: `Tipo O.S.: ${displayOsType}`, style: 'miniLabel', colSpan: 2 }, {}]
@@ -1720,12 +1767,12 @@ async function generatePdf(req, res) {
             widths: ['*', '*'],
             body: [
               [
-                { text: [{ text: 'Cliente: ', style: 'label' }, { text: clientData.externalId ? `${clientData.externalId} - ${clientData.name}` : (clientData.name || 'N/A'), style: 'value' }], colSpan: 2, border: [true, false, true, true] },
+                { text: [{ text: 'Cliente: ', style: 'label' }, { text: `${clientExternalId} - ${clientName}`, style: 'value' }], colSpan: 2, border: [true, false, true, true] },
                 {}
               ],
               [
                 { text: [{ text: 'Endereço: ', style: 'label' }, { text: crmCustomer?.address || clientData.address || 'N/A', style: 'value' }], border: [true, false, true, true] },
-                { text: [{ text: 'Equipamento: ', style: 'label' }, { text: os.equipment.externalId ? `${os.equipment.externalId} - ${os.equipment.model || 'N/A'}` : 'N/A', style: 'value' }] }
+                { text: [{ text: 'Equipamento: ', style: 'label' }, { text: `${equipmentExternalId} - ${equipmentModel}`, style: 'value' }] }
               ],
               [
                 { text: [{ text: 'Bairro: ', style: 'label' }, { text: crmCustomer?.neighborhood || 'N/A', style: 'value' }], border: [true, false, true, true] },
@@ -1737,7 +1784,7 @@ async function generatePdf(req, res) {
               ],
               [
                 { text: [{ text: 'CNPJ/CPF: ', style: 'label' }, { text: crmCustomer?.cpfCnpj || clientData.cpfCnpj || 'N/A', style: 'value' }], border: [true, false, true, true] },
-                { text: [{ text: 'Tipo de Contrato: ', style: 'label' }, { text: crmEquipment?.contractExternalId || 'N/A', style: 'value' }] }
+                { text: [{ text: 'Tipo de Contrato: ', style: 'label' }, { text: humanPdfCode(crmEquipment?.contractExternalId), style: 'value' }] }
               ],
               [
                 { text: [{ text: 'Contato: ', style: 'label' }, { text: crmCustomer?.contactName || solicitante || 'N/A', style: 'value' }], border: [true, false, true, true] },
@@ -1969,7 +2016,7 @@ async function generatePdf(req, res) {
     const doc = pdfmake.createPdf({ ...docDefinition, footer: () => ({ text: '' }), content: fullIluxContent });
     const stream = await doc.getStream();
     const filename = osPdfFilename(
-      os.externalId || os.id.substring(os.id.length - 6),
+      pdfOrderNumber,
       clientData?.name || os.contact?.name,
     );
 

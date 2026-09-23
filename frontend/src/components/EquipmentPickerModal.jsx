@@ -129,7 +129,9 @@ export default function EquipmentPickerModal({ open, equipments, selectedId, onS
                   <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '7px', marginBottom: '7px' }}>
                     <strong style={{ fontSize: 'var(--text-md)', wordBreak: 'break-word' }}>{equipment.model}</strong>
                     <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>Série: {equipment.serialNumber || 'S/N'}</span>
-                    {equipment.externalId ? <span style={{ color: 'var(--accent)', fontSize: 'var(--text-xs)', fontWeight: 800, border: '1px solid rgba(226, 184, 44, 0.35)', borderRadius: '999px', padding: '2px 7px', fontVariantNumeric: 'tabular-nums' }}>ILUX WEB {equipment.externalId}</span> : null}
+                    {/* O identificador externo (geralmente um UUID) é usado
+                        apenas na integração. O técnico escolhe pela máquina,
+                        série, patrimônio e endereço; não mostramos o ID bruto. */}
                   </div>
                   {address ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', color: 'var(--text-main)', fontSize: 'var(--text-xs)', lineHeight: 1.35 }}><MapPin size={14} color="var(--accent)" style={{ flexShrink: 0, marginTop: '1px' }} /><span>{address}</span></div> : null}
                   {operationalLocation ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.35, marginTop: '5px' }}><Building2 size={14} style={{ flexShrink: 0, marginTop: '1px' }} /><span>{operationalLocation}</span></div> : null}

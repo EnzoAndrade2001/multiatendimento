@@ -268,11 +268,36 @@ function directDocumentUrl(receivable, documentType) {
   return null;
 }
 
+function directDocumentHeaders(url) {
+  // Os PDFs oficiais de fatura/demonstrativo ficam no backend do LCD Web. A
+  // rota exige o token de integração mesmo quando a URL é chamada pelo CRM;
+  // sem estes cabeçalhos o CRM recebia 401 e caía no agente antigo, que só
+  // conseguia achar arquivos já exportados na pasta local.
+  const integrationUrl = String(process.env.ILUX_WEB_URL || '').trim().replace(/\/+$/, '');
+  const token = String(process.env.ILUX_WEB_SYNC_TOKEN || '').trim();
+  if (!integrationUrl || !token) return {};
+  try {
+    const target = new URL(url);
+    const base = new URL(integrationUrl);
+    if (target.origin !== base.origin) return {};
+  } catch {
+    return {};
+  }
+  return {
+    'X-Ilux-Agente-Token': token,
+    'X-Lcd-Agente-Token': token,
+  };
+}
+
 async function tryDirectDocument(request, params) {
   const url = directDocumentUrl(params.receivable, params.documentType);
   if (!url) return false;
   try {
-    const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    const response = await fetch(url, {
+      redirect: 'follow',
+      headers: directDocumentHeaders(url),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!response.ok) throw new Error(`iLux WEB respondeu HTTP ${response.status}.`);
     const pdf = Buffer.from(await response.arrayBuffer());
     if (!pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('O iLux WEB não devolveu um PDF válido.');
