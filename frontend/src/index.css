@@ -17,16 +17,16 @@
   --leading-normal: 1.5;
   --leading-relaxed: 1.65;
 
-  /* Graphite + laranja PrintGuard */
-  --brand-solid: #D4510B;
-  --brand-solid-hover: #B74408;
+  /* LCD Digital: vermelho institucional */
+  --brand-solid: #DC2626;
+  --brand-solid-hover: #B91C1C;
   --brand-on-solid: #FFFFFF;
-  --accent: #FF6A00;
-  --accent-hover: #FF8533;
-  --accent-strong: #FFB070;
-  --accent-light: rgba(255, 106, 0, 0.13);
-  --accent-border: rgba(255, 106, 0, 0.34);
-  --focus-ring: rgba(255, 106, 0, 0.42);
+  --accent: #DC2626;
+  --accent-hover: #B91C1C;
+  --accent-strong: #EF4444;
+  --accent-light: rgba(220, 38, 38, 0.13);
+  --accent-border: rgba(220, 38, 38, 0.34);
+  --focus-ring: rgba(220, 38, 38, 0.42);
 
   /* Semantic colors */
   /* Criticidade: vermelho quente, sem o tom rosado dos vermelhos claros */
@@ -91,7 +91,7 @@
   --text-main: #F4F6FA;
   --text-muted: #AAB4C5;
   --text-dim: #7C899E;
-  --text-inverse: #241006;
+  --text-inverse: #FFFFFF;
   --lead-form-bg: linear-gradient(180deg, rgba(18, 24, 37, 0.88), rgba(14, 18, 30, 0.98));
   --lead-preview-bg: linear-gradient(180deg, rgba(16, 22, 35, 0.96), rgba(13, 17, 28, 0.98));
   --lead-preview-header-bg: rgba(13, 18, 28, 0.92);
@@ -119,18 +119,18 @@ body.dark-theme {
   --text-main: #F4F6FA;
   --text-muted: #AAB4C5;
   --text-dim: #7C899E;
-  --text-inverse: #241006;
-  --accent: #FF6A00;
-  --accent-hover: #FF8533;
-  --accent-strong: #FFB070;
+  --text-inverse: #FFFFFF;
+  --accent: #DC2626;
+  --accent-hover: #B91C1C;
+  --accent-strong: #F87171;
   color-scheme: dark;
 
   /* Message Bubbles - Dark */
   --bg-msg-me: #1d5f52;
   --text-msg-me: #eefbf6;
-  --bg-msg-ai: rgba(255, 106, 0, 0.16);
-  --text-msg-ai: #ffe0c2;
-  --border-msg-ai: rgba(255, 106, 0, 0.26);
+  --bg-msg-ai: rgba(220, 38, 38, 0.16);
+  --text-msg-ai: #fecaca;
+  --border-msg-ai: rgba(220, 38, 38, 0.26);
   --bg-msg-contact: #181d27;
   --text-msg-contact: var(--text-main);
   --glass-bg: rgba(17, 21, 29, 0.86);
@@ -165,12 +165,12 @@ body.light-theme {
   --lead-preview-hint: #64748b;
   --lead-preview-time: #64748b;
   --lead-preview-image-bg: #e2e8f0;
-  --accent: #D4510B;
-  --accent-hover: #B74408;
-  --accent-strong: #963B06;
-  --accent-light: rgba(212, 81, 11, 0.10);
-  --accent-border: rgba(212, 81, 11, 0.28);
-  --focus-ring: rgba(212, 81, 11, 0.30);
+  --accent: #DC2626;
+  --accent-hover: #B91C1C;
+  --accent-strong: #991B1B;
+  --accent-light: rgba(220, 38, 38, 0.10);
+  --accent-border: rgba(220, 38, 38, 0.28);
+  --focus-ring: rgba(220, 38, 38, 0.30);
   --danger: #B42318;
   --danger-light: rgba(180, 35, 24, 0.09);
   --danger-border: rgba(180, 35, 24, 0.26);
@@ -186,9 +186,9 @@ body.light-theme {
   /* Message Bubbles - Light */
   --bg-msg-me: #dff4ea;
   --text-msg-me: #113328;
-  --bg-msg-ai: rgba(212, 81, 11, 0.09);
-  --text-msg-ai: #7c2d0a;
-  --border-msg-ai: rgba(212, 81, 11, 0.20);
+  --bg-msg-ai: rgba(220, 38, 38, 0.09);
+  --text-msg-ai: #7f1d1d;
+  --border-msg-ai: rgba(220, 38, 38, 0.20);
   --bg-msg-contact: #FFFFFF;
   --text-msg-contact: var(--text-main);
   --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
@@ -215,7 +215,7 @@ body .inbox-workspace {
   --rail-ink: #E9EBEE;
   --rail-dim: #A2ABB5;
   --rail-faint: #7A838F;
-  --rail-cyan: #FF6A00;
+  --rail-cyan: #DC2626;
   --rail-magenta: #FF3B30; /* nome histórico; hoje é o vermelho de urgência/SLA */
 
   /* papel: a conversa. Neutro levemente frio, nunca creme. */
@@ -236,7 +236,7 @@ body .inbox-workspace {
 }
 
 /* No tema escuro nao ha metafora de papel: e um dark limpo, alinhado a
-   paleta do app, apenas com a mesma hierarquia e o acento laranja. */
+   paleta do app, apenas com a mesma hierarquia e o acento vermelho institucional. */
 body.dark-theme .inbox-workspace {
   --rail-bg: #11151D;
   --rail-raise: #171C26;
@@ -244,7 +244,7 @@ body.dark-theme .inbox-workspace {
   --rail-ink: #F4F6FA;
   --rail-dim: #AAB4C5;
   --rail-faint: #7C899E;
-  --rail-cyan: #FF6A00;
+  --rail-cyan: #DC2626;
   --rail-magenta: #F26D6D;
 
   --paper: #0B0D12;

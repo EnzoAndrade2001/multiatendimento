@@ -120,8 +120,10 @@ export default function EquipmentPickerModal({ open, equipments, selectedId, onS
                 onClick={() => { onSelect(equipment); onClose(); }}
                 style={{
                   width: '100%', textAlign: 'left', padding: '14px 15px', borderRadius: '11px', cursor: 'pointer',
-                  border: selected ? '1px solid var(--accent)' : '1px solid var(--border-color)',
-                  background: selected ? 'rgba(226, 184, 44, 0.1)' : 'var(--bg-base)', color: 'var(--text-main)',
+                  // A selecao de equipamento continua usando o vermelho
+                  // operacional do LCD; o laranja e reservado para a marca.
+                  border: selected ? '1px solid var(--danger)' : '1px solid var(--border-color)',
+                  background: selected ? 'var(--danger-light)' : 'var(--bg-base)', color: 'var(--text-main)',
                   display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'center',
                 }}
               >
@@ -136,7 +138,7 @@ export default function EquipmentPickerModal({ open, equipments, selectedId, onS
                   {address ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', color: 'var(--text-main)', fontSize: 'var(--text-xs)', lineHeight: 1.35 }}><MapPin size={14} color="var(--accent)" style={{ flexShrink: 0, marginTop: '1px' }} /><span>{address}</span></div> : null}
                   {operationalLocation ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.35, marginTop: '5px' }}><Building2 size={14} style={{ flexShrink: 0, marginTop: '1px' }} /><span>{operationalLocation}</span></div> : null}
                 </div>
-                <span style={{ width: '27px', height: '27px', borderRadius: '50%', display: 'grid', placeItems: 'center', border: selected ? 'none' : '1px solid var(--border-color)', background: selected ? 'var(--accent)' : 'transparent', color: selected ? 'var(--text-inverse)' : 'transparent' }}><Check size={16} /></span>
+                <span style={{ width: '27px', height: '27px', borderRadius: '50%', display: 'grid', placeItems: 'center', border: selected ? 'none' : '1px solid var(--border-color)', background: selected ? 'var(--danger)' : 'transparent', color: selected ? '#fff' : 'transparent' }}><Check size={16} /></span>
               </button>
             );
           })}

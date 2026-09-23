@@ -91,10 +91,10 @@ export default function Login({ supportPortal = false }) {
     }
   }
 
-  // Login sempre usa o acento do sistema (laranja PrintGuard = --accent).
+  // Login sempre usa o acento institucional da LCD Digital.
   // O primaryColor de tenant nao tematiza mais nada no app; para reativar um
-  // login white-label no futuro, voltar a: tenantInfo?.primaryColor || '#FF6A00'.
-  const primaryColor = '#FF6A00';
+  // login white-label no futuro, voltar a: tenantInfo?.primaryColor || '#DC2626'.
+  const primaryColor = '#DC2626';
   const displayName = supportPortal ? 'Central de Suporte' : (tenantInfo?.name || (routeSlug ? routeSlug.toUpperCase() : 'Multiatendimento'));
   const hasTenant = Boolean(tenantInfo?.name);
   const year = new Date().getFullYear();

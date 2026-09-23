@@ -261,9 +261,20 @@ async function tryPlugBoletoDirect(request, params) {
 // navegador não precisa acessar o ILUX diretamente nem expor token de
 // integração, e os botões Visualizar/Baixar funcionam no 360.
 function directDocumentUrl(receivable, documentType) {
-  if (documentType === 'fatura') return cleanText(receivable.faturaUrl);
+  // O endpoint de integracao do LCD pode devolver a URL montada com
+  // API_PUBLIC_URL (host interno da API). O CRM, porem, conversa com o iLux
+  // pelo ILUX_WEB_URL. Montar a URL oficial nesse mesmo host evita o 401 que
+  // ocorria quando o token era enviado para um host diferente e tambem
+  // funciona quando API_PUBLIC_URL nao estava preenchida no servidor.
+  const iluxBase = String(process.env.ILUX_WEB_URL || '').trim().replace(/\/+$/, '');
+  const faturaId = cleanText(receivable.faturaId);
+  const officialUrl = (suffix) => {
+    if (!iluxBase || !faturaId) return null;
+    return `${iluxBase}/api/faturas/${encodeURIComponent(faturaId)}/${suffix}`;
+  };
+  if (documentType === 'fatura') return officialUrl('fatura-locacao.pdf') || cleanText(receivable.faturaUrl);
   if (documentType === 'invoice') return cleanText(receivable.invoicePdfUrl);
-  if (documentType === 'statement') return cleanText(receivable.statementUrl);
+  if (documentType === 'statement') return officialUrl('demonstrativo.pdf') || cleanText(receivable.statementUrl);
   if (documentType === 'boleto') return cleanText(receivable.boletoUrl);
   return null;
 }
@@ -666,5 +677,6 @@ module.exports = {
     documentAvailability,
     defaultFileName,
     requestExternalId,
+    directDocumentUrl,
   },
 };

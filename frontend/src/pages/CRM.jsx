@@ -1811,7 +1811,7 @@ function documentLoadingPageHtml(label) {
     width: 42px; height: 42px; margin: 0 auto 1.3rem;
     border-radius: 50%;
     border: 3px solid rgba(232, 201, 106, 0.25);
-    border-top-color: #E8C96A;
+    border-top-color: #DC2626;
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
