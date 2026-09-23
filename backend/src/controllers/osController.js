@@ -597,7 +597,7 @@ async function createOS(req, res) {
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
-          abertoPor: req.user.name || req.user.email || null,
+          abertoPor: (req.user?.firebirdSupportName || req.user?.name || 'CAMILLE').trim().toUpperCase(),
           solicitante: contact.name || null,
           // Para o documento, prevalece o telefone oficial do cliente ILUX
           // sincronizado no CRM; o telefone do contato WhatsApp pode ser
