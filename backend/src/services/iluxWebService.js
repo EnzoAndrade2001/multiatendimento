@@ -4,6 +4,7 @@ const DEFAULT_FINANCIAL_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_CONTRACTS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
 const DEFAULT_DEFECT_TYPES_PATH = '/api/assistencia/os/integracao-crm/tipos-defeito';
+const DEFAULT_CUSTOMER_360_PATH = '/api/clientes';
 const REQUEST_TIMEOUT_MS = Math.max(
   5000,
   Number.parseInt(process.env.ILUX_WEB_REQUEST_TIMEOUT_MS, 10) || 30000,
@@ -120,6 +121,25 @@ async function listContractsFromIluxWeb(customerExternalId, { limit = 250 } = {}
   };
 }
 
+/**
+ * O cadastro operacional do LCD Digital Web e a fonte oficial de equipamentos.
+ * O CRM Novo mantem um espelho para buscas, mas ele pode ficar atrasado (ou
+ * ainda vazio) quando um cliente foi vinculado depois da ultima sincronizacao.
+ */
+async function getCustomer360FromIluxWeb(customerExternalId) {
+  if (!isIluxWebConfigured() || !customerExternalId) {
+    return { item: null, lastSyncedAt: null, source: null };
+  }
+  const basePath = process.env.ILUX_WEB_CUSTOMER_360_PATH || DEFAULT_CUSTOMER_360_PATH;
+  const path = `${basePath.replace(/\/+$/, '')}/${encodeURIComponent(String(customerExternalId))}/360`;
+  const data = await requestJson(path, { method: 'GET' });
+  return {
+    item: data?.cliente || data,
+    lastSyncedAt: data?.generatedAt || data?.updatedAt || new Date().toISOString(),
+    source: 'ilux_web',
+  };
+}
+
 async function getCompanyProfileFromIluxWeb() {
   if (!isIluxWebConfigured()) return null;
   const path = process.env.ILUX_WEB_COMPANY_PATH || DEFAULT_COMPANY_PATH;
@@ -148,6 +168,7 @@ module.exports = {
   isIluxWebConfigured,
   listDefectTypesFromIluxWeb,
   listContractsFromIluxWeb,
+  getCustomer360FromIluxWeb,
   listReceivablesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 };

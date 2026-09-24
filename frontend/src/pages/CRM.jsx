@@ -644,10 +644,14 @@ export function CrmCustomerProfileModal({ customerId, initialCustomer, initialTa
 
 function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoading, resourceStatus = {}, error, onRetry, onClose, onOpenConversation, onOpenServiceOrder }) {
   const { can, loading: permissionsLoading } = usePermissions();
-  const equipments = arrayOf(customer.equipments);
+  const customer360 = customer.customer360 || {};
+  // O LCD Digital Web e a fonte oficial. Use a lista devolvida pela visao 360
+  // quando o espelho local do CRM ainda estiver vazio ou desatualizado.
+  const equipments = arrayOf(customer360.equipments).length
+    ? arrayOf(customer360.equipments)
+    : arrayOf(customer.equipments);
   const contracts = arrayOf(customer.contracts);
   const serviceOrders = arrayOf(customer.serviceOrders, customer.orders, customer.osHistory);
-  const customer360 = customer.customer360 || {};
   const serverFinancialAllowed = customer360.capabilities?.tabs?.financial;
   const serverCanSendFinancial = customer360.capabilities?.actions?.sendFinancialDocuments;
   const financialAllowed = permissionsLoading

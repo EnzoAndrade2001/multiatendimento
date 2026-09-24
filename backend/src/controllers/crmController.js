@@ -3,7 +3,12 @@ const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/
 const { hasPermission } = require('../auth/permissions');
 const billingDocuments = require('../services/billingDocumentService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
-const { listContractsFromIluxWeb, listReceivablesFromIluxWeb, listServiceOrdersFromIluxWeb } = require('../services/iluxWebService');
+const {
+  listContractsFromIluxWeb,
+  listReceivablesFromIluxWeb,
+  listServiceOrdersFromIluxWeb,
+  getCustomer360FromIluxWeb,
+} = require('../services/iluxWebService');
 
 const HISTORY_DEFAULT_LIMIT = 25;
 const HISTORY_MAX_LIMIT = 100;
@@ -645,6 +650,32 @@ async function loadContracts(tenantId, customerExternalId) {
       source: 'ilux_web',
     }))
     .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+}
+
+function normalizeIluxWebEquipment(equipment, customerExternalId) {
+  const source = equipment || {};
+  const id = first(source.id, source.externalId, source.codigoLegado, source.codigo);
+  return {
+    id: id ? String(id) : `ilux-equipment-${Math.random().toString(36).slice(2)}`,
+    externalId: first(source.externalId, source.codigoLegado, source.codigo, id),
+    customerExternalId: first(source.customerExternalId, source.clienteCodigoLegado, customerExternalId),
+    isActive: source.isActive !== false && source.ativo !== false,
+    manufacturer: first(source.manufacturer, source.fabricante, source.marca),
+    model: first(source.model, source.modelo, source.description, source.descricao),
+    serialNumber: first(source.serialNumber, source.numeroSerie, source.serie),
+    sector: first(source.sector, source.departamento, source.depto),
+    type: first(source.type, source.tipo),
+    assetTag: first(source.assetTag, source.patrimonio),
+    installLocation: first(source.installLocation, source.enderecoInstalacao, source.address, source.localInstalacao),
+    address: first(source.address, source.enderecoInstalacao, source.installLocation, source.localInstalacao),
+    city: first(source.city, source.cidade),
+    state: first(source.state, source.uf),
+    zipCode: first(source.zipCode, source.cep),
+    contractExternalId: first(source.contractExternalId, source.contractNumber, source.numeroContrato),
+    contractNumber: first(source.contractNumber, source.numeroContrato),
+    updatedAt: source.updatedAt || source.atualizadoEm || null,
+    raw: source,
+  };
 }
 
 async function loadCustomerOrderCatalog(tenantId, customer, sourceLimit = null) {
@@ -1341,8 +1372,22 @@ async function getCustomer360(req, res) {
   const customer = await findTenantCustomer(tenantId, req.params.id);
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado' });
 
+  // O LCD Digital Web e a fonte operacional oficial dos equipamentos. O
+  // espelho do CRM pode estar vazio para clientes vinculados recentemente;
+  // nesse caso consulte o cadastro 360 oficial antes de montar a resposta.
+  let lcdCustomer360 = null;
+  try {
+    lcdCustomer360 = await getCustomer360FromIluxWeb(customer.externalId);
+  } catch (error) {
+    console.warn(`[CRM 360] Falha ao consultar equipamentos do ILUX WEB para ${customer.externalId}:`, error.message);
+  }
+  const lcdEquipments = Array.isArray(lcdCustomer360?.item?.equipments)
+    ? lcdCustomer360.item.equipments.map((equipment) => normalizeIluxWebEquipment(equipment, customer.externalId))
+    : [];
+  const customerEquipments = lcdEquipments.length ? lcdEquipments : customer.equipments;
+
   const contactIds = customer.whatsappContacts.map((contact) => contact.id);
-  const equipmentExternalIds = customer.equipments.map((equipment) => text(equipment.externalId)).filter(Boolean);
+  const equipmentExternalIds = customerEquipments.map((equipment) => text(equipment.externalId)).filter(Boolean);
   const canViewFinancial = hasPermission(req.user, 'crm.financial.view');
   const capabilities = getCrmCapabilities(req.user);
   const [contracts, orderCatalog, settings, tickets, iluxFinancialResult, meterRecords] = await Promise.all([
@@ -1462,7 +1507,7 @@ async function getCustomer360(req, res) {
     return !Number.isNaN(end) && end >= now && end - now <= 90 * 86400000;
   });
   const activeContracts = contracts.filter((contract) => contract.isActive);
-  const unlinkedEquipments = customer.equipments.filter((equipment) => (
+  const unlinkedEquipments = customerEquipments.filter((equipment) => (
     equipment.isActive !== false && !text(equipment.contractExternalId)
   ));
   // Bases antigas podem nao trazer SEQCONTRATO no equipamento. Com apenas um
@@ -1500,7 +1545,7 @@ async function getCustomer360(req, res) {
     id: `whatsapp-${contact.id}`, role: 'Contato WhatsApp', source: 'Multiatendimento',
     name: contact.name, phone: first(contact.whatsapp, contact.phone), contactId: contact.id,
   });
-  for (const equipment of customer.equipments) {
+  for (const equipment of customerEquipments) {
     const localContact = first(rawValue(equipment, 'contact', 'contato'));
     const localPhone = first(equipment.phone, rawValue(equipment, 'fone'));
     if (localContact || localPhone) addRelationshipContact({
@@ -1511,7 +1556,7 @@ async function getCustomer360(req, res) {
   }
 
   const supplyPattern = /\b(toner|cartucho|cilindro|fusor|fusao|fusão|revelador|unidade de imagem|peca|peça|kit)\b/gi;
-  const equipmentEvolution = customer.equipments.map((equipment) => {
+  const equipmentEvolution = customerEquipments.map((equipment) => {
     const equipmentOrders = orders.filter((order) => (
       text(order.equipmentExternalId) === text(equipment.externalId)
       || (equipment.serialNumber && text(order.serialNumber) === text(equipment.serialNumber))
@@ -1600,7 +1645,10 @@ async function getCustomer360(req, res) {
       recurringEquipments,
       mostRecurringEquipment: recurringEquipments[0] || null,
     },
-    units: buildCustomerUnits(customer),
+    // A aba de equipamentos do frontend usa esta lista diretamente. Inclua a
+    // fonte oficial mesmo quando o espelho local ainda estiver vazio.
+    equipments: customerEquipments,
+    units: buildCustomerUnits({ ...customer, equipments: customerEquipments }),
     contacts: relationshipContacts,
     quickActions: {
       ticketId: activeTicket?.id || null,
