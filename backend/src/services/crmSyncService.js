@@ -79,9 +79,13 @@ async function syncOfficialEquipments(tenantId, customerId) {
       where: { tenantId, externalId: official.externalId },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
     });
-    const canonical = candidates.find((record) => record.customerId === customer.id) || candidates[0] || null;
+    const canonical = candidates.find((record) => record.externalSource === 'LCDDIGITALWEB')
+      || candidates.find((record) => record.customerId === customer.id)
+      || candidates[0]
+      || null;
     const data = {
       customerId: customer.id,
+      externalSource: official.externalSource,
       externalUpdatedAt: official.externalUpdatedAt,
       model: official.model,
       manufacturer: official.manufacturer,
@@ -157,41 +161,42 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
     }
 
     for (const crmEquip of crmEquipments) {
+      // Official LCD rows are tagged explicitly. Preserve that identity in
+      // the OS mirror so a later Firebird push cannot create a second active
+      // row for the same physical machine.
       const externalSource = crmEquip.externalSource || 'firebird';
       const externalId = crmEquip.externalId;
-
-      await prisma.equipment.upsert({
-        where: {
-          tenantId_externalSource_externalId: {
-            tenantId,
-            externalSource,
-            externalId
-          }
-        },
-        update: {
-          contactId: contact.id,
-          model: crmEquip.model,
-          manufacturer: crmEquip.manufacturer,
-          type: mapEquipmentType(crmEquip.type, crmEquip.model),
-          serialNumber: crmEquip.serialNumber,
-          sector: crmEquip.sector || crmEquip.installLocation || 'Geral',
-          address: crmEquip.address,
-          isActive: crmEquip.isActive
-        },
-        create: {
-          tenantId,
-          contactId: contact.id,
-          externalSource,
-          externalId,
-          model: crmEquip.model,
-          manufacturer: crmEquip.manufacturer,
-          type: mapEquipmentType(crmEquip.type, crmEquip.model),
-          serialNumber: crmEquip.serialNumber,
-          sector: crmEquip.sector || crmEquip.installLocation || 'Geral',
-          address: crmEquip.address,
-          isActive: crmEquip.isActive
-        }
+      const equipmentData = {
+        contactId: contact.id,
+        externalSource,
+        model: crmEquip.model,
+        manufacturer: crmEquip.manufacturer,
+        type: mapEquipmentType(crmEquip.type, crmEquip.model),
+        serialNumber: crmEquip.serialNumber,
+        sector: crmEquip.sector || crmEquip.installLocation || 'Geral',
+        address: crmEquip.address,
+        isActive: crmEquip.isActive,
+      };
+      const existingMirrors = await prisma.equipment.findMany({
+        where: { tenantId, externalId },
+        orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
       });
+      const canonicalMirror = existingMirrors.find((record) => record.externalSource === 'LCDDIGITALWEB')
+        || existingMirrors.find((record) => record.contactId === contact.id)
+        || existingMirrors[0]
+        || null;
+      const savedMirror = canonicalMirror
+        ? await prisma.equipment.update({ where: { id: canonicalMirror.id }, data: equipmentData })
+        : await prisma.equipment.create({ data: { tenantId, externalId, ...equipmentData } });
+      const duplicateMirrorIds = existingMirrors
+        .filter((record) => record.id !== savedMirror.id)
+        .map((record) => record.id);
+      if (duplicateMirrorIds.length) {
+        await prisma.equipment.updateMany({
+          where: { tenantId, id: { in: duplicateMirrorIds } },
+          data: { isActive: false },
+        });
+      }
     }
     console.log(`[crmSyncService] Sincronização concluída com sucesso para Contact ${contactId}`);
   } catch (err) {

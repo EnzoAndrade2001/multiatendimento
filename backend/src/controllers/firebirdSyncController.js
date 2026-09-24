@@ -541,6 +541,21 @@ async function upsertCrmEquipment(tenant, data) {
     throw new Error('Equipamento CRM sem identificador externo.');
   }
 
+  // The LCD Digital Web is authoritative for the customer/equipment link.
+  // Once its mirror exists, a later Firebird snapshot may refresh legacy
+  // fields but must not overwrite the official link or create a competing
+  // active record for the same machine.
+  const lcdOfficial = await prisma.crmEquipment.findUnique({
+    where: {
+      tenantId_externalSource_externalId: {
+        tenantId: tenant.id,
+        externalSource: 'LCDDIGITALWEB',
+        externalId,
+      },
+    },
+  });
+  if (lcdOfficial) return lcdOfficial;
+
   let customer = null;
   if (clientExternalId) {
     customer = await prisma.crmCustomer.findFirst({
