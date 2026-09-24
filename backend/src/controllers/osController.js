@@ -9,6 +9,13 @@ const { draftServiceOrder } = aiService;
 const { renderOfficialOsTemplate } = require('../templates/officialOsTemplate');
 const { getLatestCompanyProfile } = require('../services/companyProfileService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
+const {
+  createServiceOrderInIluxWeb,
+  getCompanyProfileFromIluxWeb,
+  isIluxWebConfigured,
+  listDefectTypesFromIluxWeb,
+  listServiceOrdersFromIluxWeb,
+} = require('../services/iluxWebService');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -18,6 +25,33 @@ const OS_DRAFT_TIMEOUT_MS = Math.max(
   5_000,
   Math.min(Number.parseInt(process.env.OS_DRAFT_TIMEOUT_MS, 10) || 20_000, 60_000)
 );
+
+const ILUX_WEB_EQUIPMENT_SOURCES = new Set([
+  'firebird',
+  'ilux_web',
+  'ilux-web',
+  'iluxweb',
+  'lcddigitalweb',
+]);
+
+const CRM_EXTERNAL_SOURCES = [
+  'firebird',
+  'LCDDIGITALWEB',
+  'ilux_web',
+  'ilux-web',
+  'iluxweb',
+  'lcddigitalweb',
+];
+
+function cleanLegacyDefect(value) {
+  const text = String(value || '').trim();
+  return text.replace(/^\s*\[Defeito\s+[^\]]+\]\s*/i, '').trim();
+}
+
+function isIluxWebEquipment(equipment) {
+  const source = String(equipment?.externalSource || '').trim().toLowerCase();
+  return Boolean(equipment?.externalId && ILUX_WEB_EQUIPMENT_SOURCES.has(source));
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -369,7 +403,7 @@ async function createOS(req, res) {
     }
     const normalizedRequestKey = String(requestKey).trim().slice(0, 120);
 
-    const [ticket, contact, equipment, osType, defectType] = await Promise.all([
+    const [ticket, contact, equipment, osType, iluxDefectTypes] = await Promise.all([
       prisma.ticket.findFirst({ where: { id: ticketId, tenantId } }),
       prisma.contact.findFirst({
         where: { id: contactId, tenantId },
@@ -377,22 +411,23 @@ async function createOS(req, res) {
       }),
       prisma.equipment.findFirst({ where: { id: equipmentId, tenantId } }),
       prisma.crmOsType.findFirst({ where: { tenantId, code: String(cdOstp) } }),
-      prisma.crmDefectType.findFirst({ where: { tenantId, code: String(cdDefeito), inactive: false } }),
+      listDefectTypesFromIluxWeb(),
     ]);
+    const defectType = iluxDefectTypes.find((item) => item.code === String(cdDefeito).trim().toUpperCase());
 
     if (!ticket || ticket.contactId !== contactId) {
       return res.status(400).json({ error: 'O ticket não pertence ao cliente informado.' });
     }
     if (!contact) return res.status(404).json({ error: 'Cliente não encontrado.' });
     if (!contact.externalId && !contact.crmCustomer?.externalId) {
-      return res.status(400).json({ error: 'Vincule a conversa a um cliente do iLux antes de abrir a O.S.' });
+      return res.status(400).json({ error: 'Vincule a conversa a um cliente do ILUX WEB antes de abrir a O.S.' });
     }
     if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
-    if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do iLux.' });
-    if (equipment.externalSource !== 'firebird' || !equipment.externalId) {
-      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o iLux.' });
+    if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do ILUX WEB.' });
+    if (!isIluxWebEquipment(equipment)) {
+      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o ILUX WEB.' });
     }
-    // O vínculo confiável é a identidade do cliente no iLux, não Equipment.contactId:
+    // O vínculo confiável é a identidade do cliente no ILUX WEB, não Equipment.contactId:
     // Equipment é uma linha por máquina (única por externalId) e esse contactId é
     // reescrito toda vez que QUALQUER contato do mesmo cliente abre este modal
     // (syncCrmEquipmentsToEquipment). Comparar por contactId fazia dois atendentes
@@ -400,11 +435,15 @@ async function createOS(req, res) {
     let equipmentBelongsToCustomer = equipment.contactId === contactId;
     if (!equipmentBelongsToCustomer) {
       const crmEquip = await prisma.crmEquipment.findFirst({
-        where: { tenantId, externalSource: 'firebird', externalId: equipment.externalId },
+        where: {
+          tenantId,
+          externalId: equipment.externalId,
+          externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
+        },
         select: { customerId: true, customer: { select: { externalId: true } } },
       });
       const contactCustomerId = contact.crmCustomerId || null;
-      const contactCustomerExternalId = String(contact.externalId || contact.crmCustomer?.externalId || '').trim();
+      const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
       equipmentBelongsToCustomer = Boolean(
         (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
         || (crmEquip?.customer?.externalId && contactCustomerExternalId
@@ -414,13 +453,13 @@ async function createOS(req, res) {
     if (!equipmentBelongsToCustomer) {
       return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
     }
-    if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do iLux.' });
+    if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do ILUX WEB.' });
 
     if (nmsuportet) {
       const technician = await prisma.crmTechnician.findFirst({
         where: { tenantId, name: nmsuportet, isActive: true },
       });
-      if (!technician) return res.status(400).json({ error: 'O técnico selecionado não está ativo no iLux.' });
+      if (!technician) return res.status(400).json({ error: 'O técnico selecionado não está ativo no ILUX WEB.' });
     }
 
     let os = await prisma.serviceOrder.findFirst({
@@ -444,7 +483,7 @@ async function createOS(req, res) {
         where: {
           tenantId,
           ticketId,
-          externalSource: 'firebird',
+          externalSource: { in: ['firebird', 'ilux_web'] },
           externalId: null,
           status: { in: ['AGUARDANDO_ILUX', 'PROCESSANDO_ILUX', 'ERRO_INTEGRACAO'] },
         },
@@ -490,12 +529,78 @@ async function createOS(req, res) {
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
-          externalSource: 'firebird',
+          externalSource: 'ilux_web',
           externalId: null,
           requestKey: normalizedRequestKey,
         },
         include: { contact: true, equipment: true },
       });
+    }
+
+    // Na operação da LCD o ILUX_WEB é a fonte oficial das O.S. O CRM mantém
+    // o espelho para ligar a ordem ao ticket/conversa, mas a confirmação
+    // definitiva vem deste POST, sem depender do agente Firebird.
+    if (isIluxWebConfigured()) {
+      try {
+        // O contato pode ter externalId igual ao JID do WhatsApp. Para o ILUX WEB,
+        // a identidade oficial é sempre o identificador do cliente sincronizado.
+        const clienteIdentificador = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+        const equipamentoIdentificador = String(equipment.externalId || '').trim();
+        const respostaIlux = await createServiceOrderInIluxWeb({
+          origem: 'CRM',
+          ordemServicoId: os.id,
+          clienteIdentificador,
+          equipamentoIdentificador,
+          // Compatibilidade com o contrato antigo, quando os IDs eram numéricos.
+          clienteCodigoLegado: clienteIdentificador,
+          equipamentoCodigoLegado: equipamentoIdentificador,
+          cdOstp: String(cdOstp),
+          cdDefeito: defectType.code,
+          nmsuportet: nmsuportet || null,
+          abertoPor: req.user.name || req.user.email || null,
+          solicitante: contact.name || null,
+          // Para o documento, prevalece o telefone oficial do cliente ILUX
+          // sincronizado no CRM; o telefone do contato WhatsApp pode ser
+          // apenas o número do atendente/solicitante.
+          telefoneContato: contact.crmCustomer?.phone || contact.phone || contact.whatsapp || null,
+          tipoAtendimento: String(cdOstp) === '01' ? 'CONTRATOS' : 'CORRETIVA',
+          descricaoProblema: String(defect).trim(),
+          dataAbertura: os.createdAt?.toISOString?.() || undefined,
+        });
+        const externalId = String(
+          respostaIlux.seqos
+          || respostaIlux.numero
+          || respostaIlux.os?.numero
+          || '',
+        ).trim();
+        if (!/^\d+$/.test(externalId)) {
+          throw new Error('ILUX_WEB não devolveu o número definitivo da O.S.');
+        }
+
+        const confirmada = await prisma.serviceOrder.update({
+          where: { id: os.id, tenantId },
+          data: {
+            externalSource: 'ilux_web',
+            externalId,
+            externalUpdatedAt: new Date(),
+            status: 'PENDENTE',
+          },
+          include: { contact: true, equipment: true },
+        });
+        return res.status(201).json({ ...confirmada, confirmed: true, source: 'ilux_web' });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const erroIntegracao = await prisma.serviceOrder.update({
+          where: { id: os.id, tenantId },
+          data: { status: 'ERRO_INTEGRACAO' },
+          include: { contact: true, equipment: true },
+        });
+        console.error(`[createOS] falha ao abrir O.S. ${os.id} no ILUX_WEB:`, detail);
+        return res.status(502).json({
+          error: `Não foi possível abrir a O.S. no ILUX_WEB: ${detail}`,
+          serviceOrderId: erroIntegracao.id,
+        });
+      }
     }
 
     const confirmed = await waitForIluxConfirmation(os.id, tenantId);
@@ -506,7 +611,7 @@ async function createOS(req, res) {
         && confirmed.equipmentId === equipmentId
         && /^\d+$/.test(String(confirmed.externalId));
       if (!matchesRequestedContext) {
-        console.error('[createOS] confirmação do iLux rejeitada por contexto divergente', {
+        console.error('[createOS] confirmação do ILUX WEB rejeitada por contexto divergente', {
           serviceOrderId: confirmed.id,
           requested: { ticketId, contactId, equipmentId },
           confirmed: {
@@ -517,7 +622,7 @@ async function createOS(req, res) {
           },
         });
         return res.status(409).json({
-          error: 'O iLux confirmou uma O.S. com dados diferentes desta conversa. Nenhuma confirmação foi enviada ao cliente.',
+          error: 'O ILUX WEB confirmou uma O.S. com dados diferentes desta conversa. Nenhuma confirmação foi enviada ao cliente.',
           serviceOrderId: confirmed.id,
         });
       }
@@ -525,12 +630,12 @@ async function createOS(req, res) {
     }
     if (confirmed.status === 'ERRO_INTEGRACAO') {
       return res.status(502).json({
-        error: 'O agente encontrou um erro e a abertura não foi confirmada no iLux.',
+        error: 'O agente encontrou um erro e a abertura não foi confirmada no ILUX WEB.',
         serviceOrderId: confirmed.id,
       });
     }
     return res.status(504).json({
-      error: 'O agente do iLux não confirmou a abertura dentro do tempo esperado. Verifique o agente antes de tentar novamente.',
+      error: 'O ILUX WEB não confirmou a abertura dentro do tempo esperado. Verifique a integração antes de tentar novamente.',
       serviceOrderId: confirmed.id,
       status: confirmed.status,
     });
@@ -575,13 +680,10 @@ async function getOSTechnicians(req, res) {
 
 async function getOSDefectTypes(req, res) {
   try {
-    const types = await prisma.crmDefectType.findMany({
-      where: { tenantId: req.user.tenantId, inactive: false },
-      orderBy: [{ name: 'asc' }, { code: 'asc' }],
-    });
+    const types = await listDefectTypesFromIluxWeb();
     res.json(types);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: `Não foi possível carregar os tipos de defeito do ILUX WEB: ${err.message}` });
   }
 }
 
@@ -623,7 +725,7 @@ async function generatePdf(req, res) {
 
   if (!os.externalId || os.status === 'ERRO_INTEGRACAO') {
     return res.status(409).json({
-      error: 'Esta O.S. ainda nao foi confirmada pelo iLux e nao pode ser impressa.',
+      error: 'Esta O.S. ainda nao foi confirmada pelo ILUX WEB e nao pode ser impressa.',
     });
   }
 
@@ -679,7 +781,7 @@ async function generatePdf(req, res) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           externalId: clientData.externalId
         }
       });
@@ -689,7 +791,7 @@ async function generatePdf(req, res) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           cpfCnpj: clientData.cpfCnpj
         }
       });
@@ -699,7 +801,7 @@ async function generatePdf(req, res) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           name: { contains: clientData.name.trim(), mode: 'insensitive' }
         }
       });
@@ -709,13 +811,37 @@ async function generatePdf(req, res) {
       crmEquipment = await prisma.crmEquipment.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: 'firebird',
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           externalId: os.equipment.externalId
         }
       });
     }
   } catch (err) {
     console.error('[generatePdf] erro ao buscar dados estruturados adicionais:', err);
+  }
+
+  // O PDF deve refletir a mesma O.S. oficial que o ILUX WEB exibe. O contato
+  // do CRM pode ter externalId de WhatsApp; para consultar o ILUX usamos
+  // sempre o cliente sincronizado e guardamos a resposta para o histórico.
+  let iluxWebOrders = [];
+  let iluxWebOrder = null;
+  let iluxWebCompany = null;
+  try {
+    if (isIluxWebConfigured()) {
+      const iluxCustomerExternalId = String(
+        crmCustomer?.externalId
+        || os.contact.crmCustomer?.externalId
+        || ''
+      ).trim();
+      if (iluxCustomerExternalId) {
+        const result = await listServiceOrdersFromIluxWeb(iluxCustomerExternalId, { limit: 250 });
+        iluxWebOrders = Array.isArray(result?.items) ? result.items : [];
+        iluxWebOrder = iluxWebOrders.find((item) => String(item?.externalId || item?.numero || '') === String(os.externalId)) || null;
+      }
+      iluxWebCompany = await getCompanyProfileFromIluxWeb();
+    }
+  } catch (err) {
+    console.error('[generatePdf] erro ao carregar dados oficiais do ILUX WEB:', err);
   }
 
   let osPrintData = null;
@@ -752,18 +878,24 @@ async function generatePdf(req, res) {
 
     const normalizeHistoryItem = (item) => {
       const raw = item?.raw && typeof item.raw === 'object' ? item.raw : item || {};
+      const openedAt = item?.openedAt || item?.dataAbertura || item?.createdAt || item?.updatedAt || raw.dtinclusao || null;
+      const openedAtTime = openedAt && !raw.hrinclusao
+        ? new Date(openedAt).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+        : '';
+      const status = item?.statusLabel || item?.status || raw.nmstatus || raw.status || '';
+      const isClosed = /CONCL|FECH|FINALIZ/i.test(String(status));
       return {
         externalId: String(item?.externalId || raw.seqos || ''),
-        createdAt: item?.createdAt || item?.updatedAt || raw.dtinclusao || null,
-        time: raw.hrinclusao || '',
-        osType: raw.nmostp || item?.osType || '',
-        equipmentExternalId: String(item?.equipmentExternalId || raw.cdequipamento || ''),
+        createdAt: openedAt,
+        time: raw.hrinclusao || item?.time || openedAtTime,
+        osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
+        equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
         attendant: raw.nmsuportea || item?.attendant || '',
-        status: item?.status || raw.nmstatus || raw.status || '',
-        defect: item?.defect || raw.obsdefeitocli || '',
+        status,
+        defect: cleanLegacyDefect(item?.defect || item?.description || raw.obsdefeitocli || ''),
         closing: item?.closing || item?.observacao || raw.obsdefeitoats || '',
-        closedBy: raw.usuario_fechamento || raw.nmsuportel || raw.nmsuportet || '',
-        technician: item?.nmSuporteT || raw.nmsuportet || raw.nmsuportel || '',
+        closedBy: raw.usuario_fechamento || raw.nmsuportel || raw.nmsuportet || item?.closedBy || (isClosed ? item?.technician : '') || '',
+        technician: item?.technician || item?.nmSuporteT || raw.nmsuportet || raw.nmsuportel || '',
       };
     };
 
@@ -771,10 +903,15 @@ async function generatePdf(req, res) {
       previousOrders = osPrintData.history.map(normalizeHistoryItem);
     }
 
+    if (iluxWebOrders.length > 0) {
+      previousOrders = [...previousOrders, ...iluxWebOrders.map(normalizeHistoryItem)];
+    }
+
     const clientExternalId = String(
       osPrintData?.serviceOrder?.cdcliente
-      || os.contact.externalId
       || crmCustomer?.externalId
+      || os.contact.crmCustomer?.externalId
+      || os.contact.externalId
       || ''
     );
     if (previousOrders.length === 0 && clientExternalId) {
@@ -790,12 +927,20 @@ async function generatePdf(req, res) {
       previousOrders = syncedHistory.map((item) => normalizeHistoryItem(item.payload));
     }
 
-    previousOrders = previousOrders
+    const uniqueOrders = new Map();
+    for (const item of previousOrders) {
+      if (item.externalId && !uniqueOrders.has(item.externalId)) uniqueOrders.set(item.externalId, item);
+    }
+    previousOrders = [...uniqueOrders.values()]
       .filter((item) => item.externalId && item.externalId !== String(os.externalId || ''))
-      .sort((left, right) => Number(right.externalId || 0) - Number(left.externalId || 0))
+      .sort((left, right) => {
+        const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
+        if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
+        return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
+      })
       .slice(0, 5);
   } catch (err) {
-    console.error('[generatePdf] erro ao carregar histórico do iLux:', err);
+    console.error('[generatePdf] erro ao carregar histórico do ILUX WEB:', err);
     previousOrders = [];
   }
 
@@ -814,8 +959,8 @@ async function generatePdf(req, res) {
 
     pdfmake.setFonts(fonts);
     
-    const dataOS = os.createdAt.toLocaleDateString('pt-BR');
-    const horaOS = os.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const dataOS = os.createdAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const horaOS = os.createdAt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     const emissionDate = new Date().toLocaleString('pt-BR');
     
     let meters = {};
@@ -851,11 +996,12 @@ async function generatePdf(req, res) {
     const firebirdCompany = {
       ...(cachedCompanyProfile || {}),
       ...(osPrintData?.company || {}),
+      ...(iluxWebCompany || {}),
     };
     const firstValue = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
     const joinAddress = (record = {}) => {
       const full = firstValue(record.addressFull);
-      const base = full || firstValue(record.endereco, record.address);
+      const base = full || firstValue(record.endereco, record.address, record.logradouro);
       return [
         base,
         full ? null : firstValue(record.num, record.numero),
@@ -878,17 +1024,18 @@ async function generatePdf(req, res) {
     // identidade de outra empresa em O.S. de tenants sem cadastro sincronizado.
     // Sem dado, os campos ficam vazios; so nome/marca usam o nome do tenant.
     const tenantName = firstValue(settings?.companyName, os.tenant?.name);
+    const officialCompany = iluxWebCompany || {};
     const company = {
-      brand: firstValue(firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
-      name: firstValue(firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
-      cnpj: firstValue(firebirdCompany.cnpj, settings?.companyCnpj),
-      ie: firstValue(firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
-      address: firstValue(joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
-      bairro: firstValue(firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
-      cep: firstValue(firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
-      city: firstValue(firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
-      state: firstValue(firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
-      phone: firstValue(joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
+      brand: firstValue(officialCompany.printBrand, officialCompany.nomeFantasia, officialCompany.razaoSocial, firebirdCompany.fantasia, firebirdCompany.nmfantasia, firebirdCompany.nomefantasia, firebirdCompany.nomeFantasia, firebirdCompany.tradeName, firebirdCompany.nmempresa, firebirdCompany.name, tenantName, 'Empresa'),
+      name: firstValue(officialCompany.printName, officialCompany.razaoSocial, firebirdCompany.nmempresa, firebirdCompany.name, firebirdCompany.razaoSocial, tenantName, 'Empresa'),
+      cnpj: firstValue(officialCompany.printCnpj, officialCompany.cnpj, firebirdCompany.cnpj, settings?.companyCnpj),
+      ie: firstValue(officialCompany.printStateRegistration, officialCompany.inscricaoEstadual, firebirdCompany.inscest, firebirdCompany.stateRegistration, settings?.companyIE),
+      address: firstValue(officialCompany.printAddress, joinAddress(officialCompany), joinAddress(firebirdCompany), firebirdCompany.addressFull, firebirdCompany.address, settings?.companyAddress),
+      bairro: firstValue(officialCompany.printNeighborhood, officialCompany.bairro, firebirdCompany.bairro, firebirdCompany.neighborhood, settings?.companyBairro),
+      cep: firstValue(officialCompany.printZipCode, officialCompany.cep, firebirdCompany.cep, firebirdCompany.zipCode, settings?.companyCep),
+      city: firstValue(officialCompany.printCity, officialCompany.cidade, firebirdCompany.cidade, firebirdCompany.city, settings?.companyCity),
+      state: firstValue(officialCompany.printState, officialCompany.uf, firebirdCompany.uf, firebirdCompany.state, settings?.companyState),
+      phone: firstValue(officialCompany.printPhone, officialCompany.telefone, joinPhone(firebirdCompany), firebirdCompany.phone, settings?.companyPhone)
     };
     // firstValue devolve undefined quando nada preenche; normaliza para string
     // vazia para nao imprimir "undefined" no cabecalho.
@@ -899,8 +1046,8 @@ async function generatePdf(req, res) {
     company.cityLine = [company.city, company.state && `(${company.state})`].filter(Boolean).join(' ');
 
     // Identificação do atendente com fallback para o usuário atual que está gerando o documento
-    let attendantName = firstValue(firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
-    if ((attendantName === 'N/A' || !os.user) && req.user?.userId) {
+    let attendantName = firstValue(iluxWebOrder?.attendant, firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
+    if ((attendantName === 'N/A' || (!os.user && !iluxWebOrder?.attendant)) && req.user?.userId) {
       const activeUser = await prisma.user.findUnique({
         where: { id: req.user.userId }
       });
@@ -924,10 +1071,13 @@ async function generatePdf(req, res) {
         displayOsType = `TIPO ${os.cdOstp}`;
       }
     }
+    if (iluxWebOrder?.type || iluxWebOrder?.tipoAtendimento) {
+      displayOsType = firstValue(iluxWebOrder.type, iluxWebOrder.tipoAtendimento, displayOsType);
+    }
 
     const printAttendances = Array.isArray(osPrintData?.attendances) ? osPrintData.attendances : [];
     const lastPrintAttendance = printAttendances[printAttendances.length - 1] || {};
-    const attendanceMeterCode = String(lastPrintAttendance.cdmedidor || '').toUpperCase();
+    const attendanceMeterCode = String(lastPrintAttendance.cdmedidor || (iluxWebOrder ? 'TOTAL' : '')).toUpperCase();
     if (lastPrintAttendance.medidor !== undefined && lastPrintAttendance.medidor !== null) {
       if (attendanceMeterCode.includes('COR')) meters.color = lastPrintAttendance.medidor;
       else if (attendanceMeterCode.includes('SCAN')) meters.scan = lastPrintAttendance.medidor;
@@ -1000,7 +1150,7 @@ async function generatePdf(req, res) {
         ])
       : [[
           {
-            text: 'Nenhum chamado anterior encontrado para este cliente no iLux.',
+            text: 'Nenhum chamado anterior encontrado para este cliente no ILUX WEB.',
             colSpan: 2,
             alignment: 'center',
             color: '#666',
@@ -1010,62 +1160,98 @@ async function generatePdf(req, res) {
         ]];
 
     const currentPrintOrder = firebirdOrder;
+    const iluxOrderData = iluxWebOrder || {};
     const firstPrintAttendance = printAttendances[0] || {};
     const timeText = (value) => {
       if (!value) return '';
       const match = String(value).match(/(\d{2}:\d{2})/);
       return match ? match[1] : String(value);
     };
-    const visitDate = formatHistoryDate(
-      lastPrintAttendance.dtatendimento || lastPrintAttendance.datahora || currentPrintOrder.dtatendimento || ''
+    const localTimeFromDate = (value) => {
+      if (!value) return '';
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime())
+        ? ''
+        : parsed.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+    };
+    const iluxOpenedDate = iluxOrderData.openedAt ? formatHistoryDate(iluxOrderData.openedAt) : '';
+    const iluxOpenedTime = localTimeFromDate(iluxOrderData.openedAt);
+    const visitDate = (() => {
+      const legacyDate = lastPrintAttendance.dtatendimento || lastPrintAttendance.datahora || currentPrintOrder.dtatendimento || '';
+      return legacyDate ? formatHistoryDate(legacyDate) : (iluxOpenedDate || '');
+    })();
+    const visitStart = firstValue(timeText(firstPrintAttendance.hratendimento || firstPrintAttendance.datahora), iluxOpenedTime, '');
+    const visitEnd = firstValue(timeText(lastPrintAttendance.hratendimentofin || lastPrintAttendance.hratendimento1), iluxOpenedTime, '');
+    const clientExternalId = firstValue(
+      iluxOrderData.clientCodigoLegado,
+      currentPrintOrder.cdcliente,
+      firebirdClient.cdcliente,
+      crmCustomer?.externalId,
+      os.contact.crmCustomer?.externalId,
+      os.contact.externalId,
+      'N/A',
     );
-    const visitStart = timeText(firstPrintAttendance.hratendimento || firstPrintAttendance.datahora);
-    const visitEnd = timeText(lastPrintAttendance.hratendimentofin || lastPrintAttendance.hratendimento1);
-    const clientExternalId = firstValue(currentPrintOrder.cdcliente, firebirdClient.cdcliente, os.contact.externalId, crmCustomer?.externalId, 'N/A');
-    const clientName = firstValue(currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
-    const clientAddress = firstValue(joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
-    const clientNeighborhood = firstValue(currentPrintOrder.bairro, firebirdClient.bairro, crmCustomer?.neighborhood, 'N/A');
-    const clientZipCode = firstValue(currentPrintOrder.cep, firebirdClient.cep, crmCustomer?.zipCode, clientData.zipCode, 'N/A');
-    const clientCity = firstValue(currentPrintOrder.cidade, firebirdClient.cidade, crmCustomer?.city, clientData.city, 'N/A');
-    const clientState = firstValue(currentPrintOrder.uf, firebirdClient.uf, crmCustomer?.state, clientData.state, 'N/A');
-    const clientDocument = firstValue(firebirdClient.cnpj, firebirdClient.cpf, crmCustomer?.cpfCnpj, clientData.cpfCnpj, 'N/A');
-    const clientStateRegistration = firstValue(firebirdClient.inscest, firebirdClient.inscmun, 'N/A');
-    const clientContact = firstValue(currentPrintOrder.contato, firebirdClient.contato, crmCustomer?.contactName, solicitante, 'N/A');
-    const primaryClientPhone = firstValue(joinPhone(currentPrintOrder), joinPhone(firebirdClient), crmCustomer?.phone, os.contact.phone, 'N/A');
+    const clientName = firstValue(iluxOrderData.clientName, currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
+    const clientAddress = firstValue(iluxOrderData.clientAddress, joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
+    const clientNeighborhood = firstValue(iluxOrderData.clientNeighborhood, currentPrintOrder.bairro, firebirdClient.bairro, crmCustomer?.neighborhood, 'N/A');
+    const clientZipCode = firstValue(iluxOrderData.clientZipCode, currentPrintOrder.cep, firebirdClient.cep, crmCustomer?.zipCode, clientData.zipCode, 'N/A');
+    const clientCity = firstValue(iluxOrderData.clientCity, currentPrintOrder.cidade, firebirdClient.cidade, crmCustomer?.city, clientData.city, 'N/A');
+    const clientState = firstValue(iluxOrderData.clientState, currentPrintOrder.uf, firebirdClient.uf, crmCustomer?.state, clientData.state, 'N/A');
+    const clientDocument = firstValue(iluxOrderData.clientDocument, firebirdClient.cnpj, firebirdClient.cpf, crmCustomer?.cpfCnpj, clientData.cpfCnpj, 'N/A');
+    const clientStateRegistration = firstValue(iluxOrderData.clientStateRegistration, firebirdClient.inscest, firebirdClient.inscmun, 'N/A');
+    const clientContact = firstValue(iluxOrderData.clientContact, currentPrintOrder.contato, firebirdClient.contato, crmCustomer?.contactName, solicitante, 'N/A');
+    const primaryClientPhone = firstValue(iluxOrderData.clientPhone, joinPhone(currentPrintOrder), joinPhone(firebirdClient), crmCustomer?.phone, os.contact.phone, 'N/A');
     const clientCellPhone = currentPrintOrder.celular && !String(primaryClientPhone).includes(String(currentPrintOrder.celular))
       ? String(currentPrintOrder.celular)
       : '';
     const clientPhone = [primaryClientPhone, clientCellPhone].filter(Boolean).join(' ');
-    const equipmentExternalId = firstValue(currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
-    const equipmentModel = firstValue(firebirdEquipment.modelo, os.equipment.model, 'N/A');
-    const equipmentSerial = firstValue(firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
-    const equipmentAsset = firstValue(firebirdEquipment.patrimonio, 'N/A');
-    const contractType = firstValue(firebirdContract.cdcontratotp, firebirdEquipment.cdcontratotp, 'N/A');
-    const territory = firstValue(firebirdEquipment.cdterritorio, currentPrintOrder.cdterritorio, 'N/A');
+    const equipmentExternalId = firstValue(iluxOrderData.equipmentExternalId, currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
+    const equipmentModel = firstValue(iluxOrderData.equipmentModel, firebirdEquipment.modelo, os.equipment.model, 'N/A');
+    const equipmentSerial = firstValue(iluxOrderData.serialNumber, firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
+    const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, iluxWebOrder ? '-' : 'N/A');
+    const contractType = firstValue(iluxOrderData.contractType, firebirdContract.cdcontratotp, firebirdEquipment.cdcontratotp, 'N/A');
+    const territory = firstValue(iluxOrderData.territory, firebirdEquipment.cdterritorio, currentPrintOrder.cdterritorio, 'N/A');
     const department = currentPrintOrder.departamento
       || firebirdEquipment.departamento
+      || iluxOrderData.equipmentDepartment
       || crmEquipment?.raw?.departamento
       || crmEquipment?.raw?.DEPARTAMENTO
       || os.equipment.sector
       || 'N/A';
     const installLocation = currentPrintOrder.localinstal
       || firebirdEquipment.localinstal
+      || iluxOrderData.equipmentLocation
       || crmEquipment?.installLocation
       || crmEquipment?.raw?.localinstal
       || crmEquipment?.raw?.LOCALINSTAL
-      || os.equipment.sector
-      || 'N/A';
-    const currentOsDate = currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : dataOS;
-    const currentOsTime = timeText(currentPrintOrder.hrinclusao) || horaOS;
-    const currentTechnician = firstValue(currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
-    const currentDefect = firstValue(currentPrintOrder.obsdefeitocli, os.defect, '');
+      || (iluxWebOrder ? '-' : (os.equipment.sector || 'N/A'));
+    const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
+    const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
+    const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
+    const defectTypeName = firstValue(
+      iluxOrderData.defectTypeName,
+      iluxOrderData.defeitoTipoNome,
+      iluxOrderData.defectType?.name,
+      '',
+    );
+    const currentDefect = cleanLegacyDefect(firstValue(
+      iluxOrderData.defect,
+      iluxOrderData.description,
+      currentPrintOrder.obsdefeitocli,
+      os.defect,
+      '',
+    ));
     const currentFollowUp = [currentPrintOrder.obsdefeitoats, followUpText].filter(Boolean).join('\n');
     const checkbox = (checked, label) => `${checked ? '[X]' : '[ ]'} ${label}`;
-    const isAttendance = ['A', 'ATENDIMENTO'].includes(String(currentPrintOrder.tporcatend || 'A').toUpperCase());
+    const isAttendance = iluxWebOrder
+      ? ['A', 'ATENDIMENTO'].includes(String(iluxOrderData.attendanceType || '').toUpperCase())
+      : ['A', 'ATENDIMENTO'].includes(String(currentPrintOrder.tporcatend || 'A').toUpperCase());
     const isWarranty = ['G', 'GARANTIA'].includes(String(currentPrintOrder.tpchamado || '').toUpperCase());
     const isBudget = ['2', 'O', 'ORCAMENTO'].includes(String(currentPrintOrder.tipo_os || '').toUpperCase());
 
-    const symptom = [...printAttendances].reverse().find((item) => item.sintoma)?.sintoma || '';
+    const symptom = iluxWebOrder
+      ? firstValue(iluxOrderData.symptom, iluxOrderData.sintoma, '')
+      : ([...printAttendances].reverse().find((item) => item.sintoma)?.sintoma || '');
     const meterAttendance = firstPrintAttendance;
     let logoDataUri = '';
     try {
@@ -1092,9 +1278,9 @@ async function generatePdf(req, res) {
       time: currentOsTime,
       openedBy: String(attendantName).toUpperCase(),
       technician: String(currentTechnician).toUpperCase(),
-      expectedDate: currentPrintOrder.dtpreventrega ? formatHistoryDate(currentPrintOrder.dtpreventrega) : '',
+      expectedDate: currentPrintOrder.dtpreventrega ? formatHistoryDate(currentPrintOrder.dtpreventrega) : (iluxWebOrder ? currentOsDate : ''),
       expectedTime: timeText(currentPrintOrder.hrpreventrega),
-      priority: currentPrintOrder.prioridade || '',
+      priority: currentPrintOrder.prioridade || (iluxWebOrder ? '1' : ''),
       type: String(displayOsType).toUpperCase(),
       isAttendance,
       isWarranty,
@@ -1139,10 +1325,11 @@ async function generatePdf(req, res) {
         date: visitDate === '-' ? '' : visitDate,
         start: visitStart,
         end: visitEnd,
-        meterCode: meterAttendance.cdmedidor || '',
+        meterCode: meterAttendance.cdmedidor || (iluxWebOrder ? 'TOTAL' : ''),
         meterValue: meterAttendance.medidor ?? 0,
       },
       defect: currentDefect,
+      defectTypeName,
       symptom,
       cause: lastPrintAttendance.causa || '',
       action: lastPrintAttendance.acao || '',
@@ -1213,7 +1400,7 @@ async function generatePdf(req, res) {
                 { text: `Hora: ${currentOsTime}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico abertura: ${attendantName.toUpperCase()}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico atendimento: ${String(currentTechnician).toUpperCase()}`, bold: true, fontSize: 6.5 },
-                { text: `Atendimento Prev: ${formatHistoryDate(currentPrintOrder.dtpreventrega)} ${timeText(currentPrintOrder.hrpreventrega)}   Priorid. ${currentPrintOrder.prioridade || ''}`, bold: true, fontSize: 6.3 },
+                { text: `Atendimento Prev: ${currentPrintOrder.dtpreventrega ? formatHistoryDate(currentPrintOrder.dtpreventrega) : (iluxWebOrder ? currentOsDate : '-')} ${timeText(currentPrintOrder.hrpreventrega)}   Priorid. ${currentPrintOrder.prioridade || (iluxWebOrder ? '1' : '')}`, bold: true, fontSize: 6.3 },
                 { text: `Tipo O.S.: ${displayOsType}`, bold: true, fontSize: 6.3 },
                 { text: `${checkbox(isAttendance, 'Atendimento')}   ${checkbox(isWarranty, 'Garantia')}\n${checkbox(isBudget, 'Orçamento')}`, fontSize: 6.3 },
               ],
@@ -1243,7 +1430,7 @@ async function generatePdf(req, res) {
           body: [[
             {
               stack: [
-                { text: [{ text: 'Código iLux: ', bold: true }, String(clientExternalId), { text: '   Cliente: ', bold: true }, String(clientName)] },
+                { text: [{ text: 'Código ILUX WEB: ', bold: true }, String(clientExternalId), { text: '   Cliente: ', bold: true }, String(clientName)] },
                 { text: [{ text: 'Endereço: ', bold: true }, String(clientAddress)] },
                 { text: [{ text: 'Bairro: ', bold: true }, String(clientNeighborhood), { text: '   CEP: ', bold: true }, String(clientZipCode)] },
                 { text: [{ text: 'Cidade: ', bold: true }, String(clientCity), { text: '   U.F.: ', bold: true }, String(clientState)] },
@@ -1286,8 +1473,9 @@ async function generatePdf(req, res) {
           body: [[{
             stack: [
               { text: `Data Visita: ${visitDate === '-' ? '' : visitDate}    Hora Inicial: ${visitStart}    Hora Final: ${visitEnd}`, bold: true, fontSize: 6.5 },
-              { text: `Medidor 01: ${attendanceMeterCode}    Contador Medidor 01: ${lastPrintAttendance.medidor ?? ''}`, bold: true, fontSize: 6.5 },
-              { text: [{ text: 'Defeito:   ', bold: true, fontSize: 7 }, { text: currentDefect, fontSize: 11 }], margin: [0, 9, 0, 4] },
+              { text: `Medidor 01: ${attendanceMeterCode}    Contador Medidor 01: ${lastPrintAttendance.medidor ?? (iluxWebOrder ? 0 : '')}`, bold: true, fontSize: 6.5 },
+              { text: [{ text: 'Tipo de defeito: ', bold: true, fontSize: 7 }, { text: defectTypeName, fontSize: 7 }], margin: [0, 4, 0, 2] },
+              { text: [{ text: 'Defeito:   ', bold: true, fontSize: 7 }, { text: currentDefect, fontSize: 11 }], margin: [0, 5, 0, 4] },
               { text: [{ text: 'Sintoma:   ', bold: true }, lastPrintAttendance.sintoma || ''], fontSize: 7, margin: [0, 2, 0, 2] },
               { text: [{ text: 'Causa:     ', bold: true }, lastPrintAttendance.causa || ''], fontSize: 7, margin: [0, 2, 0, 2] },
               { text: [{ text: 'Ação:      ', bold: true }, lastPrintAttendance.acao || ''], fontSize: 7, margin: [0, 2, 0, 4] },
@@ -1534,8 +1722,9 @@ async function generatePdf(req, res) {
               [
                 {
                   stack: [
-                    { text: `Defeito: ${os.defect || 'Nenhum defeito reportado'}`, style: 'boxContent' },
-                    { text: `\nSintoma: ${lastPrintAttendance.sintoma || ''}`, style: 'boxContent' },
+                    { text: `Tipo de defeito: ${defectTypeName || ''}`, style: 'boxContent' },
+                    { text: `\nDefeito: ${currentDefect || 'Nenhum defeito reportado'}`, style: 'boxContent' },
+                    { text: `\nSintoma: ${symptom || ''}`, style: 'boxContent' },
                     { text: `\nCausa: ${lastPrintAttendance.causa || ''}`, style: 'boxContent' },
                     { text: `\nAção: ${lastPrintAttendance.acao || ''}`, style: 'boxContent' }
                   ],

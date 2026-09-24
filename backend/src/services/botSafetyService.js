@@ -26,7 +26,7 @@ function guardBotReply(text) {
   return {
     blocked: true,
     reasons,
-    reply: 'Entendido! Encaminhei sua solicitação para a equipe responsável. A abertura da O.S., o número, o status e o prazo de atendimento serão confirmados por um atendente após a validação no iLux.',
+    reply: 'Entendido! Encaminhei sua solicitação para a equipe responsável. A abertura da O.S., o número, o status e o prazo de atendimento serão confirmados por um atendente após a validação no ILUX WEB.',
   };
 }
 

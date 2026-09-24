@@ -398,7 +398,7 @@ export default function Users() {
                 </div>
 
                 <div style={s.field}>
-                  <label style={s.label}>Atendente ILUX (Nome Exato)</label>
+                  <label style={s.label}>Atendente ILUX WEB (Nome Exato)</label>
                   <select style={s.input} value={form.firebirdSupportName} onChange={(e) => setForm({ ...form, firebirdSupportName: e.target.value })}>
                     <option value="">Nenhum / Mesmo do sistema</option>
                     {technicians.map(t => (

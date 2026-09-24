@@ -52,7 +52,7 @@ export default function LinkContactModal({ onClose, onLink }) {
     <div style={s.overlay} onClick={onClose}>
       <div style={s.modal} onClick={e => e.stopPropagation()}>
         <h2 style={s.title}><Link2 size={24} color="var(--accent)"/> Vincular ao CRM</h2>
-        <p style={s.sub}>Pesquise na base ILUX/CRM para vincular este WhatsApp ao cliente oficial.</p>
+        <p style={s.sub}>Pesquise na base CRM / ILUX WEB para vincular este WhatsApp ao cliente oficial.</p>
 
         <div style={s.searchBox}>
           <Search style={s.searchIcon} size={18} />

@@ -28,7 +28,7 @@ function buildManagerMessage(order, osType) {
   });
 
   return [
-    '📋 *NOVA O.S. ABERTA NO iLux*',
+    '📋 *NOVA O.S. ABERTA NO ILUX WEB*',
     '',
     `*Número:* ${valueOrDash(order.externalId)}`,
     `*Cliente:* ${valueOrDash(customerName)}`,

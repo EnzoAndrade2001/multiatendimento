@@ -65,7 +65,7 @@ export default function IluxAssistant() {
       <header className="ilux-ai-header">
         <div>
           <span className="ilux-ai-kicker"><Sparkles size={14} /> Inteligência corporativa</span>
-          <h1>Assistente iLux</h1>
+          <h1>Assistente ILUX WEB</h1>
           <p>Consulte dados financeiros, clientes, contratos, equipamentos e ordens de serviço em linguagem natural.</p>
         </div>
         <div className="ilux-ai-scope"><Building2 size={17} /><span><small>Escopo atual</small>Empresa inteira</span></div>
@@ -73,7 +73,7 @@ export default function IluxAssistant() {
 
       <section className="ilux-ai-shell">
         <aside className="ilux-ai-aside">
-          <div className="ilux-ai-info"><Database size={18} /><div><strong>Dados do iLux</strong><p>As respostas usam somente informações sincronizadas pelo agente local.</p></div></div>
+          <div className="ilux-ai-info"><Database size={18} /><div><strong>Dados do ILUX WEB</strong><p>As respostas usam somente informações sincronizadas pelo agente local.</p></div></div>
           <div className="ilux-ai-info"><ShieldCheck size={18} /><div><strong>Consulta segura</strong><p>A IA não cria nem executa SQL. Permissões financeiras continuam valendo.</p></div></div>
           <div className="ilux-ai-aside-title">Perguntas sugeridas</div>
           <div className="ilux-ai-suggestions">{SUGGESTIONS.map((item) => <button type="button" key={item} onClick={() => ask(item)} disabled={busy}>{item}</button>)}</div>

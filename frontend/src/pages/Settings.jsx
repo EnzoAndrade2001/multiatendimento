@@ -42,7 +42,7 @@ import UserAvatar from '../components/ui/UserAvatar';
 import PrintGuardSettings from './PrintGuardSettings';
 import AttendanceOperations from '../components/AttendanceOperations';
 
-const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'iLux Sentinela', 'Minha conta', 'Agente Local', 'PrintGuard'];
+const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'ILUX WEB Sentinela', 'Minha conta', 'Agente Local', 'PrintGuard'];
 const TAB_PERMISSIONS = [
   'settings.bot.manage', 'settings.attendance.manage', 'users.manage', 'teams.manage',
   'settings.company.manage', 'quick_responses.manage', 'tags.manage', 'revenue.view',
@@ -342,7 +342,7 @@ export default function Settings() {
     setSyncingCompany(true);
     try {
       await syncCompanyFromFirebird();
-      toast.success('Consulta da empresa enviada ao agente iLux.');
+      toast.success('Consulta da empresa enviada ao ILUX WEB.');
 
       // O agente responde por HTTPS no próximo polling de comandos. Atualiza
       // somente as configurações para não reiniciar toda a tela.
@@ -368,7 +368,7 @@ export default function Settings() {
         }));
         if (next.firebirdCompanySyncStatus !== 'pending') {
           if (next.firebirdCompanySyncStatus === 'ok') {
-            toast.success('Dados da empresa atualizados pelo iLux.');
+      toast.success('Dados da empresa atualizados pelo ILUX WEB.');
           } else {
             toast.error('O agente não confirmou a consulta da empresa.');
           }
@@ -784,7 +784,7 @@ export default function Settings() {
   const companySyncLabel = companySyncStatus === 'pending'
     ? 'Aguardando o agente'
     : companySyncStatus === 'ok'
-      ? 'Sincronizado com o iLux'
+      ? 'Sincronizado com o ILUX WEB'
       : companySyncStatus === 'failed'
         ? 'Falha na última consulta'
       : 'Ainda não sincronizado';
@@ -1051,9 +1051,9 @@ export default function Settings() {
                   </div>
                 </div>
                 <div style={s.field}>
-                  <label style={s.label} htmlFor="technical-contact-firebird-name">Nome do técnico no iLux (opcional)</label>
+                  <label style={s.label} htmlFor="technical-contact-firebird-name">Nome do técnico no ILUX WEB (opcional)</label>
                   <input id="technical-contact-firebird-name" style={s.input} value={technicalContactForm.firebirdSupportName} onChange={(e) => setTechnicalContactForm({ ...technicalContactForm, firebirdSupportName: e.target.value })} placeholder="Ex.: DIEGO" maxLength={80} />
-                  <p style={s.hint}>Usado apenas para identificar o técnico ao abrir chamados no iLux.</p>
+                  <p style={s.hint}>Usado apenas para identificar o técnico ao abrir chamados no ILUX WEB.</p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button type="submit" style={s.saveBtn} disabled={technicalContactBusy}>
@@ -1069,7 +1069,7 @@ export default function Settings() {
                   <div key={item.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem', border: '1px solid var(--border)', borderRadius: '0.75rem', flexWrap: 'wrap' }}>
                     <div style={{ minWidth: 0 }}>
                       <strong>{item.name}</strong>
-                      <div style={s.hint}>{item.phone}{item.firebirdSupportName ? ` · iLux: ${item.firebirdSupportName}` : ''}</div>
+                        <div style={s.hint}>{item.phone}{item.firebirdSupportName ? ` · ILUX WEB: ${item.firebirdSupportName}` : ''}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button type="button" style={s.iconButton} onClick={() => toggleTechnicalContact(item)}>{item.active ? 'Ativo' : 'Inativo'}</button>
@@ -1235,13 +1235,13 @@ export default function Settings() {
             <h2 style={s.cardTitle}>Cópia automática de O.S.</h2>
             <div style={s.form}>
               <div style={s.field}>
-                <label style={s.label}>Enviar ao gestor após abrir no iLux</label>
+                  <label style={s.label}>Enviar ao gestor após abrir no ILUX WEB</label>
                 <div style={s.toggleCard}>
                   <div style={s.toggleInfo}>
                     <span style={{ ...s.toggleStatus, color: form.serviceOrderManagerCopyEnabled ? 'var(--accent)' : 'var(--text-dim)' }}>
                       {form.serviceOrderManagerCopyEnabled ? 'Ativa' : 'Desativada'}
                     </span>
-                    <p style={s.toggleHint}>O envio ocorre somente após o banco do iLux confirmar o número da O.S.</p>
+                    <p style={s.toggleHint}>O envio ocorre somente após o banco do ILUX WEB confirmar o número da O.S.</p>
                   </div>
                   <input
                     type="checkbox"
@@ -1350,7 +1350,7 @@ export default function Settings() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ ...s.label, marginBottom: '.35rem' }}>Cadastro oficial do iLux</div>
+                  <div style={{ ...s.label, marginBottom: '.35rem' }}>Cadastro oficial do ILUX WEB</div>
                   <div style={{ fontWeight: 700, color: companySyncStatus === 'ok' ? 'var(--success)' : companySyncStatus === 'pending' ? 'var(--accent)' : 'var(--text-dim)' }}>
                     {companySyncLabel}
                   </div>
@@ -1369,7 +1369,7 @@ export default function Settings() {
                   )}
                 </div>
                 <button type="button" style={{ ...s.saveBtn, width: 'auto', minWidth: 190, marginTop: 0 }} onClick={handleCompanySync} disabled={syncingCompany}>
-                  {syncingCompany ? 'Consultando iLux...' : 'Sincronizar agora'}
+                  {syncingCompany ? 'Consultando ILUX WEB...' : 'Sincronizar agora'}
                 </button>
               </div>
 
@@ -1737,7 +1737,7 @@ export default function Settings() {
       {tab === 7 && (
         <div style={s.sections}>
           <div style={s.card}>
-            <h2 style={s.cardTitle}>Configurações de KPIs do iLux Sentinela</h2>
+            <h2 style={s.cardTitle}>Configurações de KPIs do ILUX WEB Sentinela</h2>
             <form onSubmit={handleSave} style={s.form}>
               <div style={s.field}>
                 <label style={s.label}>Fallback de contrato sem valor (R$/mês)</label>
@@ -1790,11 +1790,11 @@ export default function Settings() {
                   onChange={(e) => setForm({ ...form, kpiReincidentThreshold: e.target.value })}
                   placeholder="2"
                 />
-                <p style={s.hint}>A partir de quantas O.S. no mês um equipamento é considerado reincidente/com falha recorrente no iLux Sentinela.</p>
+                <p style={s.hint}>A partir de quantas O.S. no mês um equipamento é considerado reincidente/com falha recorrente no ILUX WEB Sentinela.</p>
               </div>
 
               <button style={s.saveBtn} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar configurações do iLux Sentinela'}
+                {saving ? 'Salvando...' : 'Salvar configurações do ILUX WEB Sentinela'}
               </button>
             </form>
           </div>
@@ -1981,7 +1981,7 @@ export default function Settings() {
                     </p>
                     <p style={{ ...s.hint, color: form.plugBoletoConfigSyncedAt ? 'var(--success)' : 'var(--text-dim)' }}>
                       {form.plugBoletoConfigSyncedAt
-                        ? `Credencial sincronizada automaticamente do iLux em ${new Date(form.plugBoletoConfigSyncedAt).toLocaleString('pt-BR')}.`
+                        ? `Credencial sincronizada automaticamente do ILUX WEB em ${new Date(form.plugBoletoConfigSyncedAt).toLocaleString('pt-BR')}.`
                         : form.plugBoletoTokenSet
                           ? 'Credencial configurada manualmente.'
                           : 'O agente envia CNPJ e token do cedente (CE_CEDENTE / CE_PARAM_CONFIG) a cada sincronização. Os campos abaixo são só para override manual.'}
@@ -1994,7 +1994,7 @@ export default function Settings() {
                       style={s.input}
                       value={form.plugBoletoCedenteCnpj || ''}
                       onChange={(e) => setForm({ ...form, plugBoletoCedenteCnpj: e.target.value })}
-                      placeholder="Só números — CE_CEDENTE.CEDENTECPFCNPJ no iLux"
+                      placeholder="Só números — CE_CEDENTE.CEDENTECPFCNPJ no ILUX WEB"
                     />
                   </div>
 
@@ -2005,7 +2005,7 @@ export default function Settings() {
                       type="password"
                       value={form.plugBoletoToken || ''}
                       onChange={(e) => setForm({ ...form, plugBoletoToken: e.target.value })}
-                      placeholder={form.plugBoletoTokenSet ? '•••••••• configurado — digite para trocar' : 'CE_CEDENTE.TOKEN_CEDENTE no iLux'}
+                      placeholder={form.plugBoletoTokenSet ? '•••••••• configurado — digite para trocar' : 'CE_CEDENTE.TOKEN_CEDENTE no ILUX WEB'}
                     />
                     <p style={s.hint}>Guardado cifrado. Não é exibido depois de salvo.</p>
                   </div>
@@ -2044,7 +2044,7 @@ export default function Settings() {
                       </label>
                     </div>
                     <p style={s.hint}>
-                      Com isto ligado, o CRM gera o PDF do demonstrativo a partir dos valores fechados no iLux
+                      Com isto ligado, o CRM gera o PDF do demonstrativo a partir dos valores fechados no ILUX WEB
                       (IXLDEMOFAT + IXLCONTRATOSFAT sincronizados pelo agente), sem exigir o PDF oficial na pasta monitorada.
                       Os números vêm do ERP — o CRM não recalcula franquia nem excedente. Se o demonstrativo ainda não
                       tiver sido sincronizado, o agente/pasta continua sendo o fallback.
@@ -2061,7 +2061,7 @@ export default function Settings() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
               <div>
                 <h2 style={{ ...s.cardTitle, marginBottom: '0.35rem' }}>Central do Agente Local</h2>
-                <p style={{ ...s.hint, margin: 0 }}>Instalação, atualização e suporte do aplicativo que conecta o CRM ao iLux.</p>
+                <p style={{ ...s.hint, margin: 0 }}>Instalação, atualização e suporte do aplicativo que conecta o CRM ao ILUX WEB.</p>
               </div>
               <button type="button" style={s.iconButton} onClick={handleRefreshAgentInfo} disabled={agentInfoLoading} title="Atualizar informações">
                 {agentInfoLoading ? '...' : 'Atualizar'}
@@ -2163,7 +2163,7 @@ export default function Settings() {
               <div style={s.integrationGuide}>
                 <strong style={s.integrationGuideTitle}>Instalação rápida</strong>
                 <ol style={s.guideList}>
-                  <li>Baixe o executável e salve-o no servidor do iLux.</li>
+                  <li>Baixe o executável e salve-o no servidor do ILUX WEB.</li>
                   <li>Abra o agente, informe o token salvo nesta tela e configure o Firebird.</li>
                   <li>Defina as pastas de Documentos financeiros e teste a conexão.</li>
                   <li>Configure a tarefa automática do Windows abaixo para o agente iniciar mesmo sem login.</li>
@@ -2237,7 +2237,7 @@ export default function Settings() {
             </div>
 
             <ol style={s.guideList}>
-              <li>Abra o PowerShell como Administrador no servidor do iLux.</li>
+              <li>Abra o PowerShell como Administrador no servidor do ILUX WEB.</li>
               <li>Execute a instalação abaixo e informe o mesmo usuário do Windows que acessa o Firebird e as pastas financeiras.</li>
               <li>Inicie a tarefa para testar sem reiniciar o servidor.</li>
               <li>Confirme o processo e acompanhe o arquivo <code>logs\client.log</code>.</li>

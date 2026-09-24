@@ -58,13 +58,13 @@ export const PERMISSION_LABELS = {
   'crm.financial.send': 'Enviar documentos financeiros', 'billing.view': 'Ver relatórios de cobrança',
   'billing.reprocess': 'Reprocessar cobranças', 'campaigns.manage': 'Gerenciar campanhas',
   'leads.manage': 'Gerenciar prospecção', 'connections.manage': 'Gerenciar conexões',
-  'revenue.view': 'Ver iLux Sentinela', 'settings.bot.manage': 'Configurar Robô IA',
+  'revenue.view': 'Ver ILUX WEB Sentinela', 'settings.bot.manage': 'Configurar Robô IA',
   'settings.attendance.manage': 'Configurar atendimento', 'users.manage': 'Gerenciar usuários',
   'teams.manage': 'Gerenciar equipes', 'settings.company.manage': 'Configurar empresa',
   'quick_responses.manage': 'Gerenciar respostas rápidas', 'tags.manage': 'Gerenciar etiquetas',
   'settings.agent.manage': 'Configurar Agente Local', 'privacy.manage': 'Gerenciar privacidade e LGPD',
   'internal_chat.view': 'Usar chat interno', 'audit.view': 'Consultar auditoria do sistema', 'telemetry.view': 'Acompanhar telemetria operacional', 'telemetry.manage': 'Gerenciar decisões do Sentinela',
-  'ai.assistant.query': 'Consultar o Assistente iLux',
+  'ai.assistant.query': 'Consultar o Assistente ILUX WEB',
 };
 
 export function permissionsForUser(user = {}) {

@@ -104,7 +104,7 @@ async function auditBillingDocuments(tenantId) {
         statementExternalId: s.externalId,
         period: s.period || null,
         receivableExternalId: s.receivableExternalId || null,
-        detail: `Demonstrativo não fecha no iLux: fixo ${parts.toFixed(2)} ≠ total ${total.toFixed(2)}.`,
+        detail: `Demonstrativo não fecha no ILUX WEB: fixo ${parts.toFixed(2)} ≠ total ${total.toFixed(2)}.`,
       });
     }
   }

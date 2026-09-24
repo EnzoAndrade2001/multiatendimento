@@ -671,7 +671,7 @@ function OpenOrdersDialog({ item, onClose }) {
             </button>
           </div>
         ))}
-        {orders.length === 0 && <p>Não foi possível listar as O.S. abertas — confira no iLux.</p>}
+        {orders.length === 0 && <p>Não foi possível listar as O.S. abertas — confira no ILUX WEB.</p>}
       </div>
     </Modal>
   );
@@ -679,7 +679,7 @@ function OpenOrdersDialog({ item, onClose }) {
 
 function OsDialog({ item, count, osTypes, busy, onClose, onSave }) {
   const [code, setCode] = useState(item.suggestedOsType?.code || '');
-  return <Modal eyebrow="Abertura no iLux" title={count > 1 ? `Consolidar ${count} ocorrências` : 'Abrir ordem de serviço'} onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !code} onClick={() => onSave(code)}>Confirmar O.S.</button></>}>
+  return <Modal eyebrow="Abertura no ILUX WEB" title={count > 1 ? `Consolidar ${count} ocorrências` : 'Abrir ordem de serviço'} onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !code} onClick={() => onSave(code)}>Confirmar O.S.</button></>}>
     <p>{count > 1 ? 'Será criada uma única O.S. para o cliente, reunindo os itens selecionados.' : item._recommendation?.explanation}</p>
     <label>Tipo de O.S.<select value={code} onChange={(e) => setCode(e.target.value)}><option value="">Selecione…</option>{osTypes.map((type) => <option key={type.code || type.id} value={type.code || type.id}>{type.code ? `${type.code} — ` : ''}{type.name}</option>)}</select></label>
   </Modal>;
@@ -692,7 +692,7 @@ function BindingDialog({ item, busy, onClose, onDone }) {
   const customer = data?.customers?.find((c) => c.id === equipment?.customerId);
   async function save() { try { await resolveParkBinding(item.id, { customerId: customer?.id, equipmentId }); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Falha ao corrigir vínculo.'); } }
   return <Modal eyebrow="Qualidade cadastral" title="Corrigir vínculo" onClose={onClose} footer={<><button className="park-btn" onClick={onClose}>Cancelar</button><button className="park-btn primary" disabled={busy || !customer || !equipmentId} onClick={save}>Confirmar vínculo</button></>}>
-    {loading ? <div className="park-loading"><Loader2 className="spin" /> Buscando no iLux…</div> : <>
+    {loading ? <div className="park-loading"><Loader2 className="spin" /> Buscando no ILUX WEB…</div> : <>
       <p>Evento: {item.serialNumber || 'série não informada'}. Selecione o equipamento correto; o cliente será validado automaticamente.</p>
       <label>Equipamento<select value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)}><option value="">Selecione…</option>{data?.equipments?.map((e) => { const owner = data.customers?.find((c) => c.id === e.customerId); return <option value={e.id} key={e.id}>{e.model || e.externalId} · {e.serialNumber || 'sem série'} · {owner?.name || 'cliente não identificado'}</option>; })}</select></label>
       {equipment && <div className="park-confirmation"><b>{customer?.name}</b><span>{equipment.model} · {equipment.serialNumber}</span><span>{equipment.address || customer?.address || 'Endereço não informado'}</span></div>}

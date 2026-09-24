@@ -498,7 +498,7 @@ async function autoSendBilling(req, res) {
     }
     const clientExternalId = String(receivableRecord.payload?.clientExternalId ?? receivableRecord.payload?.cdcliente ?? '');
     if (!clientExternalId) {
-      return res.status(404).json({ error: 'Título sem cliente vinculado no iLux.' });
+      return res.status(404).json({ error: 'Título sem cliente vinculado no ILUX WEB.' });
     }
 
     // D4: rede de seguranca. O agente ja filtra por periodo (DTEMISSAOREC no

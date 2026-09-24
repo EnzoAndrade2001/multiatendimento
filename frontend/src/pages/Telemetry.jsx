@@ -111,8 +111,8 @@ function displayMeter(value) {
 
 function mappingText(event) {
   return event.mappingMessage || (event.mappingState === 'MATCHED'
-    ? 'Cliente e equipamento identificados no iLux.'
-    : 'Cliente ou equipamento ainda não identificado no iLux.');
+    ? 'Cliente e equipamento identificados no ILUX WEB.'
+    : 'Cliente ou equipamento ainda não identificado no ILUX WEB.');
 }
 
 function dateLabel(value) {
@@ -316,7 +316,7 @@ function TelemetryDetails({ event, working, onAction, onClose, osTypes, approval
         {event.message || event.description ? <div style={styles.messageBox}>{event.message || event.description}</div> : null}
         {metadata ? <details style={styles.meta}><summary>Contexto técnico</summary><pre>{JSON.stringify(metadata, null, 2)}</pre></details> : null}
         <section style={styles.approvalBox}>
-          <strong>Abertura de O.S. no iLux</strong>
+          <strong>Abertura de O.S. no ILUX WEB</strong>
           <label style={styles.field}><span>Tipo de O.S. obrigatório</span><select value={approval.cdOstp} onChange={(changeEvent) => onApprovalChange((current) => ({ ...current, cdOstp: changeEvent.target.value }))}><option value="">Selecione...</option>{osTypes.map((type) => <option key={type.code} value={type.code}>{type.name} ({type.code})</option>)}</select></label>
           <label style={styles.field}><span>Defeito / motivo</span><textarea style={styles.textarea} value={approval.defect} onChange={(changeEvent) => onApprovalChange((current) => ({ ...current, defect: changeEvent.target.value }))} placeholder="Se vazio, será usada a descrição da telemetria." /></label>
         </section>
