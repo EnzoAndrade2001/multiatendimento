@@ -52,10 +52,19 @@ const instanceHealthService = require('./services/instanceHealthService');
 const app = express();
 app.disable('x-powered-by');
 
-const allowedOrigins = String(process.env.FRONTEND_URL || 'http://localhost:5174')
+// Keep the known application origins available even when the deployment has
+// an incomplete FRONTEND_URL value. Additional origins can still be supplied
+// through FRONTEND_URL as a comma-separated list.
+const defaultAllowedOrigins = [
+  'http://localhost:5174',
+  'http://localhost:4174',
+  'https://crm.lcddigital.com.br',
+];
+const configuredOrigins = String(process.env.FRONTEND_URL || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...configuredOrigins])];
 const corsOrigin = (origin, callback) => {
   // Non-browser requests have no Origin and must remain usable (agents/webhooks).
   if (!origin || allowedOrigins.includes(origin)) return callback(null, true);

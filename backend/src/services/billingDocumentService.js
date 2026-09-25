@@ -63,13 +63,14 @@ function documentAvailability(receivable, type) {
 
 function defaultFileName(type, receivable, customerName) {
   const customer = safePart(customerName, 'CLIENTE');
-  const invoice = safePart(receivable.invoiceNumber || receivable.externalId, 'SEM NUMERO');
+  const invoice = safePart(receivable.invoiceNumber || receivable.documentNumber || receivable.externalId, 'SEM NUMERO');
   if (type === 'invoice') return `NF ${invoice} - ${customer}.pdf`;
   if (type === 'statement') {
     const period = safePart(receivable.billingPeriod, invoice);
     return `DEMONSTRATIVO ${period} - ${customer}.pdf`;
   }
-  return `BOLETO NF ${invoice} - ${customer}.pdf`;
+  const boletoNumber = safePart(receivable.ourNumber || invoice, 'SEM NUMERO');
+  return `BOLETO ${boletoNumber} - ${customer}.pdf`;
 }
 
 function storedFileName(displayName) {
@@ -91,10 +92,12 @@ function documentState(type, receivable, request, customerName) {
   const available = documentAvailability(receivable, type);
   const payload = request?.payload || {};
   const ready = payload.status === 'success' && publicFileExists(payload.mediaUrl);
+  const directIluxUrl = type === 'boleto' ? cleanText(receivable.boletoUrl) : null;
+  const directReady = Boolean(available && directIluxUrl);
   let status = available ? 'available' : 'unavailable';
   if (['pending', 'processing'].includes(payload.status)) status = payload.status;
   if (payload.status === 'failed') status = 'failed';
-  if (ready) status = 'ready';
+  if (ready || directReady) status = 'ready';
   return {
     type,
     label: DOCUMENT_LABELS[type],
@@ -105,9 +108,9 @@ function documentState(type, receivable, request, customerName) {
         : receivable.boletoId,
     available,
     status,
-    mediaUrl: ready ? payload.mediaUrl : null,
+    mediaUrl: ready ? payload.mediaUrl : (directReady ? directIluxUrl : null),
     fileName: ready ? payload.fileName : defaultFileName(type, receivable, customerName),
-    source: ready ? (payload.source || null) : null,
+    source: ready ? (payload.source || null) : (directReady ? 'ilux_web' : null),
     error: status === 'failed' ? cleanText(payload.error) : null,
   };
 }
@@ -260,6 +263,17 @@ async function tryStatementRerender(request, params) {
 }
 
 async function getOrRequestDocument(params) {
+  if (params.documentType === 'boleto' && cleanText(params.receivable?.boletoUrl)) {
+    return {
+      type: 'boleto',
+      status: 'ready',
+      mediaUrl: params.receivable.boletoUrl,
+      fileName: defaultFileName('boleto', params.receivable, params.customerName),
+      mimeType: 'application/pdf',
+      source: 'ilux_web',
+      sourceLabel: 'ILUX WEB',
+    };
+  }
   const request = await queueDocumentRequest(params);
   const alreadyDone = request.payload?.status === 'success' && publicFileExists(request.payload.mediaUrl);
   if (!alreadyDone) {

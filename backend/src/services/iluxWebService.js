@@ -1,8 +1,10 @@
 const DEFAULT_SYNC_PATH = '/api/assistencia/os/sincronizar-lcd';
 const DEFAULT_ORDERS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_FINANCIAL_PATH = '/api/assistencia/os/integracao-crm/clientes';
+const DEFAULT_CONTRACTS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
 const DEFAULT_DEFECT_TYPES_PATH = '/api/assistencia/os/integracao-crm/tipos-defeito';
+const DEFAULT_SUMMARY_PATH = '/api/assistencia/os/integracao-crm/resumo';
 const REQUEST_TIMEOUT_MS = Math.max(
   5000,
   Number.parseInt(process.env.ILUX_WEB_REQUEST_TIMEOUT_MS, 10) || 30000,
@@ -106,6 +108,29 @@ async function listReceivablesFromIluxWeb(customerExternalId, { limit = 120 } = 
   };
 }
 
+async function listContractsFromIluxWeb(customerExternalId, { limit = 100 } = {}) {
+  if (!isIluxWebConfigured() || !customerExternalId) return { items: [], lastSyncedAt: null, source: null };
+  const basePath = process.env.ILUX_WEB_CONTRACTS_PATH || DEFAULT_CONTRACTS_PATH;
+  const path = `${basePath.replace(/\/+$/, '')}/${encodeURIComponent(String(customerExternalId))}/contratos`;
+  const data = await requestJson(path, { method: 'GET' });
+  const items = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : []);
+  return {
+    items: items.slice(0, Math.max(1, Math.min(Number(limit) || 100, 250))),
+    lastSyncedAt: data.generatedAt || data.lastSyncedAt || new Date().toISOString(),
+    source: 'ilux_web',
+  };
+}
+
+async function getSummaryFromIluxWeb() {
+  const path = process.env.ILUX_WEB_SUMMARY_PATH || DEFAULT_SUMMARY_PATH;
+  const data = await requestJson(path, { method: 'GET' });
+  return {
+    summary: data?.summary || data || {},
+    generatedAt: data?.generatedAt || new Date().toISOString(),
+    source: 'ilux_web',
+  };
+}
+
 async function getCompanyProfileFromIluxWeb() {
   if (!isIluxWebConfigured()) return null;
   const path = process.env.ILUX_WEB_COMPANY_PATH || DEFAULT_COMPANY_PATH;
@@ -131,7 +156,9 @@ async function listDefectTypesFromIluxWeb() {
 module.exports = {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
+  getSummaryFromIluxWeb,
   isIluxWebConfigured,
+  listContractsFromIluxWeb,
   listReceivablesFromIluxWeb,
   listDefectTypesFromIluxWeb,
   listServiceOrdersFromIluxWeb,

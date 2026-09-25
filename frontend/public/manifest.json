@@ -1,6 +1,6 @@
 {
-  "name": "Multiatendimento PRO",
-  "short_name": "MultiPRO",
+  "name": "CRM - LCDDIGITAL",
+  "short_name": "CRM LCDDIGITAL",
   "description": "Sistema de Atendimento Omnichannel com IA",
   "start_url": "/lcddigital/login",
   "scope": "/",

@@ -2,5 +2,7 @@
 // Em produção conecta diretamente ao backend
 // Em desenvolvimento usa o proxy do Vite
 
-export const SOCKET_URL = import.meta.env.VITE_API_URL || undefined;
+import { BACKEND_URL } from './api';
+
+export const SOCKET_URL = BACKEND_URL || undefined;
 // undefined = conecta no mesmo host (proxy do Vite funciona no dev)

@@ -57,7 +57,7 @@ const TAB_GROUPS = [
 // Respostas rápidas possui uma área própria em Operação. Mantemos o índice
 // interno 5 para compatibilidade com links antigos, mas não o exibimos no
 // menu de Configurações para evitar duas entradas para a mesma função.
-const HIDDEN_TAB_INDEXES = new Set([5]);
+const HIDDEN_TAB_INDEXES = new Set([5, 7]);
 const SUPPORT_ONLY_TAB_INDEXES = new Set([7, 9, 10]);
 const SUPPORT_ONLY_FORM_FIELDS = [
   'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog', 'geminiKey', 'openaiKey', 'anthropicKey',
