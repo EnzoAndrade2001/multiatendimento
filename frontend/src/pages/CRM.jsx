@@ -645,11 +645,11 @@ export function CrmCustomerProfileModal({ customerId, initialCustomer, initialTa
 function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoading, resourceStatus = {}, error, onRetry, onClose, onOpenConversation, onOpenServiceOrder }) {
   const { can, loading: permissionsLoading } = usePermissions();
   const customer360 = customer.customer360 || {};
-  // O LCD Digital Web e a fonte oficial. Use a lista devolvida pela visao 360
-  // quando o espelho local do CRM ainda estiver vazio ou desatualizado.
-  const equipments = arrayOf(customer360.equipments).length
+  // O LCDDIGITALWEB é a fonte única. Uma resposta oficial vazia continua
+  // sendo válida: não podemos reexibir equipamentos antigos do Firebird.
+  const equipments = customer360.equipmentSync?.source === 'ilux_web'
     ? arrayOf(customer360.equipments)
-    : arrayOf(customer.equipments);
+    : [];
   const contracts = arrayOf(customer.contracts);
   const serviceOrders = arrayOf(customer.serviceOrders, customer.orders, customer.osHistory);
   const serverFinancialAllowed = customer360.capabilities?.tabs?.financial;

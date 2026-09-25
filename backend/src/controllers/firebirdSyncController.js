@@ -14,6 +14,9 @@ const { normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
 const agentController = require('./agentController');
 const { isOutdated } = require('../utils/agentVersion');
+const { isIluxWebConfigured } = require('../services/iluxWebService');
+
+const LCD_OFFICIAL_EQUIPMENT_SOURCES = ['LCDDIGITALWEB', 'lcd_digital_web', 'lcd-digital-web', 'ilux_web', 'ilux-web', 'iluxweb'];
 
 // Mantem o nome usado pelos normalizadores legados, mas com a semantica
 // correta para datas Firebird sem fuso (horario local de Sao Paulo).
@@ -413,14 +416,20 @@ async function reconcileServiceOrdersOpenSnapshot(tenantId, snapshot) {
       raw.dtatendimento || payload.resolvedAt,
       raw.hratendimento || payload.hratendimento,
     );
-    await prisma.serviceOrder.updateMany({
-      where: { tenantId, externalSource: 'firebird', externalId: String(record.externalId) },
-      data: {
-        status: 'FINALIZADA',
-        ...(sourceClosedAt ? { closedAt: sourceClosedAt } : {}),
-        ...((sourceAttendedAt || sourceClosedAt) ? { resolvedAt: sourceAttendedAt || sourceClosedAt } : {}),
-      },
-    });
+    try {
+      await prisma.serviceOrder.updateMany({
+        where: { tenantId, externalSource: 'firebird', externalId: String(record.externalId) },
+        data: {
+          status: 'FINALIZADA',
+          ...(sourceClosedAt ? { closedAt: sourceClosedAt } : {}),
+          ...((sourceAttendedAt || sourceClosedAt) ? { resolvedAt: sourceAttendedAt || sourceClosedAt } : {}),
+        },
+      });
+    } catch (error) {
+      // O registro bruto já foi reconciliado. Instalações antigas podem não
+      // ter o espelho local de O.S.; isso não deve invalidar a janela oficial.
+      console.warn('[firebirdSync] snapshot de O.S. reconciliado sem espelho local:', error.message);
+    }
     reconciled += 1;
   }
   return reconciled;
@@ -545,16 +554,15 @@ async function upsertCrmEquipment(tenant, data) {
   // Once its mirror exists, a later Firebird snapshot may refresh legacy
   // fields but must not overwrite the official link or create a competing
   // active record for the same machine.
-  const lcdOfficial = await prisma.crmEquipment.findUnique({
+  const lcdOfficial = await prisma.crmEquipment.findFirst({
     where: {
-      tenantId_externalSource_externalId: {
-        tenantId: tenant.id,
-        externalSource: 'LCDDIGITALWEB',
-        externalId,
-      },
+      tenantId: tenant.id,
+      externalSource: { in: LCD_OFFICIAL_EQUIPMENT_SOURCES },
+      externalId,
     },
   });
   if (lcdOfficial) return lcdOfficial;
+  if (isIluxWebConfigured()) return null;
 
   let customer = null;
   if (clientExternalId) {
@@ -666,6 +674,8 @@ async function findOrCreateEquipment(tenant, instance, data) {
 }
 
 async function upsertServiceOrder(tenant, instance, data) {
+  if (isIluxWebConfigured()) return null;
+
   const externalId = pick(data.externalId, data.seqOs, data.idAtendimento, data.id_atendimento);
 
   if (!externalId) {
@@ -1019,6 +1029,10 @@ async function pushBatch(req, res) {
           stats.stored += 1;
           continue;
         }
+        if (isIluxWebConfigured() && [EQUIPMENT_SNAPSHOT_ENTITY, SERVICE_ORDER_OPEN_SNAPSHOT_ENTITY, 'equipments', 'serviceOrders'].includes(entity)) {
+          stats.skipped += 1;
+          continue;
+        }
         if (entity === EQUIPMENT_SNAPSHOT_ENTITY) {
           stats.reconciled += await reconcileEquipmentsSnapshot(tenant.id, record);
           stats.stored += 1;
@@ -1098,6 +1112,12 @@ async function pushBatch(req, res) {
             },
           });
           stats.stored += 1;
+          continue;
+        }
+        if (isIluxWebConfigured() && ['equipments', 'serviceOrders'].includes(entity)) {
+          // No tenant LCD, o Firebird não é uma fonte operacional concorrente.
+          // Não grave nem reative equipamentos/O.S. que pertencem ao LCDDIGITALWEB.
+          stats.skipped += 1;
           continue;
         }
         const payloadToStore = entity === COMPANY_ENTITY
@@ -1273,7 +1293,9 @@ async function getPendingCommands(req, res) {
 
     do {
       const leaseExpiredAt = new Date(Date.now() - 45_000);
-      const candidate = await prisma.serviceOrder.findFirst({
+      const candidate = isIluxWebConfigured()
+        ? null
+        : await prisma.serviceOrder.findFirst({
         where: {
           tenantId: tenant.id,
           externalSource: 'firebird',
@@ -1286,7 +1308,7 @@ async function getPendingCommands(req, res) {
         },
         orderBy: { createdAt: 'asc' },
         select: { id: true, status: true, updatedAt: true },
-      });
+        });
 
       if (candidate) {
         const claimed = await prisma.serviceOrder.updateMany({

@@ -1,6 +1,5 @@
 const prisma = require('../lib/prisma');
 const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
-const { reconcileServiceOrderStatuses } = require('../services/serviceOrderStatusReconciliationService');
 const pdfmake = require('pdfmake');
 const path = require('path');
 const fs = require('fs');
@@ -17,6 +16,11 @@ const {
   listDefectTypesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
+const {
+  isLcdOfficialEquipmentSource,
+  isLcdOfficialServiceOrderSource,
+} = require('../utils/externalSource');
+const { readEquipmentLocation } = require('../utils/equipmentLocation');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -28,11 +32,12 @@ const OS_DRAFT_TIMEOUT_MS = Math.max(
 );
 
 const ILUX_WEB_EQUIPMENT_SOURCES = new Set([
-  'firebird',
+  'LCDDIGITALWEB',
+  'lcd_digital_web',
+  'lcd-digital-web',
   'ilux_web',
   'ilux-web',
   'iluxweb',
-  'lcddigitalweb',
 ]);
 
 const CRM_EXTERNAL_SOURCES = [
@@ -44,14 +49,30 @@ const CRM_EXTERNAL_SOURCES = [
   'lcddigitalweb',
 ];
 
+const LCD_EQUIPMENT_SOURCES = [...ILUX_WEB_EQUIPMENT_SOURCES];
+const LCD_SERVICE_ORDER_SOURCES = ['LCDDIGITALWEB', 'lcd_digital_web', 'lcd-digital-web', 'ilux_web', 'ilux-web', 'iluxweb'];
+
 function cleanLegacyDefect(value) {
   const text = String(value || '').trim();
   return text.replace(/^\s*\[Defeito\s+[^\]]+\]\s*/i, '').trim();
 }
 
 function isIluxWebEquipment(equipment) {
-  const source = String(equipment?.externalSource || '').trim().toLowerCase();
-  return Boolean(equipment?.externalId && ILUX_WEB_EQUIPMENT_SOURCES.has(source));
+  return Boolean(equipment?.externalId && isLcdOfficialEquipmentSource(equipment.externalSource));
+}
+
+function equipmentWhereForContact(tenantId, contactId, crmCustomerId = null) {
+  return {
+    tenantId,
+    isActive: true,
+    externalSource: { in: LCD_EQUIPMENT_SOURCES },
+    OR: crmCustomerId
+      ? [
+        { contactId },
+        { contact: { is: { crmCustomerId } } },
+      ]
+      : [{ contactId }],
+  };
 }
 
 function sleep(ms) {
@@ -125,6 +146,7 @@ async function resolveServiceOrderForPdf(tenantId, id) {
   const persisted = await prisma.serviceOrder.findFirst({
     where: {
       tenantId,
+      externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
       OR: [{ id }, { externalId: String(id) }],
     },
     include: {
@@ -135,6 +157,10 @@ async function resolveServiceOrderForPdf(tenantId, id) {
     },
   });
   if (persisted) return { order: persisted, historicalRecord: null };
+
+  // Com o LCDDIGITALWEB configurado, uma O.S. Firebird não é uma O.S. do
+  // CRM e não pode ser reimpressa nem reintroduzida pela rota de PDF.
+  if (isIluxWebConfigured()) return null;
 
   // O CRM 360 mantem o historico completo em ExternalSyncRecord. Registros
   // antigos podem nao existir mais na tabela operacional (por exemplo, apos
@@ -253,7 +279,10 @@ async function getEquipments(req, res) {
   const { tenantId } = req.user;
 
   try {
-    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, tenantId },
+      select: { id: true, crmCustomerId: true },
+    });
     if (!contact) return res.json([]);
 
     // Sincroniza os equipamentos do CRM para o contato
@@ -262,9 +291,7 @@ async function getEquipments(req, res) {
 
     const equipments = await prisma.equipment.findMany({
       where: {
-        tenantId,
-        isActive: true,
-        contactId
+        ...equipmentWhereForContact(tenantId, contactId, contact.crmCustomerId),
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -281,7 +308,7 @@ async function getEquipments(req, res) {
       ? await prisma.crmEquipment.findMany({
           where: {
             tenantId,
-            externalSource: { in: CRM_EXTERNAL_SOURCES },
+            externalSource: { in: LCD_EQUIPMENT_SOURCES },
             externalId: { in: externalIds },
           },
           select: {
@@ -305,7 +332,7 @@ async function getEquipments(req, res) {
     if (contact.crmCustomerId) {
       crmCustomer = await prisma.crmCustomer.findFirst({
         where: { tenantId, id: contact.crmCustomerId },
-        select: { externalId: true, address: true, city: true, state: true },
+        select: { externalId: true },
       });
     }
     if (crmCustomer?.externalId && isIluxWebConfigured()) {
@@ -328,20 +355,25 @@ async function getEquipments(req, res) {
       const crmEquipment = crmByExternalId.get(equipment.externalId);
       const contractEquipment = contractEquipmentByExternalId.get(String(equipment.externalId || '').trim());
       const raw = crmEquipment?.raw && typeof crmEquipment.raw === 'object' ? crmEquipment.raw : {};
-      const address = contractEquipment?.address
-        || contractEquipment?.installLocation
-        || crmEquipment?.address
-        || equipment.address
-        || crmCustomer?.address
-        || null;
+      const contractLocation = readEquipmentLocation(contractEquipment || {});
+      const crmLocation = readEquipmentLocation({ ...(crmEquipment || {}), raw });
+      const localLocation = readEquipmentLocation(equipment);
+      const address = contractLocation.address || crmLocation.address || localLocation.address || null;
       return {
         ...equipment,
         address,
-        city: contractEquipment?.city || crmEquipment?.city || raw.cidade || raw.CIDADE || crmCustomer?.city || null,
-        state: contractEquipment?.state || crmEquipment?.state || raw.uf || raw.UF || crmCustomer?.state || null,
-        complement: contractEquipment?.complement || raw.complemento || raw.COMPLEMENTO || null,
-        department: contractEquipment?.department || raw.departamento || raw.DEPARTAMENTO || crmEquipment?.sector || equipment.sector || null,
-        installLocation: contractEquipment?.installLocation || crmEquipment?.installLocation || raw.localinstal || raw.LOCALINSTAL || null,
+        city: contractLocation.city || crmLocation.city || localLocation.city || null,
+        state: contractLocation.state || crmLocation.state || localLocation.state || null,
+        complement: contractLocation.complement || crmLocation.complement || localLocation.complement || null,
+        neighborhood: contractLocation.neighborhood || crmLocation.neighborhood || localLocation.neighborhood || null,
+        department: contractEquipment?.department
+          || contractEquipment?.sector
+          || raw.departamento
+          || raw.DEPARTAMENTO
+          || crmEquipment?.sector
+          || equipment.sector
+          || null,
+        installLocation: contractLocation.installLocation || crmLocation.installLocation || localLocation.installLocation || null,
       };
     }));
   } catch (err) {
@@ -392,11 +424,64 @@ async function deleteEquipment(req, res) {
 async function getOpenOrdersForEquipment(req, res) {
   const { tenantId } = req.user;
   const { equipmentId } = req.params;
-  const equipment = await prisma.equipment.findFirst({ where: { id: equipmentId, tenantId }, select: { id: true } });
+  const equipment = await prisma.equipment.findFirst({
+    where: {
+      id: equipmentId,
+      tenantId,
+      isActive: true,
+      externalSource: { in: LCD_EQUIPMENT_SOURCES },
+    },
+    select: {
+      id: true,
+      externalId: true,
+      contact: { select: { crmCustomer: { select: { externalId: true } } } },
+    },
+  });
   if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
-  await reconcileServiceOrderStatuses(tenantId, { equipmentId });
+  if (isIluxWebConfigured() && equipment.contact?.crmCustomer?.externalId) {
+    try {
+      const result = await listServiceOrdersFromIluxWeb(equipment.contact.crmCustomer.externalId, { limit: 250 });
+      const officialOrders = (result.items || [])
+        .filter((item) => {
+          const itemEquipmentId = String(
+            item?.equipmentExternalId
+            || item?.equipmentCodigoLegado
+            || item?.cdequipamento
+            || item?.equipment?.externalId
+            || item?.equipamento?.externalId
+            || item?.equipamentoCodigo
+            || '',
+          ).trim();
+          return itemEquipmentId && itemEquipmentId === String(equipment.externalId).trim();
+        })
+        .filter((item) => !isServiceOrderClosed({
+          status: item?.status || item?.statusLabel || item?.nmstatus,
+          closedAt: item?.closedAt || item?.resolvedAt || item?.dataFechamento,
+        }))
+        .map((item) => ({
+          id: String(item?.id || item?.externalId || item?.numero || item?.numeroOs || '').trim(),
+          externalId: String(item?.externalId || item?.numero || item?.numeroOs || '').trim() || null,
+          status: normalizeServiceOrderStatus(item?.status || item?.statusLabel || item?.nmstatus),
+          cdOstp: item?.cdOstp || item?.tipoAtendimento || item?.type || null,
+          defect: item?.defect || item?.description || item?.observacao || null,
+          createdAt: item?.createdAt || item?.openedAt || item?.dataAbertura || null,
+          ticketId: null,
+        }))
+        .filter((item) => item.id);
+      return res.json(officialOrders.slice(0, 6));
+    } catch (error) {
+      console.warn(`[getOpenOrdersForEquipment] LCDDIGITALWEB indisponível para ${equipment.externalId}; usando cache oficial:`, error.message);
+    }
+  }
+
   const orders = await prisma.serviceOrder.findMany({
-    where: { tenantId, equipmentId, closedAt: null, resolvedAt: null },
+    where: {
+      tenantId,
+      equipmentId,
+      externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
+      closedAt: null,
+      resolvedAt: null,
+    },
     select: { id: true, externalId: true, status: true, cdOstp: true, defect: true, createdAt: true, ticketId: true },
     orderBy: { createdAt: 'desc' },
     take: 12,
@@ -438,7 +523,7 @@ async function getOSList(req, res) {
   }
 
   const orders = await prisma.serviceOrder.findMany({
-    where,
+    where: { ...where, externalSource: { in: LCD_SERVICE_ORDER_SOURCES } },
     include: {
       contact: true,
       equipment: {
@@ -459,6 +544,9 @@ async function createOS(req, res) {
   const { tenantId } = req.user;
 
   try {
+    if (!isIluxWebConfigured()) {
+      return res.status(503).json({ error: 'O LCDDIGITALWEB não está configurado. O CRM não usa Firebird como fallback.' });
+    }
     if (!contactId || !equipmentId || !ticketId || !requestKey || !cdOstp || !cdDefeito || !String(defect || '').trim()) {
       return res.status(400).json({ error: 'Cliente, equipamento, ticket, identificador, tipo de O.S., tipo de defeito e relato são obrigatórios.' });
     }
@@ -470,7 +558,14 @@ async function createOS(req, res) {
         where: { id: contactId, tenantId },
         include: { crmCustomer: true },
       }),
-      prisma.equipment.findFirst({ where: { id: equipmentId, tenantId } }),
+      prisma.equipment.findFirst({
+        where: {
+          id: equipmentId,
+          tenantId,
+          isActive: true,
+          externalSource: { in: LCD_EQUIPMENT_SOURCES },
+        },
+      }),
       prisma.crmOsType.findFirst({ where: { tenantId, code: String(cdOstp) } }),
       listDefectTypesFromIluxWeb(),
     ]);
@@ -486,35 +581,40 @@ async function createOS(req, res) {
     if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
     if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do ILUX WEB.' });
     if (!isIluxWebEquipment(equipment)) {
-      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o ILUX WEB.' });
+      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o LCDDIGITALWEB.' });
     }
     // O vínculo confiável é a identidade do cliente no ILUX WEB, não Equipment.contactId:
     // Equipment é uma linha por máquina (única por externalId) e esse contactId é
     // reescrito toda vez que QUALQUER contato do mesmo cliente abre este modal
     // (syncCrmEquipmentsToEquipment). Comparar por contactId fazia dois atendentes
     // ou dois contatos da mesma empresa colidirem em "não pertence ao cliente".
-    let equipmentBelongsToCustomer = equipment.contactId === contactId;
-    if (!equipmentBelongsToCustomer) {
-      const crmEquip = await prisma.crmEquipment.findFirst({
-        where: {
-          tenantId,
-          externalId: equipment.externalId,
-          externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
-        },
-        select: { customerId: true, customer: { select: { externalId: true } } },
-      });
-      const contactCustomerId = contact.crmCustomerId || null;
-      const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
-      equipmentBelongsToCustomer = Boolean(
-        (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
-        || (crmEquip?.customer?.externalId && contactCustomerExternalId
-          && String(crmEquip.customer.externalId).trim() === contactCustomerExternalId),
-      );
+    const crmEquip = await prisma.crmEquipment.findFirst({
+      where: {
+        tenantId,
+        externalId: equipment.externalId,
+        externalSource: { in: LCD_EQUIPMENT_SOURCES },
+        isActive: true,
+      },
+      select: { customerId: true, customer: { select: { externalId: true } } },
+    });
+    if (!crmEquip) {
+      return res.status(409).json({ error: 'Equipamento sem vínculo ativo no LCDDIGITALWEB.' });
     }
+    const contactCustomerId = contact.crmCustomerId || null;
+    const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+    const equipmentBelongsToCustomer = Boolean(
+      (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
+      || (crmEquip?.customer?.externalId && contactCustomerExternalId
+        && String(crmEquip.customer.externalId).trim() === contactCustomerExternalId),
+    );
     if (!equipmentBelongsToCustomer) {
       return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
     }
     if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do ILUX WEB.' });
+
+    if (!crmEquip) {
+      return res.status(409).json({ error: 'Equipamento sem vínculo ativo no LCDDIGITALWEB.' });
+    }
 
     if (nmsuportet) {
       const technician = await prisma.crmTechnician.findFirst({
@@ -544,7 +644,7 @@ async function createOS(req, res) {
         where: {
           tenantId,
           ticketId,
-          externalSource: { in: ['firebird', 'ilux_web'] },
+          externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
           externalId: null,
           status: { in: ['AGUARDANDO_ILUX', 'PROCESSANDO_ILUX', 'ERRO_INTEGRACAO'] },
         },
@@ -721,7 +821,11 @@ async function createOS(req, res) {
 
 async function getOSStatus(req, res) {
   const order = await prisma.serviceOrder.findFirst({
-    where: { id: req.params.id, tenantId: req.user.tenantId },
+    where: {
+      id: req.params.id,
+      tenantId: req.user.tenantId,
+      externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
+    },
     select: { id: true, externalId: true, status: true, ticketId: true, contactId: true, equipmentId: true, updatedAt: true },
   });
   if (!order) return res.status(404).json({ error: 'O.S. não encontrada.' });
@@ -769,6 +873,15 @@ async function updateOS(req, res) {
   // Trava de segurança: Exigir relatório para finalizar ou arquivar
   if ((status === 'FINALIZADA' || status === 'ARQUIVADA') && (!technicalNotes || technicalNotes.trim().length < 5)) {
     return res.status(400).json({ error: 'Relatório Técnico é obrigatório para finalizar ou arquivar a O.S.' });
+  }
+
+  const currentOrder = await prisma.serviceOrder.findFirst({
+    where: { id, tenantId },
+    select: { id: true, externalSource: true },
+  });
+  if (!currentOrder) return res.status(404).json({ error: 'O.S. não encontrada.' });
+  if (isLcdOfficialServiceOrderSource(currentOrder.externalSource)) {
+    return res.status(409).json({ error: 'O.S. oficial do LCDDIGITALWEB deve ser alterada no sistema de origem.' });
   }
 
   const data = {
@@ -885,7 +998,7 @@ async function generatePdf(req, res) {
       crmEquipment = await prisma.crmEquipment.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: { in: CRM_EXTERNAL_SOURCES },
+          externalSource: { in: LCD_EQUIPMENT_SOURCES },
           externalId: os.equipment.externalId
         }
       });
@@ -939,7 +1052,7 @@ async function generatePdf(req, res) {
         history: [],
         attendances: [],
       };
-    } else if (os.externalId) {
+    } else if (os.externalId && !isIluxWebConfigured()) {
       const printRecord = await prisma.externalSyncRecord.findUnique({
         where: {
           tenantId_source_entity_externalId: {
@@ -1005,7 +1118,7 @@ async function generatePdf(req, res) {
       || os.contact.externalId
       || ''
     );
-    if (previousOrders.length === 0 && clientExternalId) {
+    if (!isIluxWebConfigured() && previousOrders.length === 0 && clientExternalId) {
       const syncedHistory = await prisma.externalSyncRecord.findMany({
         where: {
           tenantId: req.user.tenantId,
@@ -2076,7 +2189,10 @@ async function draftOS(req, res) {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
     if (!settings || !aiService.hasConfiguredProvider(settings)) return res.status(400).json({ error: 'Provedor de IA não configurado' });
 
-    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, tenantId },
+      select: { id: true, crmCustomerId: true },
+    });
     if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
 
     // O modal jÃ¡ carrega /api/os/equipments antes de pedir o rascunho, e essa
@@ -2084,22 +2200,14 @@ async function draftOS(req, res) {
     // de upserts para clientes com muitos equipamentos. A chamada direta da
     // rota continua funcionando quando ainda nÃ£o existe equipamento local.
     let equipments = await prisma.equipment.findMany({
-      where: { 
-        tenantId, 
-        isActive: true,
-        contactId
-      } 
+      where: equipmentWhereForContact(tenantId, contactId, contact.crmCustomerId),
     });
 
     if (equipments.length === 0) {
       const { syncCrmEquipmentsToEquipment } = require('../services/crmSyncService');
       await syncCrmEquipmentsToEquipment(tenantId, contactId);
       equipments = await prisma.equipment.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-          contactId,
-        },
+        where: equipmentWhereForContact(tenantId, contactId, contact.crmCustomerId),
       });
     }
 
