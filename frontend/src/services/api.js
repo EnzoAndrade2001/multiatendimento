@@ -2,7 +2,10 @@ import axios from 'axios';
 
 // Em produção usa a URL do backend via variável de ambiente
 // Em desenvolvimento usa proxy do Vite (/api → localhost:3002)
-const DEFAULT_PRODUCTION_API_URL = 'https://api-crm.lcddigital.com.br';
+// O frontend do CRM e o backend vivem em servicos separados no Easypanel.
+// Manter o destino oficial aqui evita que uma build sem variavel VITE_API_URL
+// caia no dominio antigo, que nao expoe a API do multiatendimento.
+const DEFAULT_PRODUCTION_API_URL = 'https://lcddigitalweb-multiatendimento-nova-backend.kna79u.easypanel.host';
 const isProductionCrm =
   typeof window !== 'undefined' && window.location.hostname === 'crm.lcddigital.com.br';
 
