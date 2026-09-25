@@ -1516,8 +1516,129 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
   }
 }
 
+/**
+ * Registra no CRM uma mensagem que um sistema EXTERNO (hoje: LCDWEB, cobranças
+ * de fechamento mensal) já enviou direto pela API da Evolution.
+ *
+ * Existe porque a mensagem de cobrança nunca aparecia no Inbox: ela é mandada
+ * pela LCDWEB direto pra Evolution (sem passar pelo evolutionService.sendText
+ * deste CRM), e o eco de volta via webhook messages.upsert não estava
+ * acontecendo para essa instância — só o heartbeat genérico (lastWebhookAt)
+ * chegava, sem nunca virar Ticket/Message. Em vez de depender desse eco (que
+ * falhou e é difícil de diagnosticar de fora da Evolution), o remetente avisa
+ * a gente diretamente, do mesmo jeito que o bot já registra as próprias
+ * respostas — reaproveita contato/ticket, não reimplementa a regra de negócio.
+ *
+ * Autenticado pelo mesmo WEBHOOK_SECRET do endpoint de webhook da Evolution
+ * (ver middlewares/verifyWebhookSecret).
+ */
+async function recordExternalMessage(req, res) {
+  try {
+    const { instanceName, phone, body, externalId, mediaUrl, mediaType, fileName, mediaBase64, mimeType } = req.body || {};
+
+    if (!instanceName || !phone) {
+      return res.status(400).json({ error: 'instanceName e phone são obrigatórios.' });
+    }
+    if (!body && !mediaUrl && !mediaBase64) {
+      return res.status(400).json({ error: 'Informe body, mediaUrl ou mediaBase64.' });
+    }
+
+    const waInstance = await prisma.waInstance.findFirst({ where: { instanceName } });
+    if (!waInstance) return res.status(404).json({ error: `Instância "${instanceName}" não encontrada.` });
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: waInstance.tenantId } });
+    if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado para essa instância.' });
+
+    // Idempotente: reenvio do mesmo externalId (ex.: retry de rede do lado da
+    // LCDWEB) não duplica a mensagem no Inbox.
+    if (externalId) {
+      const existing = await prisma.message.findFirst({
+        where: { externalId, ticket: { tenantId: tenant.id } },
+      });
+      if (existing) return res.json({ ok: true, deduped: true, ticketId: existing.ticketId, messageId: existing.id });
+    }
+
+    const normalizedPhone = evolutionService.normalizePhoneNumber(String(phone));
+    if (!normalizedPhone) return res.status(400).json({ error: 'Telefone inválido.' });
+
+    const phoneCandidates = evolutionService.buildPhoneLookupCandidates(normalizedPhone);
+    const matchingContacts = await prisma.contact.findMany({
+      where: {
+        tenantId: tenant.id,
+        OR: [{ phone: { in: phoneCandidates } }, { whatsapp: { in: phoneCandidates } }],
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const matchedContact = pickBestContactMatch(matchingContacts, phoneCandidates, waInstance.id);
+
+    const contact = matchedContact || await prisma.contact.create({
+      data: { tenantId: tenant.id, instanceId: waInstance.id, phone: normalizedPhone },
+    });
+
+    let ticket = await prisma.ticket.findFirst({ where: { contactId: contact.id }, orderBy: { createdAt: 'desc' } });
+    if (!ticket) {
+      ticket = await prisma.ticket.create({
+        data: { tenantId: tenant.id, instanceId: waInstance.id, contactId: contact.id, status: 'open', sessionStartedAt: new Date() },
+      });
+      if (io) io.to(tenant.id).emit('new_ticket', ticket);
+    } else if (ticket.instanceId !== waInstance.id) {
+      ticket = await prisma.ticket.update({ where: { id: ticket.id }, data: { instanceId: waInstance.id, updatedAt: new Date() } });
+    }
+
+    const message = await prisma.message.create({
+      data: {
+        ticketId: ticket.id,
+        body: body || '',
+        fromMe: true,
+        fromBot: false,
+        automationType: 'EXTERNAL_BILLING',
+        externalId: externalId || null,
+        mediaUrl: mediaUrl || null,
+        mediaType: mediaType || null,
+        mediaStatus: mediaUrl ? 'ok' : (mediaBase64 ? 'pending' : null),
+        fileName: fileName || null,
+      },
+    });
+
+    const freshTicket = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { lastMessageAt: message.createdAt, updatedAt: new Date() },
+      include: { contact: true },
+    });
+
+    if (io) {
+      io.to(tenant.id).emit('new_message', { ticket: freshTicket, message, contact });
+      io.to(tenant.id).emit('ticket_updated', { ticketId: ticket.id });
+    }
+
+    // Anexo veio como base64 (ex.: PDF de boleto/fatura da LCDWEB) — salva no
+    // mesmo storage local que a mídia recebida de verdade usa, em segundo
+    // plano, e avisa o Inbox quando terminar. Não bloqueia a resposta: quem
+    // chamou (LCDWEB) já entregou a mensagem de verdade no WhatsApp.
+    if (mediaBase64 && mimeType) {
+      evolutionService.saveMediaFile(mediaBase64, mimeType, message.id)
+        .then(async (savedUrl) => {
+          const updated = await prisma.message.update({
+            where: { id: message.id },
+            data: { mediaUrl: savedUrl, mediaStatus: 'ok' },
+          });
+          if (io) io.to(tenant.id).emit('message_updated', { ticket: freshTicket, message: updated, contact });
+        })
+        .catch(async (err) => {
+          console.error('[external-message] falha ao salvar mídia:', err.message);
+          await prisma.message.update({ where: { id: message.id }, data: { mediaStatus: 'failed' } }).catch(() => {});
+        });
+    }
+
+    return res.json({ ok: true, ticketId: ticket.id, messageId: message.id });
+  } catch (err) {
+    console.error('[external-message] erro:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
-  handleWebhook, setIo, processSingleMessage,
+  handleWebhook, setIo, processSingleMessage, recordExternalMessage,
   __testing: {
     claimWebhookMessage,
     getWebhookMessageIdentity,
