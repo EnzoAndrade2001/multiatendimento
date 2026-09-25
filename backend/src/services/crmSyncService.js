@@ -11,6 +11,14 @@ function firstValue(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') ?? null;
 }
 
+function resolveEquipmentMirrorContactId(mirror, relatedContactIds, currentContactId) {
+  const relatedIds = new Set((relatedContactIds || []).filter(Boolean).map(String));
+  const mirrorContactId = mirror?.contactId ? String(mirror.contactId) : '';
+  return mirrorContactId && relatedIds.has(mirrorContactId)
+    ? mirror.contactId
+    : currentContactId;
+}
+
 function isActiveValue(value, fallback = true) {
   if (value === undefined || value === null || String(value).trim() === '') return fallback;
   const normalized = String(value).trim().toUpperCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
@@ -233,10 +241,11 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
         || existingMirrors.find((record) => record.contactId === contact.id)
         || existingMirrors[0]
         || null;
+      const mirrorContactId = resolveEquipmentMirrorContactId(canonicalMirror, relatedContactIds, contact.id);
       const savedMirror = canonicalMirror
         ? await prisma.equipment.update({
           where: { id: canonicalMirror.id },
-          data: { ...equipmentData, contactId: canonicalMirror.contactId || contact.id },
+          data: { ...equipmentData, contactId: mirrorContactId },
         })
         : await prisma.equipment.create({ data: { tenantId, externalId, ...equipmentData, contactId: contact.id } });
       const duplicateMirrorIds = existingMirrors
@@ -261,6 +270,7 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
 
 module.exports = {
   normalizeOfficialEquipment,
+  resolveEquipmentMirrorContactId,
   syncOfficialEquipments,
   syncCrmEquipmentsToEquipment
 };
