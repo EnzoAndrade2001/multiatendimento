@@ -127,6 +127,17 @@ function isSameOfficialOrder(item, order) {
   return candidates.some((candidate) => expected.has(candidate));
 }
 
+function findOfficialOrderForPdf(items, id) {
+  const requested = String(id || '').trim();
+  if (!requested) return null;
+  return (Array.isArray(items) ? items : []).find((item) => {
+    const candidates = [item?.id, item?.canonicalId, item?.externalId, item?.numero, item?.seqos, item?.legacyNumber]
+      .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
+      .map((value) => String(value).trim());
+    return candidates.some((candidate) => candidate === requested);
+  }) || null;
+}
+
 function pdfDate(value, fallback = new Date()) {
   if (!value) return fallback;
   return parseFirebirdDate(value) || fallback;
@@ -136,7 +147,7 @@ function pdfOrderStatus(value) {
   return normalizeServiceOrderStatus(value);
 }
 
-async function resolveServiceOrderForPdf(tenantId, id) {
+async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
   const persisted = await prisma.serviceOrder.findFirst({
     where: {
       tenantId,
@@ -152,10 +163,139 @@ async function resolveServiceOrderForPdf(tenantId, id) {
   });
   if (persisted) return { order: persisted, historicalRecord: null };
 
+  // O historico exibido no CRM vem do LCDDIGITALWEB. Uma O.S. antiga pode
+  // existir apenas no retorno oficial (sem uma copia em ServiceOrder), entao
+  // resolvemos uma representacao somente em memoria para gerar o PDF. Isso
+  // evita reintroduzir Firebird ou criar uma linha operacional falsa.
+  if (!customerId || !isIluxWebConfigured()) return null;
+
+  {
+  const customer = await prisma.crmCustomer.findFirst({
+    where: {
+      tenantId,
+      id: String(customerId),
+      externalSource: { in: CRM_EXTERNAL_SOURCES },
+    },
+  });
+  if (!customer?.externalId) return null;
+
+  let officialOrder = null;
+  try {
+    const result = await listServiceOrdersFromIluxWeb(customer.externalId, { limit: 250 });
+    officialOrder = findOfficialOrderForPdf(result?.items, id);
+  } catch (error) {
+    console.warn(`[resolveServiceOrderForPdf] O.S. oficial indisponivel para ${customer.externalId}:`, error.message);
+    return null;
+  }
+  if (!officialOrder) return null;
+
+  const equipmentExternalId = firstPdfValue(
+    officialOrder.equipmentExternalId,
+    officialOrder.equipmentCodigoLegado,
+    officialOrder.cdequipamento,
+    officialOrder.equipment?.externalId,
+    officialOrder.equipamento?.externalId,
+  );
+  const [contact, localEquipment, tenant] = await Promise.all([
+    prisma.contact.findFirst({
+      where: { tenantId, crmCustomerId: customer.id },
+      include: { crmCustomer: true },
+      orderBy: { createdAt: 'desc' },
+    }),
+    equipmentExternalId
+      ? prisma.equipment.findFirst({
+        where: {
+          tenantId,
+          externalSource: { in: LCD_EQUIPMENT_SOURCES },
+          externalId: String(equipmentExternalId),
+        },
+        orderBy: { updatedAt: 'desc' },
+      })
+      : null,
+    prisma.tenant.findUnique({ where: { id: tenantId }, include: { settings: true } }),
+  ]);
+  if (!tenant) return null;
+
+  const contactSnapshot = contact || {
+    id: `lcd-web-client-${customer.id}`,
+    tenantId,
+    externalSource: 'LCDDIGITALWEB',
+    externalId: customer.externalId,
+    crmCustomerId: customer.id,
+    crmCustomer: customer,
+    name: customer.name,
+    fantasyName: customer.fantasyName,
+    phone: customer.phone || '',
+    whatsapp: customer.phone || null,
+    cpfCnpj: customer.cpfCnpj,
+    email: customer.email,
+    address: customer.address,
+    city: customer.city,
+    state: customer.state,
+    zipCode: customer.zipCode,
+  };
+  const equipmentSnapshot = localEquipment || {
+    id: `lcd-web-equipment-${equipmentExternalId || id}`,
+    tenantId,
+    contactId: contactSnapshot.id,
+    externalSource: 'LCDDIGITALWEB',
+    externalId: equipmentExternalId ? String(equipmentExternalId) : null,
+    model: firstPdfValue(officialOrder.equipmentModel, officialOrder.equipment?.model, 'Equipamento'),
+    manufacturer: firstPdfValue(officialOrder.manufacturer, officialOrder.equipment?.manufacturer, null),
+    serialNumber: firstPdfValue(officialOrder.serialNumber, officialOrder.equipment?.serialNumber, null),
+    sector: firstPdfValue(officialOrder.equipmentDepartment, officialOrder.equipmentLocation, null),
+    address: firstPdfValue(officialOrder.equipmentAddress, officialOrder.enderecoAtendimento, null),
+    isActive: true,
+  };
+  const createdAt = pdfDate(
+    firstPdfValue(officialOrder.openedAt, officialOrder.dataAbertura, officialOrder.createdAt),
+    new Date(),
+  );
+  const closedAt = officialOrder.closedAt ? pdfDate(officialOrder.closedAt, null) : null;
+  const officialId = String(firstPdfValue(
+    officialOrder.id,
+    officialOrder.canonicalId,
+    officialOrder.externalId,
+    officialOrder.seqos,
+    officialOrder.numero,
+    officialOrder.legacyNumber,
+  ));
+
+  return {
+    historicalRecord: null,
+    order: {
+      id: `lcd-web-history-${officialId}`,
+      tenantId,
+      contactId: contactSnapshot.id,
+      equipmentId: equipmentSnapshot.id,
+      externalSource: 'LCDDIGITALWEB',
+      externalId: officialId,
+      externalUpdatedAt: officialOrder.updatedAt ? pdfDate(officialOrder.updatedAt, createdAt) : null,
+      requestKey: null,
+      ticketId: null,
+      cdOstp: firstPdfValue(officialOrder.cdOstp, officialOrder.type, officialOrder.tipoAtendimento),
+      cdDefeito: firstPdfValue(officialOrder.cdDefeito, officialOrder.defectTypeCode),
+      nmsuportet: firstPdfValue(officialOrder.technician, officialOrder.nmsuportet),
+      defect: firstPdfValue(officialOrder.defect, officialOrder.description, ''),
+      status: pdfOrderStatus(firstPdfValue(officialOrder.status, officialOrder.statusLabel)),
+      sourceStatusCode: firstPdfValue(officialOrder.statusCode, officialOrder.status),
+      technicalNotes: firstPdfValue(officialOrder.closing, officialOrder.solucaoTecnica, null),
+      meters: null,
+      userId: null,
+      createdAt,
+      updatedAt: officialOrder.updatedAt ? pdfDate(officialOrder.updatedAt, createdAt) : createdAt,
+      resolvedAt: officialOrder.attendedAt ? pdfDate(officialOrder.attendedAt, null) : null,
+      closedAt,
+      contact: contactSnapshot,
+      equipment: equipmentSnapshot,
+      tenant,
+      user: null,
+    },
+  };
+  }
+
   // Com o LCDDIGITALWEB configurado, uma O.S. Firebird não é uma O.S. do
   // CRM e não pode ser reimpressa nem reintroduzida pela rota de PDF.
-  return null;
-
   // O CRM 360 mantem o historico completo em ExternalSyncRecord. Registros
   // antigos podem nao existir mais na tabela operacional (por exemplo, apos
   // uma desvinculacao/recriacao de equipamento), mas continuam validos no
@@ -899,7 +1039,7 @@ async function updateOS(req, res) {
 
 async function generatePdf(req, res) {
   const { id } = req.params;
-  const resolvedOrder = await resolveServiceOrderForPdf(req.user.tenantId, id);
+  const resolvedOrder = await resolveServiceOrderForPdf(req.user.tenantId, id, req.query?.customerId);
   const os = resolvedOrder?.order || null;
 
   if (!os) return res.status(404).json({ error: 'O.S. não encontrada' });
@@ -2245,4 +2385,4 @@ async function draftOS(req, res) {
   }
 }
 
-module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes };
+module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, findOfficialOrderForPdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes };

@@ -6,8 +6,19 @@ const {
 } = require('../src/controllers/firebirdSyncController');
 const {
   resolveServiceOrderForPdf,
+  findOfficialOrderForPdf,
   generatePdf,
 } = require('../src/controllers/osController');
+
+test('localiza O.S. oficial pelo UUID ou pelo numero humano do LCDDIGITALWEB', () => {
+  const orders = [
+    { id: 'os-uuid-1', externalId: 'os-uuid-1', numero: '92327', legacyNumber: '92327' },
+    { id: 'os-uuid-2', externalId: 'os-uuid-2', numero: '92214', legacyNumber: '92214' },
+  ];
+  assert.equal(findOfficialOrderForPdf(orders, 'os-uuid-1'), orders[0]);
+  assert.equal(findOfficialOrderForPdf(orders, '92327'), orders[0]);
+  assert.equal(findOfficialOrderForPdf(orders, 'missing-os'), null);
+});
 
 test('reconhece somente espelho recente importado sem vinculos do CRM', () => {
   const pending = {

@@ -1499,7 +1499,8 @@ function OsTab({ customerId, serviceOrders, initialPage, onRefresh }) {
     const identifier = order.id || order.externalId || order.number;
     if (!identifier) return;
     const token = encodeURIComponent(localStorage.getItem('token') || '');
-    window.open(`${BACKEND_URL}/api/os/${encodeURIComponent(identifier)}/pdf?token=${token}`, '_blank', 'noopener,noreferrer');
+    const customerQuery = customerId ? `&customerId=${encodeURIComponent(customerId)}` : '';
+    window.open(`${BACKEND_URL}/api/os/${encodeURIComponent(identifier)}/pdf?token=${token}${customerQuery}`, '_blank', 'noopener,noreferrer');
   }
 
   async function sendToManager(order) {
