@@ -31,7 +31,7 @@ function field(source, raw, ...keys) {
 function readEquipmentLocation(source = {}) {
   const raw = source.raw && typeof source.raw === 'object' ? source.raw : {};
   const street = field(source, raw, 'street', 'logradouro', 'addressStreet', 'rua');
-  const number = field(source, raw, 'number', 'numero', 'addressNumber', 'nr');
+  const number = field(source, raw, 'number', 'numero', 'num', 'addressNumber', 'nr');
   const complement = field(source, raw, 'complement', 'complemento', 'addressComplement');
   const neighborhood = field(source, raw, 'neighborhood', 'bairro', 'district');
   const composed = street || number

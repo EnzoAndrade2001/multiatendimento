@@ -30,7 +30,7 @@ test('não inventa endereço do cliente quando o equipamento não tem endereço 
 test('compõe endereço quando o LCD envia logradouro e número separados', () => {
   const location = readEquipmentLocation({
     logradouro: 'Av. Brasil',
-    numero: '500',
+    num: '500',
     complemento: 'Bloco B',
     bairro: 'Centro',
   });
