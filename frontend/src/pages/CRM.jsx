@@ -646,7 +646,7 @@ function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoad
   const { can, loading: permissionsLoading } = usePermissions();
   const customer360 = customer.customer360 || {};
   // O LCDDIGITALWEB é a fonte única. Uma resposta oficial vazia continua
-  // sendo válida: não podemos reexibir equipamentos antigos do Firebird.
+  // sendo válida: não podemos reexibir equipamentos antigos de fonte legada.
   const equipments = customer360.equipmentSync?.source === 'ilux_web'
     ? arrayOf(customer360.equipments)
     : [];

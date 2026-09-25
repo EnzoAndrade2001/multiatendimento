@@ -4,6 +4,7 @@ const aiService = require('../services/aiService');
 const printGuardService = require('../services/printGuardService');
 const { normalizeServiceOrderStatus, rawServiceOrderStatus } = require('../utils/serviceOrderStatus');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
+const { isIluxWebConfigured } = require('../services/iluxWebService');
 const { generateText } = aiService;
 
 const SENTINELA_SYNC_STALE_AFTER_MINUTES = 15;
@@ -33,19 +34,14 @@ function customerMonthlyValue(customer) {
 }
 
 function buildSyncHealth(settings) {
-  const lastSyncedAt = settings?.firebirdLastSyncAt ? new Date(settings.firebirdLastSyncAt) : null;
-  const validLastSyncedAt = lastSyncedAt && !Number.isNaN(lastSyncedAt.getTime()) ? lastSyncedAt : null;
-  const ageMinutes = validLastSyncedAt
-    ? Math.max(0, Math.floor((Date.now() - validLastSyncedAt.getTime()) / 60000))
-    : null;
   return {
-    source: 'firebird-agent-cache',
-    status: settings?.firebirdLastSyncStatus || 'unknown',
-    lastSyncedAt: validLastSyncedAt,
-    ageMinutes,
-    stale: ageMinutes === null || ageMinutes > SENTINELA_SYNC_STALE_AFTER_MINUTES,
+    source: 'ilux_web',
+    status: isIluxWebConfigured() ? 'ok' : 'not_configured',
+    lastSyncedAt: null,
+    ageMinutes: null,
+    stale: !isIluxWebConfigured(),
     staleAfterMinutes: SENTINELA_SYNC_STALE_AFTER_MINUTES,
-    error: settings?.firebirdLastSyncError || null,
+    error: isIluxWebConfigured() ? null : 'LCDDIGITALWEB não configurado no CRM.',
   };
 }
 
@@ -91,7 +87,7 @@ async function getRevenueDashboard(req, res) {
     //    Fonte: ExternalSyncRecord com entity = 'serviceOrders'
     // ───────────────────────────────────────────────────────────────
     const allFirebirdOS = await prisma.externalSyncRecord.findMany({
-      where: { tenantId, source: 'firebird', entity: 'serviceOrders' },
+      where: { tenantId, source: 'ilux_web', entity: 'serviceOrders' },
       select: { externalId: true, payload: true, receivedAt: true },
     });
 
@@ -177,7 +173,7 @@ async function getRevenueDashboard(req, res) {
     let mrrInRisk = 0;
     const mrrRiskBands = { band1to3: 0, band3to7: 0, bandOver7: 0 };
     let clientsAtRiskList = [];
-    const mrrValueSources = { firebird: 0, crm: 0, manual_estimate: 0, missing: 0 };
+    const mrrValueSources = { ilux_web: 0, crm: 0, manual_estimate: 0, missing: 0 };
 
     for (const clientExtId of uniqueClientsAtRisk) {
       try {
@@ -196,7 +192,7 @@ async function getRevenueDashboard(req, res) {
         }, 0);
         const crmMRR = customerMonthlyValue(crmCustomerMap.get(String(clientExtId)));
         let clientMRR = firebirdMRR;
-        let valueSource = 'firebird';
+        let valueSource = 'ilux_web';
         if (clientMRR <= 0 && crmMRR > 0) {
           clientMRR = crmMRR;
           valueSource = 'crm';
@@ -265,14 +261,14 @@ async function getRevenueDashboard(req, res) {
         .map(asFiniteNumber)
         .filter((value) => value !== null);
       const parsed = parsedValues.find((value) => value > 0) ?? parsedValues[0] ?? null;
-      if (parsed !== null) return { value: Math.max(0, parsed), source: 'firebird' };
+      if (parsed !== null) return { value: Math.max(0, parsed), source: 'ilux_web' };
       if (fallbackValue > 0) return { value: fallbackValue, source: 'manual_estimate' };
       return { value: 0, source: 'missing' };
     }
 
     // Valor dos orçamentos avulsos parados (aguardando aprovação do cliente)
     let stalledEstimatesValue = 0;
-    const stalledValueSources = { firebird: 0, manual_estimate: 0, missing: 0 };
+    const stalledValueSources = { ilux_web: 0, manual_estimate: 0, missing: 0 };
     for (const o of aguardando) {
       const resolved = resolveServiceOrderValue(o.payload, manualServiceFallback);
       stalledEstimatesValue += resolved.value;
@@ -290,7 +286,7 @@ async function getRevenueDashboard(req, res) {
     let vazamentoValor = 0;
     let vazamentoSemValorCount = 0;
     let vazamentoFallbackValueCount = 0;
-    const leakageValueSources = { firebird: 0, manual_estimate: 0, missing: 0 };
+    const leakageValueSources = { ilux_web: 0, manual_estimate: 0, missing: 0 };
     for (const o of vazamento) {
       const resolved = resolveServiceOrderValue(o.payload, manualServiceFallback);
       leakageValueSources[resolved.source] += 1;
@@ -868,7 +864,7 @@ async function getDrilldown(req, res) {
 
     // Carregar O.S. reais do Firebird
     const allFirebirdOS = await prisma.externalSyncRecord.findMany({
-      where: { tenantId, source: 'firebird', entity: 'serviceOrders' },
+      where: { tenantId, source: 'ilux_web', entity: 'serviceOrders' },
       select: { externalId: true, payload: true, receivedAt: true },
     });
 

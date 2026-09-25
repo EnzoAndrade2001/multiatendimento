@@ -26,7 +26,7 @@ module.exports = async (req, res, next) => {
       const [actor, session] = await Promise.all([
         prisma.user.findUnique({
           where: { id: decoded.userId },
-          select: { id: true, name: true, email: true, firebirdSupportName: true, tenantId: true, role: true, supportLevel: true, accessProfile: true, permissions: true, active: true },
+          select: { id: true, name: true, email: true, tenantId: true, role: true, supportLevel: true, accessProfile: true, permissions: true, active: true },
         }),
         prisma.supportAccessSession.findFirst({
           where: {
@@ -47,7 +47,6 @@ module.exports = async (req, res, next) => {
         userId: actor.id,
         name: actor.name,
         email: actor.email,
-        firebirdSupportName: actor.firebirdSupportName,
         tenantId: decoded.supportTenantId,
         role: actor.role,
         supportLevel: actor.supportLevel || 'manager',
@@ -68,7 +67,6 @@ module.exports = async (req, res, next) => {
         id: true,
         name: true,
         email: true,
-        firebirdSupportName: true,
         tenantId: true,
         role: true,
         supportLevel: true,
@@ -90,7 +88,6 @@ module.exports = async (req, res, next) => {
       userId: user.id,
       name: user.name,
       email: user.email,
-      firebirdSupportName: user.firebirdSupportName,
       tenantId: user.tenantId,
       role: user.role,
       supportLevel: user.supportLevel || (user.role === 'superadmin' ? 'manager' : null),

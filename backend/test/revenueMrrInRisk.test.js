@@ -11,7 +11,7 @@ function fakeRes() {
   return res;
 }
 
-test('MRR usa Firebird, depois mensalidade do CRM e por fim fallback manual', async (context) => {
+test('MRR usa LCDDIGITALWEB, depois mensalidade do CRM e por fim fallback manual', async (context) => {
   const originalSettingsFindUnique = prisma.tenantSettings.findUnique;
   const originalExternalFindMany = prisma.externalSyncRecord.findMany;
   const originalCustomerFindMany = prisma.crmCustomer.findMany;
@@ -35,8 +35,6 @@ test('MRR usa Firebird, depois mensalidade do CRM e por fim fallback manual', as
     kpiServiceValue: 350,
     kpiSlaLimitHours: 24,
     kpiReincidentThreshold: 2,
-    firebirdLastSyncAt: new Date(),
-    firebirdLastSyncStatus: 'ok',
   });
 
   const openedAt = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
@@ -74,15 +72,15 @@ test('MRR usa Firebird, depois mensalidade do CRM e por fim fallback manual', as
 
   assert.equal(res.body.mrrInRisk, 800 + 850 + 1200);
   assert.deepEqual(res.body.dataQuality.mrr.valueSources, {
-    firebird: 1,
+      ilux_web: 1,
     crm: 1,
     manual_estimate: 1,
     missing: 0,
   });
-  assert.equal(res.body.rankingClientsAtRisk.find((item) => item.clientExternalId === 'ext-1').valueSource, 'firebird');
+  assert.equal(res.body.rankingClientsAtRisk.find((item) => item.clientExternalId === 'ext-1').valueSource, 'ilux_web');
   assert.equal(res.body.rankingClientsAtRisk.find((item) => item.clientExternalId === 'ext-2').valueSource, 'crm');
   assert.equal(res.body.rankingClientsAtRisk.find((item) => item.clientExternalId === 'ext-3').valueSource, 'manual_estimate');
-  assert.equal(res.body.synchronization.stale, false);
+  assert.equal(res.body.synchronization.source, 'ilux_web');
 });
 
 test('reincidência respeita o limite configurado no detalhamento', async (context) => {

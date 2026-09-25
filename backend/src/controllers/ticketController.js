@@ -1484,7 +1484,7 @@ async function linkContact(req, res) {
       await prisma.equipment.deleteMany({
         where: {
           contactId: sourceContactId,
-          externalSource: 'firebird'
+          externalSource: { in: require('../utils/externalSource').LCD_OFFICIAL_SOURCES }
         }
       });
 

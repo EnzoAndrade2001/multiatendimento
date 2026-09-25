@@ -15,7 +15,7 @@ test('reconhece tecnico autorizado por telefone com ou sem DDI', { concurrency: 
   try {
     const actor = await technicalAssistantService.resolveWhatsAppActor({ tenantId: 'tenant-tech', phone: '5551999998888' });
     assert.deepEqual(actor, {
-      type: 'TECHNICIAN', audience: 'TECHNICIAN', userId: null, technicalContactId: 'contact-1', name: 'Robson', firebirdSupportName: 'ROBSON',
+    type: 'TECHNICIAN', audience: 'TECHNICIAN', userId: null, technicalContactId: 'contact-1', name: 'Robson',
     });
   } finally {
     prisma.user.findMany = previousFindMany;

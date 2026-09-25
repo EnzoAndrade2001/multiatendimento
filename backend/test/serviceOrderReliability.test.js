@@ -25,7 +25,7 @@ test('reconhece somente espelho recente importado sem vinculos do CRM', () => {
   assert.equal(isImportedServiceOrderMirror(pending, { ...mirror, defect: 'Outro defeito' }, '91703'), false);
 });
 
-test('resolve O.S. historica pelo cache Firebird quando ServiceOrder nao existe', async (context) => {
+test('não resolve O.S. histórica de fonte legada quando ServiceOrder não existe', async (context) => {
   const originals = {
     serviceOrderFindFirst: prisma.serviceOrder.findFirst,
     externalSyncRecordFindUnique: prisma.externalSyncRecord.findUnique,
@@ -57,12 +57,7 @@ test('resolve O.S. historica pelo cache Firebird quando ServiceOrder nao existe'
   prisma.tenant.findUnique = async () => ({ id: 'tenant-1', settings: {} });
 
   const resolved = await resolveServiceOrderForPdf('tenant-1', '91535');
-  assert.equal(resolved.order.externalId, '91535');
-  assert.equal(resolved.order.contact.externalId, '451');
-  assert.equal(resolved.order.contact.crmCustomer.id, 'customer-451');
-  assert.equal(resolved.order.equipment.externalId, '950');
-  assert.equal(resolved.order.status, 'FINALIZADA');
-  assert.ok(resolved.historicalRecord);
+  assert.equal(resolved, null);
 });
 
 test('bloqueia impressao de O.S. provisoria ou em erro', async (context) => {

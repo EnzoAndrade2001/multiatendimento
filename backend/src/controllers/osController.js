@@ -17,6 +17,7 @@ const {
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
 const {
+  LCD_OFFICIAL_SOURCES,
   isLcdOfficialEquipmentSource,
   isLcdOfficialServiceOrderSource,
 } = require('../utils/externalSource');
@@ -40,17 +41,10 @@ const ILUX_WEB_EQUIPMENT_SOURCES = new Set([
   'iluxweb',
 ]);
 
-const CRM_EXTERNAL_SOURCES = [
-  'firebird',
-  'LCDDIGITALWEB',
-  'ilux_web',
-  'ilux-web',
-  'iluxweb',
-  'lcddigitalweb',
-];
+const CRM_EXTERNAL_SOURCES = LCD_OFFICIAL_SOURCES;
 
 const LCD_EQUIPMENT_SOURCES = [...ILUX_WEB_EQUIPMENT_SOURCES];
-const LCD_SERVICE_ORDER_SOURCES = ['LCDDIGITALWEB', 'lcd_digital_web', 'lcd-digital-web', 'ilux_web', 'ilux-web', 'iluxweb'];
+const LCD_SERVICE_ORDER_SOURCES = LCD_OFFICIAL_SOURCES;
 
 function cleanLegacyDefect(value) {
   const text = String(value || '').trim();
@@ -160,7 +154,7 @@ async function resolveServiceOrderForPdf(tenantId, id) {
 
   // Com o LCDDIGITALWEB configurado, uma O.S. Firebird não é uma O.S. do
   // CRM e não pode ser reimpressa nem reintroduzida pela rota de PDF.
-  if (isIluxWebConfigured()) return null;
+  return null;
 
   // O CRM 360 mantem o historico completo em ExternalSyncRecord. Registros
   // antigos podem nao existir mais na tabela operacional (por exemplo, apos
@@ -171,7 +165,7 @@ async function resolveServiceOrderForPdf(tenantId, id) {
     where: {
       tenantId_source_entity_externalId: {
         tenantId,
-        source: 'firebird',
+        source: 'ilux_web',
         entity: 'serviceOrders',
         externalId: String(id),
       },
@@ -188,12 +182,12 @@ async function resolveServiceOrderForPdf(tenantId, id) {
   const [customer, crmEquipment, tenant] = await Promise.all([
     clientExternalId
       ? prisma.crmCustomer.findFirst({
-        where: { tenantId, externalSource: 'firebird', externalId: clientExternalId },
+        where: { tenantId, externalSource: 'ilux_web', externalId: clientExternalId },
       })
       : null,
     equipmentExternalId
       ? prisma.crmEquipment.findFirst({
-        where: { tenantId, externalSource: 'firebird', externalId: equipmentExternalId },
+        where: { tenantId, externalSource: 'ilux_web', externalId: equipmentExternalId },
       })
       : null,
     prisma.tenant.findUnique({
@@ -213,7 +207,7 @@ async function resolveServiceOrderForPdf(tenantId, id) {
   const contact = {
     id: customer?.id || `firebird-client-${clientExternalId || id}`,
     tenantId,
-    externalSource: 'firebird',
+    externalSource: 'ilux_web',
     externalId: clientExternalId || null,
     crmCustomerId: customer?.id || null,
     crmCustomer: customer || null,
@@ -232,7 +226,7 @@ async function resolveServiceOrderForPdf(tenantId, id) {
     id: crmEquipment?.id || `firebird-equipment-${equipmentExternalId || id}`,
     tenantId,
     contactId: contact.id,
-    externalSource: 'firebird',
+    externalSource: 'ilux_web',
     externalId: equipmentExternalId || null,
     model: firstPdfValue(crmEquipment?.model, payload.equipmentModel, raw.modeloe, `Equipamento ${equipmentExternalId || id}`),
     manufacturer: firstPdfValue(crmEquipment?.manufacturer, payload.manufacturer, raw.fabricante, null),
@@ -249,7 +243,7 @@ async function resolveServiceOrderForPdf(tenantId, id) {
       tenantId,
       contactId: contact.id,
       equipmentId: equipment.id,
-      externalSource: 'firebird',
+      externalSource: 'ilux_web',
       externalId: String(id),
       externalUpdatedAt: historicalRecord.syncedAt,
       requestKey: null,
@@ -718,7 +712,7 @@ async function createOS(req, res) {
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
-          abertoPor: (req.user?.firebirdSupportName || req.user?.name || 'CAMILLE').trim().toUpperCase(),
+          abertoPor: (req.user?.name || 'CAMILLE').trim().toUpperCase(),
           solicitante: contact.name || null,
           // Para o documento, prevalece o telefone oficial do cliente ILUX
           // sincronizado no CRM; o telefone do contato WhatsApp pode ser
@@ -1052,12 +1046,12 @@ async function generatePdf(req, res) {
         history: [],
         attendances: [],
       };
-    } else if (os.externalId && !isIluxWebConfigured()) {
+    } else if (false) {
       const printRecord = await prisma.externalSyncRecord.findUnique({
         where: {
           tenantId_source_entity_externalId: {
             tenantId: req.user.tenantId,
-            source: 'firebird',
+            source: 'ilux_web',
             entity: 'osPrintData',
             externalId: String(os.externalId),
           },
@@ -1118,11 +1112,11 @@ async function generatePdf(req, res) {
       || os.contact.externalId
       || ''
     );
-    if (!isIluxWebConfigured() && previousOrders.length === 0 && clientExternalId) {
+    if (false && previousOrders.length === 0 && clientExternalId) {
       const syncedHistory = await prisma.externalSyncRecord.findMany({
         where: {
           tenantId: req.user.tenantId,
-          source: 'firebird',
+          source: 'ilux_web',
           entity: 'serviceOrders',
           payload: { path: ['clientExternalId'], equals: clientExternalId },
         },
@@ -1251,13 +1245,13 @@ async function generatePdf(req, res) {
     company.cityLine = [company.city, company.state && `(${company.state})`].filter(Boolean).join(' ');
 
     // Identificação do atendente com fallback para o usuário atual que está gerando o documento
-    let attendantName = firstValue(iluxWebOrder?.attendant, firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
+    let attendantName = firstValue(iluxWebOrder?.attendant, firebirdOrder.nmsuportea, os.user?.name, 'N/A');
     if ((attendantName === 'N/A' || (!os.user && !iluxWebOrder?.attendant)) && req.user?.userId) {
       const activeUser = await prisma.user.findUnique({
         where: { id: req.user.userId }
       });
       if (activeUser) {
-        attendantName = activeUser.firebirdSupportName || activeUser.name;
+        attendantName = activeUser.name;
       }
     }
 

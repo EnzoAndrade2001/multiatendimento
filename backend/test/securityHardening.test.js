@@ -26,7 +26,6 @@ test('settings mascara secrets autorizados e nao os entrega ao navegador', () =>
     firebirdApiKey: 'firebird-secret', firebirdClientToken: 'sync-secret',
   }), {
     evolutionKey: SECRET_PLACEHOLDER, geminiKey: SECRET_PLACEHOLDER, serpApiKey: SECRET_PLACEHOLDER,
-    firebirdApiKey: SECRET_PLACEHOLDER, firebirdClientToken: SECRET_PLACEHOLDER,
   });
 });
 
@@ -35,7 +34,7 @@ test('settings ignora secrets vazios ou mascarados para preservar valores atuais
   assert.deepEqual(filterSettingsInput(user, {
     evolutionUrl: 'https://evolution.example', evolutionKey: '', geminiKey: '   ',
     serpApiKey: SECRET_PLACEHOLDER, firebirdApiKey: null, firebirdClientToken: 'novo-token',
-  }), { evolutionUrl: 'https://evolution.example', firebirdClientToken: 'novo-token' });
+  }), { evolutionUrl: 'https://evolution.example' });
 });
 
 test('webhook falha fechado quando WEBHOOK_SECRET nao esta configurado', () => {

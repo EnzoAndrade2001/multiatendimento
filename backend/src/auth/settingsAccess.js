@@ -2,7 +2,7 @@ const { hasPermission } = require('./permissions');
 
 const SECRET_PLACEHOLDER = '********';
 const SECRET_SETTINGS_FIELDS = new Set([
-  'evolutionKey', 'geminiKey', 'openaiKey', 'anthropicKey', 'serpApiKey', 'firebirdApiKey', 'firebirdClientToken',
+  'evolutionKey', 'geminiKey', 'openaiKey', 'anthropicKey', 'serpApiKey',
   'plugBoletoToken',
 ]);
 
@@ -13,9 +13,6 @@ const SUPPORT_ONLY_SETTINGS_FIELDS = new Set([
   'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog',
   'geminiKey', 'openaiKey', 'anthropicKey',
   'evolutionUrl', 'evolutionKey', 'webhookUrl', 'serpApiKey',
-  'firebirdClientToken', 'firebirdApiUrl', 'firebirdApiKey', 'firebirdAuthMode',
-  'firebirdHealthPath', 'firebirdContactsPath', 'firebirdSyncEnabled',
-  'firebirdLastSyncAt', 'firebirdLastSyncStatus', 'firebirdLastSyncError',
   'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath',
   'plugBoletoCedenteCnpj', 'plugBoletoToken', 'plugBoletoTokenSet',
   'plugBoletoConfigSyncedAt', 'statementRerenderEnabled',
@@ -39,14 +36,11 @@ const SETTINGS_FIELDS = Object.freeze({
   'settings.company.manage': [
     'companyName', 'companyCnpj', 'companyIE', 'companyAddress', 'companyBairro',
     'companyCep', 'companyPhone', 'companyCity', 'companyState', 'osAccentColor', 'osBarcodeEnabled',
-    // Perfil somente leitura sincronizado do Firebird/IEMPRESA.
-    'firebirdCompany', 'firebirdCompanySyncStatus', 'firebirdCompanySyncRequestedAt',
-    'firebirdCompanySyncRequestId', 'firebirdCompanySyncError',
+    // Perfil somente leitura consultado no LCDDIGITALWEB.
+    'iluxCompany', 'iluxCompanySyncStatus', 'iluxCompanySyncRequestedAt',
+    'iluxCompanySyncRequestId', 'iluxCompanySyncError',
   ],
   'settings.agent.manage': [
-    'firebirdClientToken', 'firebirdApiUrl', 'firebirdApiKey', 'firebirdAuthMode',
-    'firebirdHealthPath', 'firebirdContactsPath', 'firebirdSyncEnabled', 'firebirdLastSyncAt',
-    'firebirdLastSyncStatus', 'firebirdLastSyncError',
     'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath', 'plugBoletoCedenteCnpj',
     'plugBoletoToken', 'plugBoletoTokenSet', 'plugBoletoConfigSyncedAt',
     'statementRerenderEnabled',

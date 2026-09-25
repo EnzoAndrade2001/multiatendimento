@@ -24,7 +24,6 @@ import {
   Search,
   Command,
   X,
-  BarChart2,
   ClipboardCheck,
   Activity,
   LayoutGrid,
@@ -375,7 +374,6 @@ export default function Layout() {
     { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', feature: 'ai_knowledge', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/assistente-ilux', icon: <Bot size={18} />, label: 'Assistente ILUX WEB', permission: 'ai.assistant.query', feature: 'ai_assistant', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', feature: 'telemetry', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
-    { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', feature: 'billing_reports', roles: ['admin', 'superadmin'] },
     // Operação › Sistema
     { section: 'Sistema', to: '/connections', icon: <LinkIcon size={18} />, label: 'Conexões', permission: 'connections.manage', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', feature: 'audit', roles: ['admin', 'superadmin'] },

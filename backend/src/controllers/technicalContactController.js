@@ -15,7 +15,6 @@ function serialize(contact) {
     id: contact.id,
     name: contact.name,
     phone: contact.phone,
-    firebirdSupportName: contact.firebirdSupportName || '',
     active: Boolean(contact.active),
     createdAt: contact.createdAt,
     updatedAt: contact.updatedAt,
@@ -31,9 +30,6 @@ function validateInput(body, { partial = false } = {}) {
   if (!partial || body.phone !== undefined) {
     data.phone = normalizedPhone(body.phone);
     if (!data.phone || data.phone.includes('@g.us') || data.phone.length < 10) return { error: 'Informe um WhatsApp válido com DDD e número.' };
-  }
-  if (!partial || body.firebirdSupportName !== undefined) {
-    data.firebirdSupportName = clean(body.firebirdSupportName, 80) || null;
   }
   if (!partial || body.active !== undefined) {
     if (body.active !== undefined && typeof body.active !== 'boolean') return { error: 'O status ativo deve ser booleano.' };

@@ -212,7 +212,7 @@ export default function RevGuard() {
   };
 
   const sourceLabel = (source) => ({
-    firebird: 'Firebird',
+    ilux_web: 'LCDDIGITALWEB',
     crm: 'cadastro CRM',
     manual_estimate: 'estimativa manual',
     missing: 'sem valor',
@@ -221,7 +221,7 @@ export default function RevGuard() {
   const sourceSummary = (quality) => {
     const sources = quality?.valueSources || {};
     const parts = [];
-    if (sources.firebird) parts.push(`${sources.firebird} Firebird`);
+    if (sources.ilux_web) parts.push(`${sources.ilux_web} LCDDIGITALWEB`);
     if (sources.crm) parts.push(`${sources.crm} CRM`);
     if (sources.manual_estimate) parts.push(`${sources.manual_estimate} estimada${sources.manual_estimate === 1 ? '' : 's'}`);
     if (sources.missing) parts.push(`${sources.missing} sem valor`);
@@ -233,8 +233,8 @@ export default function RevGuard() {
   const syncStatusLabel = !syncState
     ? 'Monitoramento ativo'
     : syncState.stale
-      ? 'Agente Firebird desatualizado'
-      : `Firebird sincronizado${syncState.ageMinutes != null ? ` há ${syncState.ageMinutes} min` : ''}`;
+      ? 'LCDDIGITALWEB indisponível'
+      : `LCDDIGITALWEB conectado${syncState.ageMinutes != null ? ` há ${syncState.ageMinutes} min` : ''}`;
 
   // Selo de tendência (hoje vs. última data com snapshot registrado). Para
   // métricas "quanto menor melhor" (risco, vazamento) increaseIsBad=true;
@@ -393,7 +393,7 @@ export default function RevGuard() {
                   <span style={s.kpiValue}>{formatCurrency(crisisData.mrrInRisk)}</span>
                   {crisisData.trend
                     ? renderTrendBadge(crisisData.trend.mrrInRiskDelta, { previousDate: crisisData.trend.previousDate })
-                    : <span style={s.kpiHint}>Baseado nos contratos (Firebird)</span>}
+                    : <span style={s.kpiHint}>Baseado nos contratos do LCDDIGITALWEB</span>}
                 </div>
                 {crisisData.mrrRiskBands && (
                   <div style={{ marginTop: '1rem', display: 'flex', gap: '8px', width: '100%', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -592,7 +592,7 @@ export default function RevGuard() {
                 <TrendingUp size={20} color="#10b981" />
                 <h2 style={s.sectionTitle}>Pipeline e Gargalos de Ordens de Serviço</h2>
               </div>
-              <span style={s.badge}>Leitura Sincronizada (Firebird)</span>
+              <span style={s.badge}>Leitura do LCDDIGITALWEB</span>
             </div>
             
             <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '2rem', marginTop: '1rem' }}>
@@ -640,12 +640,12 @@ export default function RevGuard() {
                 </div>
                 {crisisData.funnel.vazamentoSemValorCount > 0 && (
                   <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                    ⚠️ {crisisData.funnel.vazamentoSemValorCount} de {crisisData.funnel.vazamentoMes} O.S. vazadas não têm valor de peças/serviço informado pelo Firebird — o valor acima é uma estimativa parcial, o vazamento real pode ser maior.
+                    ⚠️ {crisisData.funnel.vazamentoSemValorCount} de {crisisData.funnel.vazamentoMes} O.S. vazadas não têm valor de peças/serviço informado pelo LCDDIGITALWEB — o valor acima é uma estimativa parcial, o vazamento real pode ser maior.
                   </p>
                 )}
                 {crisisData.funnel.vazamentoFallbackValueCount > 0 && (
                   <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--warning)', lineHeight: 1.4 }}>
-                    {crisisData.funnel.vazamentoFallbackValueCount} O.S. sem valor no Firebird usaram o valor mÃ©dio configurado como estimativa ({formatCurrency(crisisData.dataQuality?.leakage?.manualFallbackValue || 0)}).
+                    {crisisData.funnel.vazamentoFallbackValueCount} O.S. sem valor no LCDDIGITALWEB usaram o valor médio configurado como estimativa ({formatCurrency(crisisData.dataQuality?.leakage?.manualFallbackValue || 0)}).
                   </p>
                 )}
                 <div style={{ ...s.causeRow, background: 'rgba(16,185,129,0.04)', borderColor: 'rgba(16,185,129,0.2)' }}>
@@ -781,7 +781,7 @@ export default function RevGuard() {
                           </td>
                           <td style={{ ...s.td, textAlign: 'center', background: bgGradient, fontWeight: 'bold' }}>{a.osCount}</td>
                           <td style={{ ...s.td, textAlign: 'center', color: slaColor, fontWeight: 'bold' }}>{a.avgSla ? `${a.avgSla}h` : '--'}</td>
-                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 'bold', color: a.avgCsat && a.avgCsat <= 3.0 ? 'var(--critical)' : 'var(--success)' }} title={!a.matched ? 'Nome do técnico no Firebird não bateu com nenhum usuário do sistema — CSAT indisponível' : a.avgCsat ? `${a.csatSampleSize} avaliação(ões)` : undefined}>
+                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 'bold', color: a.avgCsat && a.avgCsat <= 3.0 ? 'var(--critical)' : 'var(--success)' }} title={!a.matched ? 'Nome do técnico no LCDDIGITALWEB não bateu com nenhum usuário do sistema — CSAT indisponível' : a.avgCsat ? `${a.csatSampleSize} avaliação(ões)` : undefined}>
                             {a.avgCsat ? `★ ${a.avgCsat} (${a.csatSampleSize})` : a.matched ? '--' : 'sem vínculo'}
                           </td>
                         </tr>
@@ -826,7 +826,7 @@ export default function RevGuard() {
                   </span>
                 </div>
               </div>
-              <div style={s.detectiveCard} title="Registros internos do sistema — não é o mesmo total do Firebird usado em Risco de Receita & SLA ou Benchmark">
+              <div style={s.detectiveCard} title="Registros internos do sistema — a fonte oficial é o LCDDIGITALWEB">
                 <h3 style={s.detectiveCardTitle}>O.S. (sistema interno)</h3>
                 <div style={s.detectiveCardValue}>
                   {detectiveData.stats.atual.os}

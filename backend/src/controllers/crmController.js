@@ -10,6 +10,7 @@ const {
   getCustomer360FromIluxWeb,
 } = require('../services/iluxWebService');
 const {
+  LCD_OFFICIAL_SOURCES,
   isLcdOfficialEquipmentSource,
 } = require('../utils/externalSource');
 const { readEquipmentLocation } = require('../utils/equipmentLocation');
@@ -20,8 +21,8 @@ const HISTORY_MAX_OFFSET = 100000;
 const CUSTOMER_DEFAULT_LIMIT = 100;
 const CUSTOMER_MAX_LIMIT = 250;
 const CUSTOMER_MAX_EXPORT = 10000;
-const LCD_SERVICE_ORDER_SOURCES = ['LCDDIGITALWEB', 'lcd_digital_web', 'lcd-digital-web', 'ilux_web', 'ilux-web', 'iluxweb'];
-const LCD_EQUIPMENT_SOURCES = ['LCDDIGITALWEB', 'lcd_digital_web', 'lcd-digital-web', 'ilux_web', 'ilux-web', 'iluxweb'];
+const LCD_SERVICE_ORDER_SOURCES = LCD_OFFICIAL_SOURCES;
+const LCD_EQUIPMENT_SOURCES = LCD_OFFICIAL_SOURCES;
 
 function parseHistoryPagination(query = {}) {
   const rawLimit = Number.parseInt(query.limit, 10);
@@ -74,18 +75,14 @@ function getCrmCapabilities(user) {
   };
 }
 
-function syncMetadata(settings, fallbackLastSyncedAt = null, sourceOverride = null, errorOverride = null) {
-  const lastSyncedAt = asDate(sourceOverride
-    ? (fallbackLastSyncedAt || settings?.firebirdLastSyncAt)
-    : (settings?.firebirdLastSyncAt || fallbackLastSyncedAt));
-  const status = sourceOverride === 'ilux_web'
-    ? (errorOverride ? 'error' : (lastSyncedAt ? 'ok' : 'unknown'))
-    : (settings?.firebirdLastSyncStatus || (errorOverride ? 'error' : (lastSyncedAt ? 'ok' : 'unknown')));
+function syncMetadata(_settings, fallbackLastSyncedAt = null, sourceOverride = 'ilux_web', errorOverride = null) {
+  const lastSyncedAt = asDate(fallbackLastSyncedAt);
+  const status = errorOverride ? 'error' : (lastSyncedAt ? 'ok' : 'unknown');
   return {
-    source: sourceOverride || 'firebird',
+    source: sourceOverride || 'ilux_web',
     status,
     lastSyncedAt,
-    error: errorOverride || settings?.firebirdLastSyncError || null,
+    error: errorOverride || null,
   };
 }
 
@@ -215,7 +212,7 @@ function normalizeContract(record) {
     startsAt,
     endsAt,
     updatedAt: asDate(rawValue(payload, 'updatedAt', 'atualizado')) || record?.syncedAt || record?.receivedAt || null,
-    source: 'firebird',
+    source: 'ilux_web',
   };
 }
 
@@ -425,7 +422,7 @@ function normalizeExternalOrder(payload, fallback = {}) {
     attendedAt,
     closedAt,
     updatedAt: asDate(rawValue(source, 'updatedAt', 'atualizado')) || attendedAt || openedAt,
-    source: fallback.source || 'firebird',
+    source: fallback.source || 'ilux_web',
   };
 }
 
@@ -712,7 +709,7 @@ async function loadCustomerOrderCatalog(tenantId, customer, sourceLimit = null) 
           is: {
             OR: [
               { crmCustomerId: customer.id },
-              ...(externalId ? [{ externalSource: 'firebird', externalId }] : []),
+              ...(externalId ? [{ externalSource: { in: LCD_EQUIPMENT_SOURCES }, externalId }] : []),
             ],
           },
         },
@@ -1298,18 +1295,12 @@ async function getCustomerServiceOrders(req, res) {
   const customer = await findTenantCustomer(req.user.tenantId, req.params.id);
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado' });
   const { limit, offset } = parseHistoryPagination(req.query);
-  const [catalog, settings] = await Promise.all([
-    loadCustomerOrderCatalog(req.user.tenantId, customer),
-    prisma.tenantSettings.findUnique({
-      where: { tenantId: req.user.tenantId },
-      select: { firebirdLastSyncAt: true, firebirdLastSyncStatus: true, firebirdLastSyncError: true },
-    }),
-  ]);
+  const catalog = await loadCustomerOrderCatalog(req.user.tenantId, customer);
   const page = paginateServiceOrders(catalog.orders, { limit, offset });
   res.json({
     ...page,
     generatedAt: new Date().toISOString(),
-    sync: syncMetadata(settings, catalog.lastSyncedAt, catalog.source, catalog.syncError),
+    sync: syncMetadata(null, catalog.lastSyncedAt, catalog.source, catalog.syncError),
     capabilities: getCrmCapabilities(req.user),
   });
 }
@@ -1350,12 +1341,7 @@ async function getCustomer360(req, res) {
     loadCustomerOrderCatalog(tenantId, customer, HISTORY_MAX_LIMIT),
     prisma.tenantSettings.findUnique({
       where: { tenantId },
-      select: {
-        kpiSlaLimitHours: true,
-        firebirdLastSyncAt: true,
-        firebirdLastSyncStatus: true,
-        firebirdLastSyncError: true,
-      },
+      select: { kpiSlaLimitHours: true },
     }),
     contactIds.length
       ? prisma.ticket.findMany({
@@ -1386,7 +1372,7 @@ async function getCustomer360(req, res) {
       ? prisma.externalSyncRecord.findMany({
         where: {
           tenantId,
-          source: 'firebird',
+          source: 'ilux_web',
           entity: 'equipmentMeters',
           OR: equipmentExternalIds.map((externalId) => ({
             payload: { path: ['equipmentExternalId'], equals: externalId },
@@ -1655,7 +1641,7 @@ async function getReceivableBoleto(req, res) {
     receivable = await prisma.externalSyncRecord.findFirst({
       where: {
         tenantId,
-        source: 'firebird',
+        source: 'ilux_web',
         entity: 'receivables',
         externalId: String(req.params.receivableId),
       },
@@ -1772,7 +1758,7 @@ async function resolveCustomerReceivable(req) {
     record = await prisma.externalSyncRecord.findFirst({
       where: {
         tenantId,
-        source: 'firebird',
+        source: 'ilux_web',
         entity: 'receivables',
         externalId: String(req.params.receivableId),
       },
@@ -1969,7 +1955,7 @@ async function listFlaggedBillingDocuments(req, res) {
       flagged.map((record) => text(record.payload?.receivableExternalId)).filter(Boolean),
     )];
     const receivableRecords = receivableIds.length ? await prisma.externalSyncRecord.findMany({
-      where: { tenantId, source: 'firebird', entity: 'receivables', externalId: { in: receivableIds } },
+      where: { tenantId, source: 'ilux_web', entity: 'receivables', externalId: { in: receivableIds } },
       select: { externalId: true, payload: true },
     }) : [];
     const receivableByExternalId = new Map(receivableRecords.map((record) => [record.externalId, normalizeReceivable(record)]));

@@ -4,6 +4,7 @@ const printGuard = require('./printGuardService');
 const { recordAuditEvent } = require('./auditEventService');
 const { isServiceOrderClosed } = require('../utils/serviceOrderStatus');
 const { reconcileServiceOrderStatuses } = require('./serviceOrderStatusReconciliationService');
+const { LCD_OFFICIAL_SOURCES } = require('../utils/externalSource');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LOW_TONER_RE = /toner|supply|cartucho|insumo|cilindro|drum|maintenance/i;
@@ -283,7 +284,7 @@ async function enrichEvents(tenantId, events) {
   const eqExternalIds = [...new Set(crmEquipments.map((e) => e.externalId).filter(Boolean))];
   const localEquipments = eqExternalIds.length
     ? await prisma.equipment.findMany({
-      where: { tenantId, externalSource: 'firebird', externalId: { in: eqExternalIds } },
+      where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, externalId: { in: eqExternalIds } },
       select: { id: true, externalId: true },
     })
     : [];
@@ -921,7 +922,7 @@ async function equipmentRanking(tenantId, { days = 90, limit = 20 } = {}) {
   }
   const ordersByEquipment = new Map(groupedOrders.map((group) => [group.equipmentId, group._count._all]));
   const localEquipments = await prisma.equipment.findMany({
-    where: { tenantId, externalSource: 'firebird', externalId: { in: crmEquipments.map((equipment) => equipment.externalId).filter(Boolean) } },
+    where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, externalId: { in: crmEquipments.map((equipment) => equipment.externalId).filter(Boolean) } },
     select: { id: true, externalId: true, pageCount: true },
   });
   const localByExternal = new Map(localEquipments.map((equipment) => [equipment.externalId, equipment]));
@@ -980,7 +981,7 @@ async function equipmentTimeline(tenantId, equipmentId, { limit = 40 } = {}) {
   });
   if (!crmEq) { const e = new Error('Equipamento nao encontrado.'); e.statusCode = 404; throw e; }
   const localEq = crmEq.externalId
-    ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: 'firebird', externalId: crmEq.externalId }, select: { id: true } })
+    ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, externalId: crmEq.externalId }, select: { id: true } })
     : null;
 
   const [events, orders, readings, insight] = await Promise.all([
@@ -1040,7 +1041,7 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
   const anyBinding = bindings[0];
   const crmEquipment = await prisma.crmEquipment.findFirst({ where: { tenantId, id: anyBinding.equipmentId } });
   const localEquipment = crmEquipment?.externalId
-    ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: 'firebird', externalId: crmEquipment.externalId } })
+    ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, externalId: crmEquipment.externalId } })
     : null;
   if (!localEquipment) { const e = new Error('Equipamento ainda nao sincronizado para abertura de O.S.'); e.statusCode = 409; throw e; }
   await reconcileServiceOrderStatuses(tenantId, { equipmentId: localEquipment.id });
@@ -1077,7 +1078,7 @@ async function consolidateToServiceOrder(tenantId, eventIds, { cdOstp, priority,
     const serviceOrder = await tx.serviceOrder.create({
       data: {
         tenantId, contactId: contact.id, equipmentId: localEquipment.id, ticketId: ticket.id,
-        requestKey, externalSource: 'firebird', status: 'AGUARDANDO_ILUX', cdOstp: osType.code,
+        requestKey, externalSource: 'LCDDIGITALWEB', status: 'AGUARDANDO_ILUX', cdOstp: osType.code,
         nmsuportet: nmsuportet || null, defect: body,
       },
     });

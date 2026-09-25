@@ -127,7 +127,7 @@ async function resolveCustomer({ tenantId, crmCustomerId, clienteNome }) {
 
 async function loadReceivables(tenantId, customer) {
   const records = await prisma.externalSyncRecord.findMany({
-    where: { tenantId, source: 'firebird', entity: 'receivables', ...(customer?.externalId ? { payload: { path: ['clientExternalId'], equals: String(customer.externalId) } } : {}) },
+    where: { tenantId, source: 'ilux_web', entity: 'receivables', ...(customer?.externalId ? { payload: { path: ['clientExternalId'], equals: String(customer.externalId) } } : {}) },
     select: { externalId: true, payload: true, receivedAt: true }, orderBy: { receivedAt: 'desc' }, take: 20000,
   });
   return records.map(normalizeReceivable).filter((item) => !item.isCancelled);
@@ -168,7 +168,7 @@ function normalizePayable(record) {
   return { externalId: record.externalId || p.externalId || p.seqdespesa, supplier: p.supplierName || p.nmfornecedor || p.fantasia || 'Fornecedor não identificado', dueAt: p.dueAt || p.dtvectodesp, paidAt, value, openValue: Math.max(0, money(p.openValue ?? (value - paidValue))), cancelled: Boolean(p.cancelled || plain(p.status).includes('cancel')) };
 }
 async function fetchPayablesData(tenantId, period) {
-  const rows = await prisma.externalSyncRecord.findMany({ where: { tenantId, source: 'firebird', entity: 'payables' }, select: { externalId: true, payload: true, receivedAt: true }, take: 20000 });
+  const rows = await prisma.externalSyncRecord.findMany({ where: { tenantId, source: 'ilux_web', entity: 'payables' }, select: { externalId: true, payload: true, receivedAt: true }, take: 20000 });
   if (!rows.length) return { hasData: false, summary: 'As contas a pagar ainda não foram sincronizadas pelo ILUX WEB.' };
   const open = rows.map(normalizePayable).filter((item) => !item.cancelled && !item.paidAt && item.openValue > 0 && inPeriod(item.dueAt, period));
   const total = open.reduce((sum, item) => sum + item.openValue, 0);
@@ -184,7 +184,7 @@ async function fetchOpenOrdersData(tenantId, customer) {
 async function fetchContractData(tenantId, customer) {
   const records = customer?.externalId
     ? await loadContracts(tenantId, customer.externalId)
-    : (await prisma.externalSyncRecord.findMany({ where: { tenantId, source: 'firebird', entity: 'contracts' }, select: { externalId: true, payload: true }, take: 20000 })).map((row) => row.payload);
+    : (await prisma.externalSyncRecord.findMany({ where: { tenantId, source: 'ilux_web', entity: 'contracts' }, select: { externalId: true, payload: true }, take: 20000 })).map((row) => row.payload);
   if (!records.length) return { hasData: false, summary: 'Não há contratos sincronizados para este escopo.' };
   const active = records.filter((item) => item.isActive !== false && !/cancel|encerr|inativ/.test(plain(item.status)));
   const monthly = active.reduce((sum, item) => sum + money(item.monthlyValue || item.value), 0);
@@ -222,9 +222,8 @@ async function answerQuestion({ tenantId, settings, pergunta, crmCustomerId, can
     : intent === INTENTS.STATUS_CONTRATO ? await fetchContractData(tenantId, customer)
     : intent === INTENTS.SAUDE_EQUIPAMENTO ? await fetchEquipmentData(tenantId, customer)
     : await fetchCustomerSummary(tenantId, customer);
-  const settingsRow = await prisma.tenantSettings.findUnique({ where: { tenantId }, select: { firebirdLastSyncAt: true } });
   const answer = await phraseAnswer(settings, { pergunta, intent, data, customerName: customer?.name });
-  return { intent, answer, data, scope: customer ? 'customer' : 'company', customer: customer ? { id: customer.id, name: customer.name } : null, syncedAt: settingsRow?.firebirdLastSyncAt || null };
+  return { intent, answer, data, scope: customer ? 'customer' : 'company', customer: customer ? { id: customer.id, name: customer.name } : null, syncedAt: null };
 }
 
 module.exports = { INTENTS, answerQuestion, __testing: { classifyQuestion, resolveCustomer, parseJsonSafe, keywordIntent, resolvePeriod } };

@@ -3,10 +3,10 @@ const {
   BUSINESS_HOURS_TIMEZONE,
   calculateBusinessMinutesBetween,
 } = require('../services/businessHourService');
+const { isIluxWebConfigured } = require('../services/iluxWebService');
 
 const ALLOWED_PERIOD_DAYS = [7, 30, 90];
 const DAY_MS = 24 * 60 * 60 * 1000;
-const FIREBIRD_STALE_AFTER_MS = 15 * 60 * 1000;
 const DASHBOARD_CACHE_TTL_MS = Math.max(5000, Number.parseInt(process.env.DASHBOARD_CACHE_TTL_MS, 10) || 30000);
 const dashboardCache = new Map();
 
@@ -197,31 +197,15 @@ function fillDailyMessages(rows = [], periodStart, now = new Date()) {
 }
 
 async function getOperationalHealth(tenantId) {
-  const [settings, instances] = await Promise.all([
-    prisma.tenantSettings.findUnique({
-      where: { tenantId },
-      select: { firebirdApiUrl: true, firebirdSyncEnabled: true, firebirdLastSyncAt: true, firebirdLastSyncStatus: true },
-    }),
-    prisma.waInstance.findMany({ where: { tenantId }, select: { instanceName: true, status: true } }),
-  ]);
+  const instances = await prisma.waInstance.findMany({ where: { tenantId }, select: { instanceName: true, status: true } });
 
   const visibleInstances = instances.filter((instance) => !String(instance.instanceName || '').startsWith('DELETED_'));
   const connectedInstances = visibleInstances.filter((instance) => ['connected', 'open', 'online'].includes(String(instance.status || '').toLowerCase())).length;
   const whatsappStatus = visibleInstances.length === 0 ? 'not_configured' : (connectedInstances > 0 ? 'ok' : 'degraded');
 
-  const lastSyncAt = settings?.firebirdLastSyncAt || null;
-  const syncState = String(settings?.firebirdLastSyncStatus || '').toLowerCase();
-  const firebirdConfigured = Boolean(settings?.firebirdApiUrl || settings?.firebirdSyncEnabled || lastSyncAt);
-  let firebirdStatus = 'not_configured';
-  if (firebirdConfigured) {
-    if (syncState === 'syncing') firebirdStatus = 'syncing';
-    else if (['error', 'partial', 'failed'].includes(syncState)) firebirdStatus = 'degraded';
-    else if (!lastSyncAt) firebirdStatus = 'unknown';
-    else if (Date.now() - new Date(lastSyncAt).getTime() > FIREBIRD_STALE_AFTER_MS) firebirdStatus = 'degraded';
-    else firebirdStatus = 'ok';
-  }
+  const iluxWebStatus = isIluxWebConfigured() ? 'ok' : 'not_configured';
 
-  const statuses = [whatsappStatus, firebirdStatus];
+  const statuses = [whatsappStatus, iluxWebStatus];
   const overall = statuses.includes('degraded')
     ? 'degraded'
     : statuses.includes('syncing')
@@ -237,7 +221,7 @@ async function getOperationalHealth(tenantId) {
     generatedAt: new Date().toISOString(),
     services: {
       whatsapp: { status: whatsappStatus, connected: connectedInstances, total: visibleInstances.length },
-      firebird: { status: firebirdStatus, lastSyncAt, lastSyncStatus: settings?.firebirdLastSyncStatus || null },
+      iluxWeb: { status: iluxWebStatus, lastSyncAt: null, lastSyncStatus: null },
     },
   };
 }

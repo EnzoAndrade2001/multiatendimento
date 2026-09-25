@@ -100,7 +100,7 @@ async function resolveWhatsAppActor({ tenantId, phone }) {
 
   const authorizedContacts = await prisma.technicalContact.findMany({
     where: { tenantId, active: true },
-    select: { id: true, name: true, phone: true, firebirdSupportName: true },
+    select: { id: true, name: true, phone: true },
   });
   const authorized = authorizedContacts.find((contact) => [...normalizeCandidates(contact.phone)]
     .some((candidate) => candidates.has(candidate)));
@@ -111,14 +111,13 @@ async function resolveWhatsAppActor({ tenantId, phone }) {
     userId: null,
     technicalContactId: authorized.id,
     name: authorized.name,
-    firebirdSupportName: authorized.firebirdSupportName || null,
   } : null;
 
   // Compatibilidade: instalações antigas ainda podem ter o técnico como User.
   if (!value) {
     const users = await prisma.user.findMany({
       where: { tenantId, active: true, phone: { not: null } },
-      select: { id: true, name: true, phone: true, role: true, accessProfile: true, firebirdSupportName: true },
+      select: { id: true, name: true, phone: true, role: true, accessProfile: true },
     });
     const technician = users.find((user) => isTechnicianProfile(user)
       && [...normalizeCandidates(user.phone)].some((candidate) => candidates.has(candidate)));
@@ -129,7 +128,6 @@ async function resolveWhatsAppActor({ tenantId, phone }) {
         userId: technician.id,
         technicalContactId: null,
         name: technician.name,
-        firebirdSupportName: technician.firebirdSupportName || null,
       };
     }
   }

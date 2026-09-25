@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const { encryptSecret, decryptSecret } = require('./printGuardCrypto');
 const { isServiceOrderClosed } = require('../utils/serviceOrderStatus');
 const { reconcileServiceOrderStatuses } = require('./serviceOrderStatusReconciliationService');
+const { LCD_OFFICIAL_SOURCES } = require('../utils/externalSource');
 
 const SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
@@ -331,11 +332,11 @@ async function resolveMapping(tenantId, fields, connectionId) {
   let customers = [];
   let equipments = [];
   if (customerCode) {
-    customers = await prisma.crmCustomer.findMany({ where: { tenantId, externalSource: 'firebird', externalId: customerCode }, take: 2 });
+    customers = await prisma.crmCustomer.findMany({ where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, externalId: customerCode }, take: 2 });
   }
   if (serialNumber) {
     equipments = await prisma.crmEquipment.findMany({
-      where: { tenantId, externalSource: 'firebird', serialNumber: { equals: serialNumber, mode: 'insensitive' } },
+      where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, serialNumber: { equals: serialNumber, mode: 'insensitive' } },
     });
   }
 
@@ -346,7 +347,7 @@ async function resolveMapping(tenantId, fields, connectionId) {
   // equipamento, o próprio vínculo do equipamento é a fonte segura do cliente.
   if (!customer && equipment?.customerId) {
     customer = await prisma.crmCustomer.findFirst({
-      where: { id: equipment.customerId, tenantId, externalSource: 'firebird' },
+      where: { id: equipment.customerId, tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES } },
     });
   }
   if (customers.length > 1 || equipments.length > 1) state = 'AMBIGUOUS';
@@ -788,7 +789,7 @@ async function approveEvent(tenantId, event, body = {}) {
   const binding = event.bindingId ? await prisma.printGuardBinding.findFirst({ where: { id: event.bindingId, tenantId } }) : null;
   if (!binding?.customerId || !binding.equipmentId || binding.state !== 'MATCHED') { const error = new Error('Nao foi possivel localizar cliente e equipamento vinculados.'); error.statusCode = 409; throw error; }
   const crmEquipment = await prisma.crmEquipment.findFirst({ where: { id: binding.equipmentId, tenantId } });
-  const localEquipment = crmEquipment?.externalId ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: 'firebird', externalId: crmEquipment.externalId } }) : null;
+  const localEquipment = crmEquipment?.externalId ? await prisma.equipment.findFirst({ where: { tenantId, externalSource: { in: LCD_OFFICIAL_SOURCES }, externalId: crmEquipment.externalId } }) : null;
   if (!localEquipment) { const error = new Error('Equipamento ainda nao sincronizado para abertura de O.S.'); error.statusCode = 409; throw error; }
   await reconcileServiceOrderStatuses(tenantId, { equipmentId: localEquipment.id });
   const contact = await prisma.contact.findFirst({ where: { tenantId, id: localEquipment.contactId } });
@@ -821,7 +822,7 @@ async function approveEvent(tenantId, event, body = {}) {
       return { serviceOrder: openOrder, reused: true };
     }
     const ticket = await tx.ticket.create({ data: { tenantId, contactId: contact.id, subject: defect.slice(0, 240), status: 'pending', priority: body.priority || 'medium' } });
-    const serviceOrder = await tx.serviceOrder.create({ data: { tenantId, contactId: contact.id, equipmentId: localEquipment.id, ticketId: ticket.id, requestKey, externalSource: 'firebird', status: 'AGUARDANDO_ILUX', cdOstp: osType.code, nmsuportet: body.nmsuportet || null, defect } });
+    const serviceOrder = await tx.serviceOrder.create({ data: { tenantId, contactId: contact.id, equipmentId: localEquipment.id, ticketId: ticket.id, requestKey, externalSource: 'LCDDIGITALWEB', status: 'AGUARDANDO_ILUX', cdOstp: osType.code, nmsuportet: body.nmsuportet || null, defect } });
     await tx.printGuardTelemetryEvent.update({ where: { id: event.id }, data: { state: 'APPROVED', ticketId: ticket.id, serviceOrderId: serviceOrder.id, errorCode: null, errorMessage: null } });
     return { serviceOrder, reused: false };
   });

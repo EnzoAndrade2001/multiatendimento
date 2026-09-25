@@ -57,14 +57,13 @@ export default function SuperAdmin() {
   async function load() {
     setLoading(true);
     try {
-      const [tenantsResult, agentsResult, featuresResult, supportResult] = await Promise.allSettled([getTenants(), getFirebirdAgents(), getFeatureCatalog(), getSupportUsers()]);
+      const [tenantsResult, featuresResult, supportResult] = await Promise.allSettled([getTenants(), getFeatureCatalog(), getSupportUsers()]);
       if (tenantsResult.status === 'fulfilled') {
         setTenants(tenantsResult.value.data);
       } else {
         throw tenantsResult.reason;
       }
       // O inventário do agente é secundário: uma falha aqui não derruba a tela.
-      if (agentsResult.status === 'fulfilled') setFbAgents(agentsResult.value.data);
       if (featuresResult.status === 'fulfilled') {
         const payload = featuresResult.value.data || {};
         setFeatureCatalog({
@@ -268,7 +267,6 @@ export default function SuperAdmin() {
         actions={<div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <ActionButton variant="secondary" onClick={() => setSecurityModal(true)}><KeyRound size={18} /> Segurança</ActionButton>
           <ActionButton variant="secondary" onClick={() => setAuditModal(true)}><ClipboardCheck size={18} /> Auditoria</ActionButton>
-          {isManager && <ActionButton variant="secondary" onClick={() => setReleasesModal(true)}><Download size={18} /> Versões do agente</ActionButton>}
           {isManager && <ActionButton variant="secondary" onClick={() => setSupportModal(true)}><Users size={18} /> Equipe de suporte</ActionButton>}
           {isManager && <ActionButton variant="secondary" onClick={() => setPlansModal(true)}><PackageCheck size={18} /> Editar planos</ActionButton>}
           {isManager && <ActionButton onClick={() => openModal()}><Plus size={18} /> Nova empresa</ActionButton>}
@@ -450,7 +448,7 @@ export default function SuperAdmin() {
         )}
       </SurfaceCard>
 
-      <SurfaceCard style={{ ...s.tableCard, marginTop: 'var(--space-5, 20px)' }}>
+      {false && <SurfaceCard style={{ ...s.tableCard, marginTop: 'var(--space-5, 20px)' }}>
         <div style={s.agentFleetHeader}>
           <div>
             <div style={s.agentFleetTitle}>
@@ -543,7 +541,7 @@ export default function SuperAdmin() {
             </tbody>
           </table>
         )}
-      </SurfaceCard>
+      </SurfaceCard>}
 
       {modal ? (
         <ModalShell

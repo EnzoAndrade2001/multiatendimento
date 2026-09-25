@@ -28,7 +28,7 @@ import {
   getAgentStatus,
   downloadAgent,
   getSystemPromptPreview,
-  syncCompanyFromFirebird,
+  syncCompanyFromIluxWeb,
   getTechnicalContacts,
   createTechnicalContact,
   updateTechnicalContact,
@@ -42,28 +42,26 @@ import UserAvatar from '../components/ui/UserAvatar';
 import PrintGuardSettings from './PrintGuardSettings';
 import AttendanceOperations from '../components/AttendanceOperations';
 
-const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'ILUX WEB Sentinela', 'Minha conta', 'Agente Local', 'PrintGuard'];
+const TABS = ['Robô IA', 'Atendimento', 'Atendentes', 'Equipes', 'Empresa', 'Respostas rápidas', 'Etiquetas', 'ILUX WEB Sentinela', 'Minha conta', 'PrintGuard'];
 const TAB_PERMISSIONS = [
   'settings.bot.manage', 'settings.attendance.manage', 'users.manage', 'teams.manage',
   'settings.company.manage', 'quick_responses.manage', 'tags.manage', 'revenue.view',
-  null, 'settings.agent.manage', 'connections.manage',
+  null, 'connections.manage',
 ];
 const TAB_GROUPS = [
   { label: 'Automação', indexes: [0, 1, 6] },
   { label: 'Equipe', indexes: [2, 3] },
   { label: 'Negócio', indexes: [4, 7] },
-  { label: 'Sistema', indexes: [8, 9, 10] },
+  { label: 'Sistema', indexes: [8, 9] },
 ];
 // Respostas rápidas possui uma área própria em Operação. Mantemos o índice
 // interno 5 para compatibilidade com links antigos, mas não o exibimos no
 // menu de Configurações para evitar duas entradas para a mesma função.
 const HIDDEN_TAB_INDEXES = new Set([5]);
-const SUPPORT_ONLY_TAB_INDEXES = new Set([7, 9, 10]);
+const SUPPORT_ONLY_TAB_INDEXES = new Set([7, 9]);
 const SUPPORT_ONLY_FORM_FIELDS = [
   'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog', 'geminiKey', 'openaiKey', 'anthropicKey',
   'evolutionUrl', 'evolutionKey', 'webhookUrl', 'serpApiKey',
-  'firebirdClientToken', 'firebirdApiUrl', 'firebirdApiKey', 'firebirdAuthMode', 'firebirdHealthPath',
-  'firebirdContactsPath', 'firebirdSyncEnabled', 'firebirdLastSyncAt', 'firebirdLastSyncStatus', 'firebirdLastSyncError',
   'plugBoletoEnabled', 'plugBoletoBaseUrl', 'plugBoletoPrintPath', 'plugBoletoCedenteCnpj', 'plugBoletoToken',
   'plugBoletoTokenSet', 'plugBoletoConfigSyncedAt', 'statementRerenderEnabled',
   'kpiContractValue', 'kpiServiceValue', 'kpiSlaLimitHours', 'kpiReincidentThreshold',
@@ -106,7 +104,7 @@ export default function Settings() {
   const [tab, setTab] = useState(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
     if (requestedTab === 'account') return 8;
-    if (requestedTab === 'printguard') return 10;
+    if (requestedTab === 'printguard') return 9;
     const firstAllowed = TAB_PERMISSIONS.findIndex((permission, index) => !HIDDEN_TAB_INDEXES.has(index) && (!permission || can(permission)));
     return firstAllowed >= 0 ? firstAllowed : 8;
   });
@@ -142,16 +140,6 @@ export default function Settings() {
     osAccentColor: '#D62828',
     osBarcodeEnabled: true,
     serpApiKey: '',
-    firebirdClientToken: '',
-    firebirdApiUrl: '',
-    firebirdApiKey: '',
-    firebirdAuthMode: 'bearer',
-    firebirdHealthPath: '/health',
-    firebirdContactsPath: '/contacts',
-    firebirdSyncEnabled: false,
-    firebirdLastSyncAt: '',
-    firebirdLastSyncStatus: 'idle',
-    firebirdLastSyncError: '',
     plugBoletoEnabled: false,
     plugBoletoBaseUrl: 'https://plugboleto.com.br/api/v1',
     plugBoletoPrintPath: '/boletos/impressao/lote',
@@ -160,11 +148,11 @@ export default function Settings() {
     plugBoletoTokenSet: false,
     plugBoletoConfigSyncedAt: '',
     statementRerenderEnabled: false,
-    firebirdCompany: null,
-    firebirdCompanySyncStatus: 'not_synced',
-    firebirdCompanySyncRequestedAt: '',
-    firebirdCompanySyncRequestId: '',
-    firebirdCompanySyncError: '',
+    iluxCompany: null,
+    iluxCompanySyncStatus: 'not_synced',
+    iluxCompanySyncRequestedAt: '',
+    iluxCompanySyncRequestId: '',
+    iluxCompanySyncError: '',
     kpiContractValue: 1200.0,
     kpiServiceValue: 350.0,
     kpiSlaLimitHours: 24,
@@ -204,7 +192,7 @@ export default function Settings() {
   const [syncingIntegration, setSyncingIntegration] = useState(false);
   const [syncingCompany, setSyncingCompany] = useState(false);
   const [technicalContacts, setTechnicalContacts] = useState([]);
-  const [technicalContactForm, setTechnicalContactForm] = useState({ name: '', phone: '', firebirdSupportName: '' });
+  const [technicalContactForm, setTechnicalContactForm] = useState({ name: '', phone: '' });
   const [editingTechnicalContact, setEditingTechnicalContact] = useState(null);
   const [technicalContactBusy, setTechnicalContactBusy] = useState(false);
   const [showToken, setShowToken] = useState(false);
@@ -257,8 +245,8 @@ export default function Settings() {
       getQuickResponses(),
       getTags(),
       getBusinessHours(),
-      can('settings.agent.manage') ? getAgentInfo() : Promise.resolve({ data: null }),
-      can('settings.agent.manage') ? getAgentStatus() : Promise.resolve({ data: null }),
+      Promise.resolve({ data: null }),
+      Promise.resolve({ data: null }),
       can('settings.bot.manage') ? getTechnicalContacts() : Promise.resolve({ data: [] }),
     ]);
 
@@ -311,11 +299,6 @@ export default function Settings() {
     try {
       const settingsToSave = { ...form };
       if (!isSupport) SUPPORT_ONLY_FORM_FIELDS.forEach((field) => delete settingsToSave[field]);
-      // The API masks stored secrets in read responses. Never send that visual
-      // placeholder back as if it were a real agent token.
-      if (isMaskedSecret(settingsToSave.firebirdClientToken)) {
-        delete settingsToSave.firebirdClientToken;
-      }
       // O token do PlugBoleto só é enviado quando digitado; vazio = manter o atual.
       delete settingsToSave.plugBoletoTokenSet;
       delete settingsToSave.plugBoletoConfigSyncedAt;
@@ -341,41 +324,28 @@ export default function Settings() {
   async function handleCompanySync() {
     setSyncingCompany(true);
     try {
-      await syncCompanyFromFirebird();
-      toast.success('Consulta da empresa enviada ao ILUX WEB.');
-
-      // O agente responde por HTTPS no próximo polling de comandos. Atualiza
-      // somente as configurações para não reiniciar toda a tela.
-      for (let attempt = 0; attempt < 10; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        const response = await getSettings();
-        const next = response.data || {};
-        const company = next.firebirdCompany;
-        setForm((current) => ({
-          ...current,
-          ...next,
-          ...(company ? {
-            companyName: company.name || current.companyName,
-            companyCnpj: company.cnpj || current.companyCnpj,
-            companyIE: company.stateRegistration || current.companyIE,
-            companyAddress: company.addressFull || company.address || current.companyAddress,
-            companyBairro: company.neighborhood || current.companyBairro,
-            companyCep: company.zipCode || current.companyCep,
-            companyPhone: company.phone || current.companyPhone,
-            companyCity: company.city || current.companyCity,
-            companyState: company.state || current.companyState,
-          } : {}),
-        }));
-        if (next.firebirdCompanySyncStatus !== 'pending') {
-          if (next.firebirdCompanySyncStatus === 'ok') {
-      toast.success('Dados da empresa atualizados pelo ILUX WEB.');
-          } else {
-            toast.error('O agente não confirmou a consulta da empresa.');
-          }
-          return;
-        }
-      }
-      toast.info('A consulta ficou pendente. O agente atualizará assim que estiver online.');
+      const { data } = await syncCompanyFromIluxWeb();
+      const company = data?.profile || null;
+      setForm((current) => ({
+        ...current,
+        iluxCompany: company,
+        iluxCompanySyncStatus: 'ok',
+        iluxCompanySyncRequestedAt: new Date().toISOString(),
+        iluxCompanySyncRequestId: data?.id || '',
+        iluxCompanySyncError: '',
+        ...(company ? {
+          companyName: company.name || current.companyName,
+          companyCnpj: company.cnpj || current.companyCnpj,
+          companyIE: company.stateRegistration || current.companyIE,
+          companyAddress: company.addressFull || company.address || current.companyAddress,
+          companyBairro: company.neighborhood || current.companyBairro,
+          companyCep: company.zipCode || current.companyCep,
+          companyPhone: company.phone || current.companyPhone,
+          companyCity: company.city || current.companyCity,
+          companyState: company.state || current.companyState,
+        } : {}),
+      }));
+      toast.success('Dados da empresa atualizados pelo LCDDIGITALWEB.');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Não foi possível solicitar a sincronização da empresa.');
     } finally {
@@ -470,7 +440,7 @@ export default function Settings() {
         setTechnicalContacts((current) => [...current, response.data]);
         toast.success('Técnico autorizado para o assistente via WhatsApp.');
       }
-      setTechnicalContactForm({ name: '', phone: '', firebirdSupportName: '' });
+      setTechnicalContactForm({ name: '', phone: '' });
       setEditingTechnicalContact(null);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Não foi possível salvar o técnico autorizado.');
@@ -481,7 +451,7 @@ export default function Settings() {
 
   function editTechnicalContact(item) {
     setEditingTechnicalContact(item);
-    setTechnicalContactForm({ name: item.name || '', phone: item.phone || '', firebirdSupportName: item.firebirdSupportName || '' });
+    setTechnicalContactForm({ name: item.name || '', phone: item.phone || '' });
   }
 
   async function toggleTechnicalContact(item) {
@@ -501,7 +471,7 @@ export default function Settings() {
         setTechnicalContacts((current) => current.filter((contact) => contact.id !== item.id));
         if (editingTechnicalContact?.id === item.id) {
           setEditingTechnicalContact(null);
-          setTechnicalContactForm({ name: '', phone: '', firebirdSupportName: '' });
+          setTechnicalContactForm({ name: '', phone: '' });
         }
         toast.success('Autorização removida.');
       } catch (err) {
@@ -779,8 +749,8 @@ export default function Settings() {
   const agentPublishedVersion = agentStatus?.latestVersion || agentInfo?.version || null;
   const agentOutdatedCount = agentStatus?.outdatedCount || 0;
   const firebirdTokenIsMasked = isMaskedSecret(form.firebirdClientToken);
-  const firebirdCompany = form.firebirdCompany && typeof form.firebirdCompany === 'object' ? form.firebirdCompany : null;
-  const companySyncStatus = form.firebirdCompanySyncStatus || 'not_synced';
+  const iluxCompany = form.iluxCompany && typeof form.iluxCompany === 'object' ? form.iluxCompany : null;
+  const companySyncStatus = form.iluxCompanySyncStatus || 'not_synced';
   const companySyncLabel = companySyncStatus === 'pending'
     ? 'Aguardando o agente'
     : companySyncStatus === 'ok'
@@ -1050,16 +1020,11 @@ export default function Settings() {
                     <input id="technical-contact-phone" type="tel" style={s.input} value={technicalContactForm.phone} onChange={(e) => setTechnicalContactForm({ ...technicalContactForm, phone: e.target.value })} placeholder="5551999999999" maxLength={20} />
                   </div>
                 </div>
-                <div style={s.field}>
-                  <label style={s.label} htmlFor="technical-contact-firebird-name">Nome do técnico no ILUX WEB (opcional)</label>
-                  <input id="technical-contact-firebird-name" style={s.input} value={technicalContactForm.firebirdSupportName} onChange={(e) => setTechnicalContactForm({ ...technicalContactForm, firebirdSupportName: e.target.value })} placeholder="Ex.: DIEGO" maxLength={80} />
-                  <p style={s.hint}>Usado apenas para identificar o técnico ao abrir chamados no ILUX WEB.</p>
-                </div>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button type="submit" style={s.saveBtn} disabled={technicalContactBusy}>
                     {technicalContactBusy ? 'Salvando...' : (editingTechnicalContact ? 'Salvar alteração' : 'Autorizar número')}
                   </button>
-                  {editingTechnicalContact && <button type="button" style={s.iconButton} onClick={() => { setEditingTechnicalContact(null); setTechnicalContactForm({ name: '', phone: '', firebirdSupportName: '' }); }}>Cancelar edição</button>}
+                  {editingTechnicalContact && <button type="button" style={s.iconButton} onClick={() => { setEditingTechnicalContact(null); setTechnicalContactForm({ name: '', phone: '' }); }}>Cancelar edição</button>}
                 </div>
               </form>
               <div style={{ display: 'grid', gap: '0.65rem', marginTop: '1.25rem' }}>
@@ -1069,7 +1034,7 @@ export default function Settings() {
                   <div key={item.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem', border: '1px solid var(--border)', borderRadius: '0.75rem', flexWrap: 'wrap' }}>
                     <div style={{ minWidth: 0 }}>
                       <strong>{item.name}</strong>
-                        <div style={s.hint}>{item.phone}{item.firebirdSupportName ? ` · ILUX WEB: ${item.firebirdSupportName}` : ''}</div>
+                        <div style={s.hint}>{item.phone}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button type="button" style={s.iconButton} onClick={() => toggleTechnicalContact(item)}>{item.active ? 'Ativo' : 'Inativo'}</button>
@@ -1355,16 +1320,16 @@ export default function Settings() {
                     {companySyncLabel}
                   </div>
                   <p style={{ ...s.hint, margin: '.35rem 0 0' }}>
-                    A leitura vem da tabela IEMPRESA pelo agente local. Ao sincronizar, os campos abaixo são preenchidos e salvos como fallback.
+                    A leitura vem diretamente do LCDDIGITALWEB. Os campos abaixo são apenas a cópia visual do cadastro oficial.
                   </p>
-                  {firebirdCompany?.syncedAt && (
+                  {iluxCompany?.syncedAt && (
                     <p style={{ ...s.hint, margin: '.25rem 0 0' }}>
-                      Última leitura: {new Date(firebirdCompany.syncedAt).toLocaleString('pt-BR')}
+                      Última leitura: {new Date(iluxCompany.syncedAt).toLocaleString('pt-BR')}
                     </p>
                   )}
-                  {companySyncStatus === 'failed' && form.firebirdCompanySyncError && (
+                  {companySyncStatus === 'failed' && form.iluxCompanySyncError && (
                     <p style={{ ...s.hint, margin: '.25rem 0 0', color: 'var(--danger)' }}>
-                      {form.firebirdCompanySyncError}
+                      {form.iluxCompanySyncError}
                     </p>
                   )}
                 </div>
@@ -1373,21 +1338,21 @@ export default function Settings() {
                 </button>
               </div>
 
-              {firebirdCompany && (
+              {iluxCompany && (
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '.75rem', marginTop: '1rem' }}>
                   {[
-                    ['Razão social', firebirdCompany.name],
-                    ['Nome fantasia', firebirdCompany.tradeName],
-                    ['CNPJ / CPF', firebirdCompany.cnpj],
-                    ['Inscrição estadual', firebirdCompany.stateRegistration],
-                    ['Endereço', firebirdCompany.addressFull || firebirdCompany.address],
-                    ['Bairro', firebirdCompany.neighborhood],
-                    ['CEP', firebirdCompany.zipCode],
-                    ['Cidade / UF', [firebirdCompany.city, firebirdCompany.state].filter(Boolean).join(' / ')],
-                    ['Telefone', firebirdCompany.phone
-                      ? (firebirdCompany.areaCode && !String(firebirdCompany.phone).replace(/\D/g, '').startsWith(String(firebirdCompany.areaCode).replace(/\D/g, ''))
-                        ? `(${firebirdCompany.areaCode}) ${firebirdCompany.phone}`
-                        : firebirdCompany.phone)
+                    ['Razão social', iluxCompany.name],
+                    ['Nome fantasia', iluxCompany.tradeName],
+                    ['CNPJ / CPF', iluxCompany.cnpj],
+                    ['Inscrição estadual', iluxCompany.stateRegistration],
+                    ['Endereço', iluxCompany.addressFull || iluxCompany.address],
+                    ['Bairro', iluxCompany.neighborhood],
+                    ['CEP', iluxCompany.zipCode],
+                    ['Cidade / UF', [iluxCompany.city, iluxCompany.state].filter(Boolean).join(' / ')],
+                    ['Telefone', iluxCompany.phone
+                      ? (iluxCompany.areaCode && !String(iluxCompany.phone).replace(/\D/g, '').startsWith(String(iluxCompany.areaCode).replace(/\D/g, ''))
+                        ? `(${iluxCompany.areaCode}) ${iluxCompany.phone}`
+                        : iluxCompany.phone)
                       : null],
                   ].map(([label, value]) => (
                     <div key={label} style={{ padding: '.65rem .75rem', borderRadius: 8, background: 'var(--bg-panel-hover)', minWidth: 0 }}>
@@ -1852,7 +1817,7 @@ export default function Settings() {
             </section>
           )}
 
-          {tab === 9 && (
+          {false && tab === 9 && (
             <div style={s.sections}>
               <div style={s.card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
@@ -2214,7 +2179,7 @@ export default function Settings() {
         </div>
       )}
 
-      {tab === 10 && <PrintGuardSettings />}
+      {tab === 9 && <PrintGuardSettings />}
 
       {isSupport && showAgentStartupGuide && (
         <ModalShell

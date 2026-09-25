@@ -3,6 +3,7 @@ const prisma = require('../lib/prisma');
 const { normalizeTagList } = require('../utils/tagUtils');
 const readXlsxFile = require('read-excel-file/node');
 const evolutionService = require('../services/evolutionService');
+const { LCD_OFFICIAL_SOURCES } = require('../utils/externalSource');
 
 async function list(req, res) {
   const q = req.query.q || req.query.search;
@@ -22,7 +23,7 @@ async function list(req, res) {
     filters.push({
       OR: [
         { externalSource: null },
-        { externalSource: { not: 'firebird' } },
+        { externalSource: { notIn: LCD_OFFICIAL_SOURCES } },
       ],
     });
   }

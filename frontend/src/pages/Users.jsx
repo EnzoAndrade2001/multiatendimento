@@ -1,25 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BadgeCheck, Pencil, Plus, Search, Shield, Trash2, UserRound, UserX, X } from 'lucide-react';
 import { toast } from '../utils/toast';
-import api, { getUsers, createUser, updateUser, deleteUser, getTeams, uploadUserAvatar, removeUserAvatar } from '../services/api';
+import { getUsers, createUser, updateUser, deleteUser, getTeams, uploadUserAvatar, removeUserAvatar } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import ActionButton from '../components/ui/ActionButton';
 import { ACCESS_PROFILES, PERMISSION_GROUPS, PERMISSION_LABELS } from '../auth/permissions';
 import UserAvatar from '../components/ui/UserAvatar';
 
-const EMPTY_FORM = { name: '', email: '', password: '', phone: '', role: 'agent', active: true, firebirdSupportName: '', accessProfile: 'agent', permissions: ACCESS_PROFILES.agent.permissions, homePage: '/inbox' };
+const EMPTY_FORM = { name: '', email: '', password: '', phone: '', role: 'agent', active: true, accessProfile: 'agent', permissions: ACCESS_PROFILES.agent.permissions, homePage: '/inbox' };
 const HOME_PAGES = [
   { value: '/dashboard', label: 'Dashboard', permission: 'dashboard.view' },
   { value: '/inbox', label: 'Atendimento', permission: 'inbox.view' },
   { value: '/crm', label: 'CRM', permission: 'crm.view' },
-  { value: '/billing-reports', label: 'Relatórios de cobrança', permission: 'billing.view' },
   { value: '/settings', label: 'Minha conta', permission: null },
 ];
 
 export default function Users() {
   const [users, setUsers] = useState([]);
   const [, setTeams] = useState([]);
-  const [technicians, setTechnicians] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -36,14 +34,12 @@ export default function Users() {
   async function load() {
     setLoading(true);
     try {
-      const [{ data: uData }, { data: tData }, { data: techsData }] = await Promise.all([
+      const [{ data: uData }, { data: tData }] = await Promise.all([
         getUsers(), 
         getTeams(),
-        api.get('/os/technicians').catch(() => ({ data: [] }))
       ]);
       setUsers(uData);
       setTeams(tData);
-      setTechnicians(techsData);
     } catch (err) {
       toast.error('Não foi possível carregar os usuários. Recarregue a página.');
     } finally {
@@ -55,7 +51,7 @@ export default function Users() {
     if (user) {
       setModal(user);
       const accessProfile = user.accessProfile || (user.role === 'admin' ? 'admin' : 'agent');
-      setForm({ name: user.name, email: user.email, password: '', phone: user.phone || '', avatarUrl: user.avatarUrl || '', role: user.role, active: user.active, firebirdSupportName: user.firebirdSupportName || '', accessProfile, permissions: Array.isArray(user.permissions) ? user.permissions : ACCESS_PROFILES[accessProfile]?.permissions || [], homePage: user.homePage || ACCESS_PROFILES[accessProfile]?.homePage || '/inbox' });
+      setForm({ name: user.name, email: user.email, password: '', phone: user.phone || '', avatarUrl: user.avatarUrl || '', role: user.role, active: user.active, accessProfile, permissions: Array.isArray(user.permissions) ? user.permissions : ACCESS_PROFILES[accessProfile]?.permissions || [], homePage: user.homePage || ACCESS_PROFILES[accessProfile]?.homePage || '/inbox' });
       return;
     }
 
@@ -397,15 +393,6 @@ export default function Users() {
                   </select>
                 </div>
 
-                <div style={s.field}>
-                  <label style={s.label}>Atendente ILUX WEB (Nome Exato)</label>
-                  <select style={s.input} value={form.firebirdSupportName} onChange={(e) => setForm({ ...form, firebirdSupportName: e.target.value })}>
-                    <option value="">Nenhum / Mesmo do sistema</option>
-                    {technicians.map(t => (
-                      <option key={t.id} value={t.name}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
               <section style={s.permissionSection}>

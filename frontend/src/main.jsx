@@ -27,7 +27,6 @@ const QuickResponses = lazy(() => import('./pages/QuickResponses'));
 const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
 const LeadScraper = lazy(() => import('./pages/LeadScraper'));
 const RevGuard = lazy(() => import('./pages/RevGuard'));
-const BillingReports = lazy(() => import('./pages/BillingReports'));
 const Privacy = lazy(() => import('./pages/Privacy'));
 const Audit = lazy(() => import('./pages/Audit'));
 const IluxAssistant = lazy(() => import('./pages/IluxAssistant'));
@@ -217,7 +216,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/superadmin" element={<Navigate to="/suporte" replace />} />
             <Route path="/leads" element={<RequireAccess permission="leads.manage" feature="lead_generation"><LeadScraper /></RequireAccess>} />
             <Route path="/revenue" element={<RequireAccess permission="revenue.view" feature="ilux_sentinel"><RevGuard /></RequireAccess>} />
-            <Route path="/billing-reports" element={<RequireAccess permission="billing.view" feature="billing_reports"><BillingReports /></RequireAccess>} />
               <Route path="/privacy" element={<RequireFeature feature="privacy"><Privacy /></RequireFeature>} />
             <Route path="/audit" element={<RequireAccess permission="audit.view" feature="audit"><Audit /></RequireAccess>} />
             <Route path="/telemetry" element={<Navigate to="/revenue?area=parque&section=fila" replace />} />

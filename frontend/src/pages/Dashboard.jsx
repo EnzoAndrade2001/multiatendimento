@@ -98,7 +98,7 @@ export default function Dashboard() {
   const health = stats.health || { overall: 'unknown', services: {} };
   const healthStatus = healthStatusInfo(health.overall);
   const whatsappHealth = healthStatusInfo(health.services?.whatsapp?.status);
-  const firebirdHealth = healthStatusInfo(health.services?.firebird?.status);
+  const iluxWebHealth = healthStatusInfo(health.services?.iluxWeb?.status);
 
   return (
     <div style={s.container}>
@@ -143,7 +143,7 @@ export default function Dashboard() {
       <div style={s.healthRow} aria-label="Saúde das integrações">
         <span style={s.updatedAt}><Clock size={13} /> Atualizado às {formatDateTime(lastUpdatedAt)}</span>
         <span style={{ ...s.healthChip, ...whatsappHealth.chip }}><CheckCircle2 size={13} /> WhatsApp: {whatsappHealth.label}</span>
-        <span style={{ ...s.healthChip, ...firebirdHealth.chip }}><Database size={13} /> ILUX WEB: {firebirdHealth.label}</span>
+        <span style={{ ...s.healthChip, ...iluxWebHealth.chip }}><Database size={13} /> LCDDIGITALWEB: {iluxWebHealth.label}</span>
         <span style={s.queueHint}>Fila: {kpis.activeTickets || 0} abertas · {kpis.pendingTickets || 0} aguardando</span>
       </div>
 

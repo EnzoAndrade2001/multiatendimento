@@ -50,18 +50,14 @@ test('capacidades do modal refletem permissoes sem ampliar acesso', () => {
 });
 
 test('metadados de sincronizacao tem formato estavel e fallback seguro', () => {
-  const metadata = syncMetadata({
-    firebirdLastSyncStatus: 'online',
-    firebirdLastSyncAt: new Date('2026-08-21T12:00:00Z'),
-    firebirdLastSyncError: null,
-  });
-  assert.equal(metadata.source, 'firebird');
-  assert.equal(metadata.status, 'online');
+  const metadata = syncMetadata(null, new Date('2026-08-21T12:00:00Z'));
+  assert.equal(metadata.source, 'ilux_web');
+  assert.equal(metadata.status, 'ok');
   assert.equal(metadata.lastSyncedAt, '2026-08-21T12:00:00.000Z');
   assert.equal(metadata.error, null);
 
   assert.deepEqual(syncMetadata(null, '2026-08-20T10:00:00.000Z'), {
-    source: 'firebird', status: 'ok', lastSyncedAt: '2026-08-20T10:00:00.000Z', error: null,
+    source: 'ilux_web', status: 'ok', lastSyncedAt: '2026-08-20T10:00:00.000Z', error: null,
   });
 });
 

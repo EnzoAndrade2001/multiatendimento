@@ -2,32 +2,21 @@ const prisma = require('../lib/prisma');
 const { normalizePhoneNumber } = require('../services/evolutionService');
 const botPromptService = require('../services/botPromptService');
 const { filterSettingsOutput } = require('../auth/settingsAccess');
-const { getLatestCompanyProfile, getPendingCompanyRequest, getLatestCompanyRequest, requestCompanySync } = require('../services/companyProfileService');
+const { getLatestCompanyProfile, requestCompanySync } = require('../services/companyProfileService');
 const aiService = require('../services/aiService');
 const { encryptSecret } = require('../services/printGuardCrypto');
 
 async function getSettings(req, res) {
-  const [settings, firebirdCompany, pendingCompanyRequest, latestCompanyRequest] = await Promise.all([
+  const [settings, iluxCompany] = await Promise.all([
     prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } }),
     getLatestCompanyProfile(req.user.tenantId),
-    getPendingCompanyRequest(req.user.tenantId),
-    getLatestCompanyRequest(req.user.tenantId),
   ]);
-
-  const requestStatus = latestCompanyRequest?.payload?.status;
-  const requestFailed = requestStatus === 'failed' && (
-    !firebirdCompany || !latestCompanyRequest?.receivedAt || new Date(firebirdCompany.receivedAt) < new Date(latestCompanyRequest.receivedAt)
-  );
   const companySync = {
-    firebirdCompany,
-    firebirdCompanySyncStatus: pendingCompanyRequest
-      ? 'pending'
-      : requestFailed
-        ? 'failed'
-        : (firebirdCompany ? 'ok' : 'not_synced'),
-    firebirdCompanySyncRequestedAt: latestCompanyRequest?.payload?.requestedAt || null,
-    firebirdCompanySyncRequestId: pendingCompanyRequest?.id || null,
-    firebirdCompanySyncError: latestCompanyRequest?.payload?.error || null,
+    iluxCompany,
+    iluxCompanySyncStatus: iluxCompany ? 'ok' : 'not_synced',
+    iluxCompanySyncRequestedAt: iluxCompany?.syncedAt || null,
+    iluxCompanySyncRequestId: null,
+    iluxCompanySyncError: null,
   };
 
   if (!settings) return res.json(filterSettingsOutput(req.user, {
@@ -51,9 +40,9 @@ async function getSettings(req, res) {
   }));
 }
 
-async function syncCompanyFromFirebird(req, res) {
+async function syncCompanyFromIluxWeb(req, res) {
   const result = await requestCompanySync(req.user.tenantId, req.user.userId);
-  res.status(result.alreadyQueued ? 200 : 202).json({ ok: true, ...result });
+  res.json({ ok: true, ...result });
 }
 
 async function testAiProvider(req, res) {
@@ -97,16 +86,6 @@ async function saveSettings(req, res) {
     companyName, companyCnpj, companyIE, companyAddress, companyBairro, companyCep, companyPhone,
     companyCity, companyState, osAccentColor, osBarcodeEnabled,
     serpApiKey,
-    firebirdClientToken,
-    firebirdApiUrl,
-    firebirdApiKey,
-    firebirdAuthMode,
-    firebirdHealthPath,
-    firebirdContactsPath,
-    firebirdSyncEnabled,
-    firebirdLastSyncAt,
-    firebirdLastSyncStatus,
-    firebirdLastSyncError,
     plugBoletoEnabled, plugBoletoBaseUrl, plugBoletoPrintPath, plugBoletoCedenteCnpj, plugBoletoToken,
     statementRerenderEnabled,
     kpiContractValue, kpiServiceValue, kpiSlaLimitHours, kpiReincidentThreshold,
@@ -220,16 +199,6 @@ async function saveSettings(req, res) {
       osAccentColor: parsedOsAccentColor,
       osBarcodeEnabled: parsedOsBarcodeEnabled,
       serpApiKey,
-      firebirdClientToken,
-      firebirdApiUrl,
-      firebirdApiKey,
-      firebirdAuthMode,
-      firebirdHealthPath,
-      firebirdContactsPath,
-      firebirdSyncEnabled,
-      firebirdLastSyncAt: firebirdLastSyncAt ? new Date(firebirdLastSyncAt) : undefined,
-      firebirdLastSyncStatus,
-      firebirdLastSyncError,
       plugBoletoEnabled: parsedPlugBoletoEnabled,
       plugBoletoBaseUrl: parsedPlugBoletoBaseUrl,
       plugBoletoPrintPath: parsedPlugBoletoPrintPath,
@@ -277,16 +246,6 @@ async function saveSettings(req, res) {
       osAccentColor: parsedOsAccentColor,
       osBarcodeEnabled: parsedOsBarcodeEnabled,
       serpApiKey,
-      firebirdClientToken,
-      firebirdApiUrl,
-      firebirdApiKey,
-      firebirdAuthMode,
-      firebirdHealthPath,
-      firebirdContactsPath,
-      firebirdSyncEnabled,
-      firebirdLastSyncAt: firebirdLastSyncAt ? new Date(firebirdLastSyncAt) : undefined,
-      firebirdLastSyncStatus,
-      firebirdLastSyncError,
       plugBoletoEnabled: parsedPlugBoletoEnabled,
       plugBoletoBaseUrl: parsedPlugBoletoBaseUrl,
       plugBoletoPrintPath: parsedPlugBoletoPrintPath,
@@ -365,4 +324,4 @@ async function uploadLogo(req, res) {
   res.json({ url });
 }
 
-module.exports = { getSettings, saveSettings, testAiProvider, syncCompanyFromFirebird, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };
+module.exports = { getSettings, saveSettings, testAiProvider, syncCompanyFromIluxWeb, getSystemPromptPreview, getBusinessHours, saveBusinessHours, uploadLogo };

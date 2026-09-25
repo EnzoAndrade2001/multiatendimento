@@ -77,7 +77,7 @@ async function resolveStatement(tenantId, receivable = {}) {
   if (!or.length) return null;
 
   return prisma.crmBillingStatement.findFirst({
-    where: { tenantId, externalSource: 'firebird', OR: or },
+    where: { tenantId, externalSource: 'ilux_web', OR: or },
     include: { lines: { orderBy: { lineNo: 'asc' } } },
     orderBy: { syncedAt: 'desc' },
   });
@@ -103,7 +103,7 @@ async function loadCustomer(tenantId, receivable = {}, statement = {}, customerN
   let crmCustomer = null;
   if (externalId) {
     crmCustomer = await prisma.crmCustomer.findFirst({
-      where: { tenantId, externalSource: 'firebird', externalId: String(externalId) },
+      where: { tenantId, externalSource: 'ilux_web', externalId: String(externalId) },
       select: {
         name: true, fantasyName: true, cpfCnpj: true, address: true,
         neighborhood: true, city: true, state: true, zipCode: true, phone: true,
@@ -135,13 +135,13 @@ async function enrichLines(tenantId, lines = []) {
   const [contracts, equipments] = await Promise.all([
     contractIds.length
       ? prisma.crmContract.findMany({
-        where: { tenantId, externalSource: 'firebird', externalId: { in: contractIds } },
+        where: { tenantId, externalSource: 'ilux_web', externalId: { in: contractIds } },
         select: { externalId: true, number: true },
       })
       : [],
     equipIds.length
       ? prisma.crmEquipment.findMany({
-        where: { tenantId, externalSource: 'firebird', externalId: { in: equipIds } },
+        where: { tenantId, externalSource: 'ilux_web', externalId: { in: equipIds } },
         select: { externalId: true, assetTag: true, model: true, serialNumber: true },
       })
       : [],

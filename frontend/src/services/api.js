@@ -113,7 +113,7 @@ export const getAgentStatus = () => api.get('/settings/agent-status', {
 export const downloadAgent = () => api.get('/settings/agent-download', { responseType: 'blob', timeout: 120000 });
 export const saveSettings = (data) => api.post('/settings', data);
 export const testAiProvider = (data) => api.post('/settings/ai/test', data);
-export const syncCompanyFromFirebird = () => api.post('/settings/company/sync');
+export const syncCompanyFromIluxWeb = () => api.post('/settings/company/sync');
 export const getSystemPromptPreview = (systemPrompt) => api.post('/settings/system-prompt-preview', { systemPrompt });
 export const getBusinessHours = () => api.get('/settings/business-hours');
 export const saveBusinessHours = (data) => api.post('/settings/business-hours', data);
@@ -367,7 +367,7 @@ export const sendToLeads = (data) => api.post('/leads/send', data);
 
 export const deleteContact = (id) => api.delete(`/contacts/${id}`);
 
-// CRM Firebird
+// CRM LCDDIGITALWEB
 export const getCrmSummary = () => api.get('/crm/summary');
 export const getCrmCustomers = (params = {}) => api.get('/crm/customers', { params });
 export const exportCrmCustomers = (params = {}) => api.get('/crm/customers/export', { params, responseType: 'blob', timeout: 60000 });

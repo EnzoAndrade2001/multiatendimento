@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
+const { getCompanyProfileFromIluxWeb } = require('./iluxWebService');
 
 const COMPANY_ENTITY = 'companyInfo';
 const COMPANY_REQUEST_ENTITY = 'companyInfoRequest';
@@ -40,7 +41,7 @@ function normalizeCompanyProfile(record = {}) {
 
 async function getLatestCompanyProfile(tenantId) {
   const record = await prisma.externalSyncRecord.findFirst({
-    where: { tenantId, source: 'firebird', entity: COMPANY_ENTITY },
+    where: { tenantId, source: 'ilux_web', entity: COMPANY_ENTITY },
     orderBy: [{ receivedAt: 'desc' }, { syncedAt: 'desc' }],
     select: { id: true, externalId: true, payload: true, receivedAt: true, syncedAt: true },
   });
@@ -80,26 +81,25 @@ async function getLatestCompanyRequest(tenantId) {
 }
 
 async function requestCompanySync(tenantId, requestedBy) {
-  const pending = await getPendingCompanyRequest(tenantId);
-  if (pending) return { id: pending.id, status: 'pending', alreadyQueued: true };
-
+  const profile = await getCompanyProfileFromIluxWeb();
+  if (!profile || typeof profile !== 'object') {
+    throw new Error('O LCDDIGITALWEB não devolveu o cadastro da empresa.');
+  }
   const id = crypto.randomUUID();
+  const normalized = normalizeCompanyProfile(profile);
   await prisma.externalSyncRecord.create({
     data: {
       id,
       tenantId,
-      source: 'crm',
-      entity: COMPANY_REQUEST_ENTITY,
+      source: 'ilux_web',
+      entity: COMPANY_ENTITY,
+      // Cada sincronização gera um registro próprio; isso evita colisão na
+      // chave única quando a mesma empresa é sincronizada novamente.
       externalId: id,
-      payload: {
-        status: 'pending',
-        requestedAt: new Date().toISOString(),
-        requestedBy: requestedBy || null,
-      },
+      payload: { ...profile, requestedBy: requestedBy || null, syncedAt: new Date().toISOString() },
     },
   });
-
-  return { id, status: 'pending', alreadyQueued: false };
+  return { id, status: 'ok', alreadyQueued: false, profile: normalized };
 }
 
 module.exports = {

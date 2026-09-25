@@ -1,11 +1,12 @@
 const prisma = require('../lib/prisma');
 const { normalizeServiceOrderStatus, rawServiceOrderStatus } = require('../utils/serviceOrderStatus');
+const { LCD_OFFICIAL_SOURCES } = require('../utils/externalSource');
 
 async function reconcileServiceOrderStatuses(tenantId, { equipmentId = null, limit = 1000 } = {}) {
   const orders = await prisma.serviceOrder.findMany({
     where: {
       tenantId,
-      externalSource: 'firebird',
+      externalSource: { in: LCD_OFFICIAL_SOURCES },
       externalId: { not: null },
       status: { notIn: ['FINALIZADA', 'CANCELADA'] },
       ...(equipmentId ? { equipmentId } : {}),
@@ -17,7 +18,7 @@ async function reconcileServiceOrderStatuses(tenantId, { equipmentId = null, lim
   if (!orders.length) return { checked: 0, updated: 0 };
 
   const records = await prisma.externalSyncRecord.findMany({
-    where: { tenantId, source: 'firebird', entity: 'serviceOrders', externalId: { in: orders.map((order) => order.externalId) } },
+    where: { tenantId, source: 'ilux_web', entity: 'serviceOrders', externalId: { in: orders.map((order) => order.externalId) } },
     select: { externalId: true, payload: true },
   });
   const statuses = new Map();

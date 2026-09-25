@@ -6,7 +6,7 @@ const { normalizeProfile, normalizePermissionList, resolveUserAccess, resolveHom
 
 const publicUserSelect = {
   id: true, name: true, email: true, role: true, active: true, createdAt: true,
-  firebirdSupportName: true, accessProfile: true, permissions: true, homePage: true,
+  accessProfile: true, permissions: true, homePage: true,
   avatarUrl: true, phone: true,
 };
 
@@ -52,7 +52,7 @@ async function list(req, res) {
 }
 
 async function create(req, res) {
-  const { name, email, password, role, accessProfile, permissions, homePage, firebirdSupportName, phone } = req.body;
+  const { name, email, password, role, accessProfile, permissions, homePage, phone } = req.body;
 
   const tenant = await prisma.tenant.findUnique({ where: { id: req.user.tenantId } });
   const count = await prisma.user.count({ where: { tenantId: req.user.tenantId } });
@@ -79,7 +79,6 @@ async function create(req, res) {
       password: hash,
       ...requestedAccess,
       homePage: resolveHomePage(homePage, resolveUserAccess(requestedAccess)),
-      firebirdSupportName,
       ...(phone !== undefined ? { phone: evolutionService.normalizePhoneNumber(phone) || null } : {}),
     },
     select: publicUserSelect,
@@ -90,13 +89,12 @@ async function create(req, res) {
 
 async function update(req, res) {
   const { id } = req.params;
-  const { name, email, password, role, accessProfile, permissions, homePage, active, firebirdSupportName, phone } = req.body;
+  const { name, email, password, role, accessProfile, permissions, homePage, active, phone } = req.body;
 
   const data = {
     ...(name && { name }),
     ...(email && { email }),
     ...(active !== undefined && { active }),
-    ...(firebirdSupportName !== undefined && { firebirdSupportName }),
     ...(phone !== undefined ? { phone: evolutionService.normalizePhoneNumber(phone) || null } : {}),
   };
 
