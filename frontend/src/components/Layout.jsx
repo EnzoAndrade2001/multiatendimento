@@ -19,17 +19,11 @@ import {
   Zap,
   Bell,
   ChevronDown,
-  Radar,
-  Coins,
   Search,
   Command,
   X,
-  BarChart2,
-  ClipboardCheck,
-  Activity,
   LayoutGrid,
   AlertTriangle,
-  Bot,
 } from 'lucide-react';
 import { endSupportSession, getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
@@ -38,7 +32,7 @@ import ToastContainer from './ToastContainer';
 import InternalChatDrawer from './InternalChatDrawer';
 import { usePermissions } from '../auth/PermissionContext';
 
-const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm', '/revenue'];
+const PRIMARY_NAV_PATHS = ['/dashboard', '/inbox', '/crm'];
 
 // Ordem das seções no menu "Operação".
 const NAV_SECTION_ORDER = ['Clientes & conversas', 'Aquisição', 'Inteligência & gestão', 'Sistema'];
@@ -362,7 +356,6 @@ export default function Layout() {
     { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard', permission: 'dashboard.view', feature: 'dashboard', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/inbox', icon: <MessageSquare size={18} />, label: 'Chat', permission: 'inbox.view', feature: 'inbox', roles: ['admin', 'agent', 'superadmin'] },
     { to: '/crm', icon: <Database size={18} />, label: 'CRM', permission: 'crm.view', feature: 'crm', roles: ['admin', 'agent', 'superadmin'] },
-    { to: '/revenue', icon: <Coins size={18} />, label: 'ILUX WEB Sentinela', permission: 'revenue.view', feature: 'ilux_sentinel', roles: ['admin', 'superadmin'] },
     // Operação › Clientes & conversas
     { section: 'Clientes & conversas', action: () => setIsChatOpen(true), icon: <MessageCircle size={18} />, label: 'Chat Interno', permission: 'internal_chat.view', feature: 'internal_chat', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', feature: 'contacts', roles: ['admin', 'agent', 'superadmin'] },

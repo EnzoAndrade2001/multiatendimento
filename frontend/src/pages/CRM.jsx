@@ -45,8 +45,6 @@ import {
   getCrmCustomers,
   exportCrmCustomers,
   getCrmSummary,
-  getCrmFlaggedDocuments,
-  getCrmBillingAudit,
   prepareCrmReceivableDocument,
   sendCrmReceivableDocuments,
   sendOSManagerCopy,
@@ -55,7 +53,7 @@ import { toast } from '../utils/toast';
 import { usePermissions } from '../auth/PermissionContext';
 import { CrmContactActions, CrmEquipmentFilters, filterCrmEquipments } from '../components/CrmOperationalControls';
 
-const EMPTY_SUMMARY = { customers: 0, equipments: 0, linkedEquipments: 0, contractedEquipments: 0, activeContracts: 0, openServiceOrders: 0 };
+const EMPTY_SUMMARY = { customers: null, equipments: null, linkedEquipments: null, contractedEquipments: null, activeContracts: null, openServiceOrders: null };
 const CRM_PAGE_SIZE = 60;
 const CRM_VIEW_OPTIONS = [
   { id: 'all', label: 'Todos' },
@@ -92,29 +90,14 @@ export default function CRM() {
   const [modalResources, setModalResources] = useState({ base: 'idle', contracts: 'idle', os: 'idle', view360: 'idle' });
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  const [flaggedDocuments, setFlaggedDocuments] = useState([]);
-  const [flaggedSummary, setFlaggedSummary] = useState(null);
-  const [billingScanStatus, setBillingScanStatus] = useState(null);
-  const [billingAudit, setBillingAudit] = useState([]);
+  // Mantidos vazios apenas para não quebrar estilos antigos; o painel de
+  // documentos do agente não é mais alimentado nem exibido pelo CRM.
+  const [flaggedDocuments] = useState([]);
+  const [flaggedSummary] = useState(null);
+  const [billingScanStatus] = useState(null);
+  const [billingAudit] = useState([]);
   const [flaggedExpanded, setFlaggedExpanded] = useState(false);
-
   useEffect(() => { load(new URLSearchParams(window.location.search).get('q') || '', 1); }, []);
-  useEffect(() => {
-    // Reativo: só existe aqui o que alguém já tentou abrir e falhou (documento
-    // ambíguo ou ainda não localizado nas pastas). Usuário sem acesso financeiro
-    // recebe 403 do backend - o painel simplesmente não aparece para ele.
-    getCrmFlaggedDocuments()
-      .then((response) => {
-        setFlaggedDocuments(arrayOf(response.data?.items));
-        setFlaggedSummary(response.data?.summary || null);
-        setBillingScanStatus(response.data?.scanStatus || null);
-      })
-      .catch(() => {});
-    getCrmBillingAudit()
-      .then((response) => setBillingAudit(arrayOf(response.data?.items)))
-      .catch(() => {});
-  }, []);
-
   async function load(search = q, nextPage = 1, options = {}) {
     const activeView = options.viewFilter ?? viewFilter;
     const activeSort = options.sortBy ?? sortBy;
@@ -325,7 +308,7 @@ export default function CRM() {
       <div className="crm-stats" style={s.statsGrid}>
         <Stat icon={<Building2 size={19} />} label="Clientes" value={pick(summary, 'customers', 'totalCustomers')} />
         <Stat icon={<Printer size={19} />} label="Equipamentos cadastrados" value={pick(summary, 'equipments', 'totalEquipments')} />
-        <Stat icon={<ShieldCheck size={19} />} label="Equipamentos em contrato" value={pick(summary, 'contractedEquipments')} />
+        <Stat icon={<ShieldCheck size={19} />} label="Equipamentos em contratos ativos" value={pick(summary, 'contractedEquipments')} />
         <Stat icon={<FileText size={19} />} label="Contratos ativos" value={summary.contracts?.active ?? pick(summary, 'activeContracts')} />
         <Stat icon={<ClipboardList size={19} />} label="O.S. aguardando atendimento" value={summary.serviceOrders?.open ?? pick(summary, 'openServiceOrders', 'openOrders', 'serviceOrdersOpen')} tone="warning" />
         <Stat
@@ -336,7 +319,7 @@ export default function CRM() {
         />
       </div>
 
-      {(flaggedDocuments.length || billingAudit.length || billingScanStatus) ? (
+      {false ? (
         <div style={s.flaggedPanel}>
           <button type="button" style={s.flaggedHeader} onClick={() => setFlaggedExpanded((current) => !current)} aria-expanded={flaggedExpanded}>
             <span style={s.flaggedHeaderMain}>
@@ -989,6 +972,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
   // pode chegar aqui antes da visão 360 terminar de carregar em segundo plano.
   // Sem isso, o usuário via "Acesso restrito" por um instante antes dos dados reais.
   if (!financial && loading) return <div style={s.loadingInline}><RefreshCw size={16} className="spin" /> Carregando dados financeiros...</div>;
+  if (financial?.allowed && !financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Financeiro indisponivel" text={financial.sync?.error || 'Nao foi possivel sincronizar os titulos diretamente do ILUX WEB.'} />;
   if (!financial?.allowed) return <Empty icon={<CreditCard size={28} />} title="Acesso financeiro restrito" text={financial?.reason || 'Esta área está disponível apenas para administradores.'} />;
   if (!financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Aguardando sincronização financeira" text="Atualize a integração do ILUX WEB para carregar os títulos recentes." />;
 
@@ -1044,7 +1028,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
         const objectUrl = URL.createObjectURL(await fileResponse.blob());
         const link = document.createElement('a');
         link.href = objectUrl;
-        link.download = prepared.fileName || `${billingDocument.label} NF ${selected.invoiceNumber || selected.externalId}.pdf`;
+        link.download = prepared.fileName || `${billingDocument.label} ${receivableTitle(selected)}.pdf`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -1130,10 +1114,10 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
           <div style={s.emptyState}>Nenhum título {statusFilter === 'overdue' ? 'vencido' : statusFilter === 'open' ? 'em aberto' : statusFilter === 'paid' ? 'pago' : ''} para este cliente.</div>
         ) : null}
         {visibleItems.map((item) => (
-          <button key={item.externalId} type="button" style={s.financeItem} onClick={() => setSelected(item)} aria-label={`Ver detalhes da NF ${item.invoiceNumber || item.externalId}`}>
+          <button key={item.externalId} type="button" style={s.financeItem} onClick={() => setSelected(item)} aria-label={`Ver ${receivableTitle(item)}`}>
             <div style={s.financeIcon}><CreditCard size={17} /></div>
             <div style={s.financeMain}>
-              <strong>{item.invoiceNumber ? `NF ${item.invoiceNumber}` : `Título #${item.externalId}`}</strong>
+              <strong>{receivableTitle(item)}</strong>
               <span>Emissão: {formatShortDate(item.issuedAt) || '—'} · Vencimento: {formatShortDate(item.dueAt) || '—'}</span>
               <small>{[item.billingType, item.paymentMethod].filter(Boolean).join(' · ') || 'Detalhes financeiros'}</small>
             </div>
@@ -1149,8 +1133,8 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
           <section className="crm-finance-detail" style={s.financeDetailModal} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="finance-detail-title">
             <header style={s.financeDetailHeader}>
               <div>
-                <p style={s.detailKicker}>Título #{selected.externalId}</p>
-                <h3 id="finance-detail-title" style={s.financeDetailTitle}>{selected.invoiceNumber ? `Nota fiscal ${selected.invoiceNumber}` : 'Detalhes do título'}</h3>
+                <p style={s.detailKicker}>{receivableTitle(selected)}</p>
+                <h3 id="finance-detail-title" style={s.financeDetailTitle}>{selected.invoiceNumber ? `Nota fiscal ${selected.invoiceNumber}` : receivableTitle(selected)}</h3>
               </div>
               <button type="button" style={s.closeBtn} onClick={() => setSelected(null)} aria-label="Fechar detalhes"><X size={18} /></button>
             </header>
@@ -1598,7 +1582,8 @@ function Tab({ active, icon, label, onClick, disabled = false }) {
 }
 
 function Stat({ icon, label, value, formatted = false, tone }) {
-  return <div style={s.statCard}><div style={{ ...s.statIcon, ...(tone === 'warning' ? s.warningIcon : {}) }}>{icon}</div><div><div style={s.statLabel}>{label}</div><div style={s.statValue}>{formatted ? value : Number(value || 0).toLocaleString('pt-BR')}</div></div></div>;
+  const displayValue = value === null || value === undefined || value === '' ? '—' : (formatted ? value : Number(value).toLocaleString('pt-BR'));
+  return <div style={s.statCard}><div style={{ ...s.statIcon, ...(tone === 'warning' ? s.warningIcon : {}) }}>{icon}</div><div><div style={s.statLabel}>{label}</div><div style={s.statValue}>{displayValue}</div></div></div>;
 }
 
 function MiniStat({ icon, value, label, warning }) {
@@ -1707,7 +1692,7 @@ function isOrderClosed(order) {
 }
 
 function sumMonthlyValue(contracts) { return contracts.filter(isContractActive).reduce((sum, contract) => sum + Number(pick(contract, 'monthlyValue', 'value', 'amount') || 0), 0); }
-function formatCurrency(value) { const number = Number(value || 0); return number.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+function formatCurrency(value) { if (value === null || value === undefined || value === '') return '—'; const number = Number(value || 0); return number.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function formatHours(value) {
   if (value === null || value === undefined) return '—';
   const hours = Number(value);
@@ -1756,6 +1741,15 @@ function normalizeBillingDocuments(documents, receivable) {
       status: item?.status || (fallbackAvailability[definition.type] ? 'available' : 'unavailable'),
     };
   });
+}
+
+function receivableTitle(receivable) {
+  if (!receivable) return 'Título financeiro';
+  if (receivable.invoiceNumber) return `NF ${receivable.invoiceNumber}`;
+  if (receivable.documentNumber) return `Documento ${receivable.documentNumber}`;
+  if (receivable.hasBoleto && receivable.ourNumber) return `Boleto nº ${receivable.ourNumber}`;
+  if (receivable.description) return receivable.description;
+  return 'Título financeiro';
 }
 
 function documentLoadingPageHtml(label) {
@@ -1825,6 +1819,7 @@ function billingDocumentSourceLabel(source) {
   if (source === 'crm-rerender') return 'gerado pelo CRM';
   if (source === 'ilux-export-folder') return 'arquivo da pasta';
   if (source === 'plugboleto') return 'API do banco';
+  if (source === 'ilux_web') return 'ILUX WEB';
   return null;
 }
 

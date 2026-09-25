@@ -13,7 +13,6 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Inbox = lazy(() => import('./pages/Inbox'));
-const MyTasks = lazy(() => import('./pages/MyTasks'));
 const MockInbox = lazy(() => import('./pages/MockInbox'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const CRM = lazy(() => import('./pages/CRM'));
@@ -25,17 +24,13 @@ const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
 const Campaigns = lazy(() => import('./pages/Campaigns'));
 const QuickResponses = lazy(() => import('./pages/QuickResponses'));
 const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
-const LeadScraper = lazy(() => import('./pages/LeadScraper'));
-const RevGuard = lazy(() => import('./pages/RevGuard'));
-const BillingReports = lazy(() => import('./pages/BillingReports'));
-const Privacy = lazy(() => import('./pages/Privacy'));
-const Audit = lazy(() => import('./pages/Audit'));
-const IluxAssistant = lazy(() => import('./pages/IluxAssistant'));
 // Interceptor global para tratar erros de autenticacao (401)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const requestUrl = String(error.config?.url || '');
+    const isAuthenticationAttempt = /\/auth\/(login|support-login)(?:\?|$)/.test(requestUrl);
+    if (error.response?.status === 401 && !isAuthenticationAttempt) {
       localStorage.clear();
       window.location.href = window.location.pathname.startsWith('/suporte') ? '/suporte/login' : '/login';
     }
@@ -76,6 +71,10 @@ function RequireFeature({ feature, children }) {
 
 function RequireAccess({ permission, feature, children }) {
   return <RequirePermission permission={permission}><RequireFeature feature={feature}>{children}</RequireFeature></RequirePermission>;
+}
+
+function HiddenModuleRoute() {
+  return <Navigate to="/dashboard" replace />;
 }
 
 function LocalMockRoute() {
@@ -202,10 +201,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/dashboard" element={<RequireAccess permission="dashboard.view" feature="dashboard"><Dashboard /></RequireAccess>} />
             <Route index element={<RequireAccess permission="dashboard.view" feature="dashboard"><Dashboard /></RequireAccess>} />
             <Route path="/inbox" element={<RequireAccess permission="inbox.view" feature="inbox"><Inbox /></RequireAccess>} />
-            <Route path="/tasks" element={<RequireAccess permission="inbox.view" feature="inbox"><MyTasks /></RequireAccess>} />
+            <Route path="/tasks" element={<HiddenModuleRoute />} />
             <Route path="/contacts" element={<RequireAccess permission="crm.view" feature="contacts"><Contacts /></RequireAccess>} />
             <Route path="/crm" element={<RequireAccess permission="crm.view" feature="crm"><CRM /></RequireAccess>} />
-            <Route path="/assistente-ilux" element={<RequireAccess permission="ai.assistant.query" feature="ai_assistant"><IluxAssistant /></RequireAccess>} />
+            <Route path="/assistente-ilux" element={<HiddenModuleRoute />} />
             <Route path="/users" element={<RequirePermission permission="users.manage"><Users /></RequirePermission>} />
             <Route path="/teams" element={<RequirePermission permission="teams.manage"><Teams /></RequirePermission>} />
               <Route path="/settings" element={<RequireFeature feature="settings"><Settings /></RequireFeature>} />
@@ -215,12 +214,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/os" element={<Navigate to="/inbox" replace />} />
               <Route path="/quick-responses" element={<RequireAccess permission="quick_responses.manage" feature="quick_responses"><QuickResponses /></RequireAccess>} />
             <Route path="/superadmin" element={<Navigate to="/suporte" replace />} />
-            <Route path="/leads" element={<RequireAccess permission="leads.manage" feature="lead_generation"><LeadScraper /></RequireAccess>} />
-            <Route path="/revenue" element={<RequireAccess permission="revenue.view" feature="ilux_sentinel"><RevGuard /></RequireAccess>} />
-            <Route path="/billing-reports" element={<RequireAccess permission="billing.view" feature="billing_reports"><BillingReports /></RequireAccess>} />
-              <Route path="/privacy" element={<RequireFeature feature="privacy"><Privacy /></RequireFeature>} />
-            <Route path="/audit" element={<RequireAccess permission="audit.view" feature="audit"><Audit /></RequireAccess>} />
-            <Route path="/telemetry" element={<Navigate to="/revenue?area=parque&section=fila" replace />} />
+            <Route path="/leads" element={<HiddenModuleRoute />} />
+            <Route path="/revenue" element={<HiddenModuleRoute />} />
+            <Route path="/billing-reports" element={<HiddenModuleRoute />} />
+            <Route path="/privacy" element={<HiddenModuleRoute />} />
+            <Route path="/audit" element={<HiddenModuleRoute />} />
+            <Route path="/telemetry" element={<HiddenModuleRoute />} />
           </Route>
 
           <Route element={<SupportPrivateRoute><SupportLayout /></SupportPrivateRoute>}>

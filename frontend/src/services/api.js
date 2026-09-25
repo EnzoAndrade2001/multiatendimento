@@ -1,7 +1,9 @@
 import axios from 'axios';
 
-// BACKEND_URL é resolvido dinamicamente no navegador ou via VITE_API_URL.
-// Se estiver no Easypanel (*-frontend.*.easypanel.host), redireciona automaticamente para o backend correspondente.
+// Em produção usa a URL do backend via variável de ambiente ou resolução dinâmica
+const DEFAULT_PRODUCTION_API_URL = 'https://lcddigitalweb-multiatendimento-nova-backend.kna79u.easypanel.host';
+const LEGACY_PUBLIC_API_URL = 'https://api-crm.lcddigital.com.br';
+
 const resolveBackendUrl = () => {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
@@ -10,10 +12,14 @@ const resolveBackendUrl = () => {
       return `${proto}//${host.replace('-frontend.', '-backend.')}`;
     }
     if (host === 'crm.lcddigital.com.br') {
-      return 'https://api-crm.lcddigital.com.br';
+      const configured = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+      if (configured && configured !== LEGACY_PUBLIC_API_URL) {
+        return configured;
+      }
+      return DEFAULT_PRODUCTION_API_URL;
     }
   }
-  const envUrl = import.meta.env.VITE_API_URL;
+  const envUrl = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
   if (envUrl && !envUrl.includes('kra79u')) {
     return envUrl;
   }
@@ -21,7 +27,6 @@ const resolveBackendUrl = () => {
 };
 
 export const BACKEND_URL = resolveBackendUrl();
-
 const BASE_URL = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 const api = axios.create({ baseURL: BASE_URL });
 

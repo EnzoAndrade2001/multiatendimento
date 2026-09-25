@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import api, { updateContact, deleteContact, getEquipments, updateEquipment, deleteEquipment, BACKEND_URL } from '../services/api';
+import api, { BACKEND_URL, updateContact, deleteContact, getEquipments, updateEquipment, deleteEquipment } from '../services/api';
+
 import { toast } from '../utils/toast';
 import { Printer, FileText, User, Trash2, Edit3 } from 'lucide-react';
 import ActionButton from './ui/ActionButton';
