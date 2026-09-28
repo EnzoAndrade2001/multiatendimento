@@ -68,6 +68,28 @@ test('gera nomes legiveis e seguros para envio no WhatsApp', () => {
   assert.equal(_private.defaultFileName('boleto', receivable, 'Postál Digital'), 'BOLETO NF 14494 - POSTAL DIGITAL.pdf');
 });
 
+test('usa o host oficial do iLux para fatura e demonstrativo', (context) => {
+  const oldUrl = process.env.ILUX_WEB_URL;
+  context.after(() => {
+    if (oldUrl === undefined) delete process.env.ILUX_WEB_URL;
+    else process.env.ILUX_WEB_URL = oldUrl;
+  });
+  process.env.ILUX_WEB_URL = 'https://ilux-web.example.test/';
+  const receivable = {
+    faturaId: 'fat/001',
+    faturaUrl: 'http://api-interno.example.test/api/faturas/fat/001/fatura-locacao.pdf',
+    statementUrl: 'http://api-interno.example.test/api/faturas/fat/001/demonstrativo.pdf',
+  };
+  assert.equal(
+    _private.directDocumentUrl(receivable, 'fatura'),
+    'https://ilux-web.example.test/api/faturas/fat%2F001/fatura-locacao.pdf',
+  );
+  assert.equal(
+    _private.directDocumentUrl(receivable, 'statement'),
+    'https://ilux-web.example.test/api/faturas/fat%2F001/demonstrativo.pdf',
+  );
+});
+
 test('rejeita tipos de documento fora da lista permitida', () => {
   assert.throws(() => _private.assertDocumentType('contrato'), /Tipo de documento financeiro invalido/);
 });

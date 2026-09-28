@@ -162,6 +162,25 @@ async function syncOfficialEquipments(tenantId, customerId) {
   return { available: true, equipmentIds: officialIds };
 }
 
+const recentCustomerSyncMap = new Map();
+const SYNC_DEBOUNCE_MS = 2 * 60 * 1000;
+
+function shouldSkipCustomerSync(tenantId, customerId) {
+  const key = `${tenantId}:${customerId}`;
+  const lastSync = recentCustomerSyncMap.get(key);
+  const now = Date.now();
+  if (lastSync && now - lastSync < SYNC_DEBOUNCE_MS) {
+    return true;
+  }
+  recentCustomerSyncMap.set(key, now);
+  if (recentCustomerSyncMap.size > 1000) {
+    for (const [k, ts] of recentCustomerSyncMap.entries()) {
+      if (now - ts > 30 * 60 * 1000) recentCustomerSyncMap.delete(k);
+    }
+  }
+  return false;
+}
+
 async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
   try {
     const contact = await prisma.contact.findFirst({
@@ -170,6 +189,10 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
     
     if (!contact || !contact.crmCustomerId) {
       console.log(`[crmSyncService] Contato ${contactId} não está vinculado a um cliente CRM ou não existe.`);
+      return;
+    }
+
+    if (shouldSkipCustomerSync(tenantId, contact.crmCustomerId)) {
       return;
     }
 

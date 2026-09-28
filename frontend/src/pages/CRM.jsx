@@ -1597,7 +1597,7 @@ function TabSkeleton({ tab }) {
 }
 
 function ResourceError({ onRetry }) {
-  return <div style={s.resourceError}><AlertCircle size={24} /><strong>Não foi possível carregar esta aba.</strong><span>Os dados anteriores não foram considerados vazios.</span><button type="button" style={s.retryBtn} onClick={onRetry}>Tentar novamente</button></div>;
+  return <div style={s.resourceError}><AlertCircle size={24} /><strong>Não foi possível carregar esta aba.</strong><span>Não foi possível obter as informações no momento. Tente novamente.</span><button type="button" style={s.retryBtn} onClick={onRetry}>Tentar novamente</button></div>;
 }
 
 function Tab({ active, icon, label, onClick, disabled = false }) {

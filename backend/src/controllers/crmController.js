@@ -8,6 +8,7 @@ const {
   listReceivablesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
   getCustomer360FromIluxWeb,
+  getCrmSummaryFromIluxWeb,
 } = require('../services/iluxWebService');
 const {
   LCD_OFFICIAL_SOURCES,
@@ -631,31 +632,36 @@ async function findTenantCustomer(tenantId, id) {
 
 async function loadContracts(tenantId, customerExternalId) {
   if (!customerExternalId) return [];
-  const result = await listContractsFromIluxWeb(customerExternalId, { limit: 250 });
-  return result.items
-    .map((source) => ({
-      id: source.id || source.externalId || null,
-      externalId: first(source.externalId, source.id, source.contractNumber, source.number),
-      contractNumber: first(source.contractNumber, source.number, source.numero),
-      number: first(source.number, source.contractNumber, source.numero),
-      name: first(source.name, source.apelido, source.typeName, source.contractType, source.type),
-      type: first(source.type, source.typeName, source.contractType, source.apelido),
-      typeName: first(source.typeName, source.contractType, source.type, source.apelido),
-      status: source.status || null,
-      isActive: typeof source.isActive === 'boolean' ? source.isActive : contractIsActive(source.status, source.endsAt || source.endDate),
-      value: asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
-      monthlyValue: asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
-      fixedValue: asNumber(first(source.fixedValue, source.valorFixoMensal)) || 0,
-      franchiseValue: asNumber(first(source.franchiseValue, source.valorFranquia)) || 0,
-      totalValue: asNumber(source.totalValue) || asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
-      equipmentCount: Number(source.equipmentCount ?? source.equipmentsCount ?? (Array.isArray(source.equipments) ? source.equipments.length : 0)) || 0,
-      equipments: Array.isArray(source.equipments) ? source.equipments : [],
-      startsAt: asDate(first(source.startsAt, source.startDate, source.dataInicial)),
-      endsAt: asDate(first(source.endsAt, source.endDate, source.dataFinal)),
-      updatedAt: asDate(first(source.updatedAt, source.atualizadoEm, source.createdAt, source.criadoEm)),
-      source: 'ilux_web',
-    }))
-    .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  try {
+    const result = await listContractsFromIluxWeb(customerExternalId, { limit: 250 });
+    return (result?.items || [])
+      .map((source) => ({
+        id: source.id || source.externalId || null,
+        externalId: first(source.externalId, source.id, source.contractNumber, source.number),
+        contractNumber: first(source.contractNumber, source.number, source.numero),
+        number: first(source.number, source.contractNumber, source.numero),
+        name: first(source.name, source.apelido, source.typeName, source.contractType, source.type),
+        type: first(source.type, source.typeName, source.contractType, source.apelido),
+        typeName: first(source.typeName, source.contractType, source.type, source.apelido),
+        status: source.status || null,
+        isActive: typeof source.isActive === 'boolean' ? source.isActive : contractIsActive(source.status, source.endsAt || source.endDate),
+        value: asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
+        monthlyValue: asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
+        fixedValue: asNumber(first(source.fixedValue, source.valorFixoMensal)) || 0,
+        franchiseValue: asNumber(first(source.franchiseValue, source.valorFranquia)) || 0,
+        totalValue: asNumber(source.totalValue) || asNumber(first(source.monthlyValue, source.value, source.amount)) || 0,
+        equipmentCount: Number(source.equipmentCount ?? source.equipmentsCount ?? (Array.isArray(source.equipments) ? source.equipments.length : 0)) || 0,
+        equipments: Array.isArray(source.equipments) ? source.equipments : [],
+        startsAt: asDate(first(source.startsAt, source.startDate, source.dataInicial)),
+        endsAt: asDate(first(source.endsAt, source.endDate, source.dataFinal)),
+        updatedAt: asDate(first(source.updatedAt, source.atualizadoEm, source.createdAt, source.criadoEm)),
+        source: 'ilux_web',
+      }))
+      .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  } catch (error) {
+    console.warn(`[CRM 360] Falha ao consultar contratos do ILUX WEB para ${customerExternalId}:`, error.message);
+    return [];
+  }
 }
 
 function normalizeIluxWebEquipment(equipment, customerExternalId) {
@@ -751,13 +757,59 @@ async function loadCustomerOrders(tenantId, customer, limit = HISTORY_DEFAULT_LI
 
 async function getSummary(req, res) {
   const tenantId = req.user.tenantId;
+
+  // Consulta o resumo unificado oficial do LCDDIGITALWEB em uma única chamada rápida
+  try {
+    const officialSummary = await getCrmSummaryFromIluxWeb();
+    if (officialSummary) {
+      const customers = officialSummary.customers?.total ?? 0;
+      const equipments = officialSummary.equipments?.total ?? 0;
+      const contractedEquipments = officialSummary.equipments?.contracted ?? 0;
+      const activeEquipments = officialSummary.equipments?.active ?? 0;
+      const contractsTotal = officialSummary.contracts?.total ?? 0;
+      const contractsActive = officialSummary.contracts?.active ?? 0;
+      const monthlyRevenue = Number(officialSummary.contracts?.monthlyValue ?? 0);
+      const serviceOrdersTotal = officialSummary.serviceOrders?.total ?? 0;
+      const serviceOrdersOpen = officialSummary.serviceOrders?.open ?? 0;
+
+      return res.json({
+        customers,
+        equipments,
+        linkedEquipments: contractedEquipments,
+        activeEquipments,
+        contractedEquipments,
+        unlinkedEquipments: Math.max(0, equipments - contractedEquipments),
+        contracts: {
+          total: contractsTotal,
+          active: contractsActive,
+          value: monthlyRevenue,
+        },
+        serviceOrders: {
+          synced: serviceOrdersTotal,
+          local: serviceOrdersTotal,
+          open: serviceOrdersOpen,
+          closed: Math.max(0, serviceOrdersTotal - serviceOrdersOpen),
+        },
+        monthlyRevenue,
+        synchronization: {
+          source: 'ilux_web',
+          lastSyncAt: new Date().toISOString(),
+          status: 'live',
+          error: null,
+        },
+      });
+    }
+  } catch (err) {
+    console.warn('[CRM resumo] Falha ao consultar resumo unificado do ILUX WEB, usando fallback local:', err.message);
+  }
+
+  // Fallback local seguro (sem disparar tempestade de requisições de rede)
   const [
     customers,
     equipments,
     linkedEquipments,
     activeEquipments,
     activeEquipmentContractLinks,
-    contractCustomers,
     localServiceOrders,
     localServiceOrderCandidates,
   ] = await Promise.all([
@@ -769,7 +821,6 @@ async function getSummary(req, res) {
       where: { tenantId, externalSource: { in: LCD_EQUIPMENT_SOURCES }, isActive: true, contractExternalId: { not: null } },
       select: { contractExternalId: true },
     }),
-    prisma.crmCustomer.findMany({ where: { tenantId }, select: { externalId: true } }),
     prisma.serviceOrder.count({ where: { tenantId, externalSource: { in: LCD_SERVICE_ORDER_SOURCES } } }),
     prisma.serviceOrder.findMany({
       where: { tenantId, externalSource: { in: LCD_SERVICE_ORDER_SOURCES }, status: { not: 'FINALIZADA' } },
@@ -779,39 +830,17 @@ async function getSummary(req, res) {
 
   const localAwaitingServiceOrders = localServiceOrderCandidates.filter(isServiceOrderAwaitingAttendance).length;
 
-  const contractResults = await Promise.all(contractCustomers.map((customer) => (
-    loadContracts(tenantId, customer.externalId).catch((error) => {
-      console.warn(`[CRM resumo] Falha ao consultar contratos LCD para ${customer.externalId}:`, error.message);
-      return [];
-    })
-  )));
-  const contracts = contractResults.flat();
-  const activeContractIds = new Set(
-    contracts
-      .filter((contract) => contract.isActive)
-      .map((contract) => text(contract.externalId))
-      .filter(Boolean)
-  );
-  const contractedEquipments = activeEquipmentContractLinks.filter((equipment) => (
-    activeContractIds.has(text(equipment.contractExternalId))
-  )).length;
-  const contractMonthlyRevenue = contracts
-    .filter((contract) => contract.isActive)
-    .reduce((total, contract) => total + (contract.monthlyValue || contract.value || 0), 0);
-  const monthlyRevenue = contractMonthlyRevenue;
-
   res.json({
-    // Campos antigos mantidos para compatibilidade.
     customers,
     equipments,
     linkedEquipments,
     activeEquipments,
-    contractedEquipments,
+    contractedEquipments: activeEquipmentContractLinks.length,
     unlinkedEquipments: Math.max(0, equipments - linkedEquipments),
     contracts: {
-      total: contracts.length,
-      active: contracts.filter((contract) => contract.isActive).length,
-      value: contracts.reduce((total, contract) => total + (contract.value || 0), 0),
+      total: 0,
+      active: 0,
+      value: 0,
     },
     serviceOrders: {
       synced: localServiceOrders,
@@ -819,12 +848,12 @@ async function getSummary(req, res) {
       open: localAwaitingServiceOrders,
       closed: Math.max(0, localServiceOrders - localAwaitingServiceOrders),
     },
-    monthlyRevenue,
+    monthlyRevenue: 0,
     synchronization: {
-      source: 'ilux_web',
+      source: 'local_fallback',
       lastSyncAt: null,
-      status: 'live',
-      error: null,
+      status: 'degraded',
+      error: 'Resumo oficial do ILUX WEB temporariamente indisponível.',
     },
   });
 }
@@ -1310,6 +1339,8 @@ async function getCustomer360(req, res) {
   const customer = await findTenantCustomer(tenantId, req.params.id);
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado' });
 
+  try {
+
   // O LCD Digital Web e a fonte operacional oficial dos equipamentos. O
   // espelho do CRM pode estar vazio para clientes vinculados recentemente;
   // nesse caso consulte o cadastro 360 oficial antes de montar a resposta.
@@ -1614,6 +1645,24 @@ async function getCustomer360(req, res) {
     equipmentEvolution,
     alerts,
   });
+  } catch (error) {
+    console.error(`[CRM 360] Erro ao montar visão 360 para cliente ${customer.externalId || req.params.id}:`, error);
+    const cachedOfficialEquipments = (customer.equipments || []).filter((e) => isLcdOfficialEquipmentSource(e.externalSource));
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      sync: { source: 'ilux_web', status: 'error', error: error.message, lastSyncedAt: null },
+      capabilities: getCrmCapabilities(req.user),
+      sla: null,
+      equipments: cachedOfficialEquipments,
+      equipmentSync: { source: 'ilux_web', status: 'error', error: error.message, lastSyncedAt: null },
+      units: buildCustomerUnits({ ...customer, equipments: cachedOfficialEquipments }),
+      contacts: [],
+      quickActions: {},
+      financial: { allowed: true, synchronized: false, sync: { source: 'ilux_web', status: 'error', error: error.message }, totalOpen: 0, overdueAmount: 0, overdueCount: 0, nextReceivable: null, lastPayment: null, items: [] },
+      equipmentEvolution: [],
+      alerts: [],
+    });
+  }
 }
 
 async function getReceivableBoleto(req, res) {

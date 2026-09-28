@@ -5,6 +5,7 @@ const DEFAULT_CONTRACTS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
 const DEFAULT_DEFECT_TYPES_PATH = '/api/assistencia/os/integracao-crm/tipos-defeito';
 const DEFAULT_CUSTOMER_360_PATH = '/api/clientes';
+const DEFAULT_SUMMARY_PATH = '/api/assistencia/os/integracao-crm/resumo';
 const REQUEST_TIMEOUT_MS = Math.max(
   5000,
   Number.parseInt(process.env.ILUX_WEB_REQUEST_TIMEOUT_MS, 10) || 30000,
@@ -162,9 +163,17 @@ async function listDefectTypesFromIluxWeb() {
     .filter((item) => item.code && item.name && !item.inactive);
 }
 
+async function getCrmSummaryFromIluxWeb() {
+  if (!isIluxWebConfigured()) return null;
+  const path = process.env.ILUX_WEB_SUMMARY_PATH || DEFAULT_SUMMARY_PATH;
+  const data = await requestJson(path, { method: 'GET' });
+  return data?.summary || null;
+}
+
 module.exports = {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
+  getCrmSummaryFromIluxWeb,
   isIluxWebConfigured,
   listDefectTypesFromIluxWeb,
   listContractsFromIluxWeb,
