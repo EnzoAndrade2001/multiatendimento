@@ -375,12 +375,14 @@ export const getCrmSummary = () => api.get('/crm/summary');
 export const getCrmCustomers = (params = {}) => api.get('/crm/customers', { params });
 export const exportCrmCustomers = (params = {}) => api.get('/crm/customers/export', { params, responseType: 'blob', timeout: 60000 });
 export const getCrmCustomer = (id) => api.get(`/crm/customers/${id}`, { timeout: 10000 });
-export const getCrmCustomerContracts = (id) => api.get(`/crm/customers/${id}/contracts`, { timeout: 15000 });
+// Keep this above the backend integration timeout so a slow official LCD
+// response can still return the degraded/cache-backed profile.
+export const getCrmCustomerContracts = (id) => api.get(`/crm/customers/${id}/contracts`, { timeout: 40000 });
 export const getCrmCustomerServiceOrders = (id, options = 25) => {
   const params = typeof options === 'number' ? { limit: options } : options;
-  return api.get(`/crm/customers/${id}/service-orders`, { params, timeout: 15000 });
+  return api.get(`/crm/customers/${id}/service-orders`, { params, timeout: 40000 });
 };
-export const getCrmCustomer360 = (id) => api.get(`/crm/customers/${id}/360`, { timeout: 20000 });
+export const getCrmCustomer360 = (id) => api.get(`/crm/customers/${id}/360`, { timeout: 40000 });
 export const getCrmReceivableBoleto = (customerId, receivableId) => api.post(
   `/crm/customers/${customerId}/receivables/${receivableId}/boleto`,
   {},

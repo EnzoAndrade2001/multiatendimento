@@ -1334,9 +1334,45 @@ async function getCustomerServiceOrders(req, res) {
   });
 }
 
+function buildCustomer360Fallback(req, customer, error) {
+  const cachedOfficialEquipments = (customer?.equipments || [])
+    .filter((equipment) => isLcdOfficialEquipmentSource(equipment.externalSource));
+  const safeCustomer = {
+    address: customer?.address || null,
+    neighborhood: customer?.neighborhood || null,
+    city: customer?.city || null,
+    state: customer?.state || null,
+    equipments: cachedOfficialEquipments,
+  };
+  const message = error?.message || 'Visao 360 temporariamente indisponivel.';
+  const canViewFinancial = hasPermission(req.user, 'crm.financial.view');
+  return {
+    generatedAt: new Date().toISOString(),
+    sync: { source: 'ilux_web', status: 'error', error: message, lastSyncedAt: null },
+    capabilities: getCrmCapabilities(req.user),
+    sla: null,
+    equipments: cachedOfficialEquipments,
+    equipmentSync: { source: 'ilux_web', status: 'error', error: message, lastSyncedAt: null },
+    units: buildCustomerUnits(safeCustomer),
+    contacts: [],
+    quickActions: {},
+    financial: canViewFinancial
+      ? { allowed: true, synchronized: false, sync: { source: 'ilux_web', status: 'error', error: message }, totalOpen: 0, overdueAmount: 0, overdueCount: 0, nextReceivable: null, lastPayment: null, items: [] }
+      : { allowed: false, reason: 'Usuario sem permissao para visualizar informacoes financeiras.' },
+    equipmentEvolution: [],
+    alerts: [],
+  };
+}
+
 async function getCustomer360(req, res) {
   const tenantId = req.user.tenantId;
-  const customer = await findTenantCustomer(tenantId, req.params.id);
+  let customer;
+  try {
+    customer = await findTenantCustomer(tenantId, req.params.id);
+  } catch (error) {
+    console.error(`[CRM 360] Falha ao carregar o cadastro base ${req.params.id}:`, error);
+    return res.json(buildCustomer360Fallback(req, null, error));
+  }
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado' });
 
   try {
@@ -1647,21 +1683,7 @@ async function getCustomer360(req, res) {
   });
   } catch (error) {
     console.error(`[CRM 360] Erro ao montar visão 360 para cliente ${customer.externalId || req.params.id}:`, error);
-    const cachedOfficialEquipments = (customer.equipments || []).filter((e) => isLcdOfficialEquipmentSource(e.externalSource));
-    return res.json({
-      generatedAt: new Date().toISOString(),
-      sync: { source: 'ilux_web', status: 'error', error: error.message, lastSyncedAt: null },
-      capabilities: getCrmCapabilities(req.user),
-      sla: null,
-      equipments: cachedOfficialEquipments,
-      equipmentSync: { source: 'ilux_web', status: 'error', error: error.message, lastSyncedAt: null },
-      units: buildCustomerUnits({ ...customer, equipments: cachedOfficialEquipments }),
-      contacts: [],
-      quickActions: {},
-      financial: { allowed: true, synchronized: false, sync: { source: 'ilux_web', status: 'error', error: error.message }, totalOpen: 0, overdueAmount: 0, overdueCount: 0, nextReceivable: null, lastPayment: null, items: [] },
-      equipmentEvolution: [],
-      alerts: [],
-    });
+    return res.json(buildCustomer360Fallback(req, customer, error));
   }
 }
 

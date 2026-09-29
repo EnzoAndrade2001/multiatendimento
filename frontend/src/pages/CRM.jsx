@@ -169,9 +169,19 @@ export default function CRM() {
         getCrmCustomerServiceOrders(customer.id, 25),
         getCrmCustomer360(customer.id),
       ]);
-      const contracts = contractsResult.status === 'fulfilled' ? contractsResult.value.data?.items || [] : [];
-      const serviceOrders = ordersResult.status === 'fulfilled' ? ordersResult.value.data?.items || [] : [];
-      const customer360 = view360Result.status === 'fulfilled' ? view360Result.value.data || null : null;
+      // Keep the last usable snapshot when a complementary request fails.
+      // The customer list already contains official equipment data, so a
+      // transient 360 failure must not turn the whole profile into an empty
+      // error state.
+      const contracts = contractsResult.status === 'fulfilled'
+        ? contractsResult.value.data?.items || []
+        : arrayOf(fullCustomer.contracts, customer.contracts);
+      const serviceOrders = ordersResult.status === 'fulfilled'
+        ? ordersResult.value.data?.items || []
+        : arrayOf(fullCustomer.serviceOrders, customer.serviceOrders);
+      const customer360 = view360Result.status === 'fulfilled'
+        ? view360Result.value.data || null
+        : fullCustomer.customer360 || customer.customer360 || null;
       setModalResources({
         base: 'ready',
         contracts: contractsResult.status === 'fulfilled' ? 'ready' : 'error',
@@ -183,8 +193,10 @@ export default function CRM() {
         ...(current || fullCustomer),
         contracts,
         serviceOrders,
-        serviceOrdersPage: ordersResult.status === 'fulfilled' ? ordersResult.value.data : null,
-        customer360,
+        serviceOrdersPage: ordersResult.status === 'fulfilled'
+          ? ordersResult.value.data
+          : (current?.serviceOrdersPage || fullCustomer.serviceOrdersPage || null),
+        customer360: customer360 || current?.customer360 || null,
         operationalSummary: {
           ...(current?.operationalSummary || fullCustomer.operationalSummary || {}),
           contracts: contracts.length,
@@ -584,9 +596,15 @@ export function CrmCustomerProfileModal({ customerId, initialCustomer, initialTa
         getCrmCustomerServiceOrders(customerId, 25),
         getCrmCustomer360(customerId),
       ]);
-      const contracts = contractsResult.status === 'fulfilled' ? contractsResult.value.data?.items || [] : [];
-      const serviceOrders = ordersResult.status === 'fulfilled' ? ordersResult.value.data?.items || [] : [];
-      const customer360 = view360Result.status === 'fulfilled' ? view360Result.value.data || null : null;
+      const contracts = contractsResult.status === 'fulfilled'
+        ? contractsResult.value.data?.items || []
+        : arrayOf(fullCustomer?.contracts, initialCustomer?.contracts, customer?.contracts);
+      const serviceOrders = ordersResult.status === 'fulfilled'
+        ? ordersResult.value.data?.items || []
+        : arrayOf(fullCustomer?.serviceOrders, initialCustomer?.serviceOrders, customer?.serviceOrders);
+      const customer360 = view360Result.status === 'fulfilled'
+        ? view360Result.value.data || null
+        : fullCustomer?.customer360 || initialCustomer?.customer360 || customer?.customer360 || null;
       setResourceStatus({
         base: 'ready',
         contracts: contractsResult.status === 'fulfilled' ? 'ready' : 'error',
@@ -597,8 +615,10 @@ export function CrmCustomerProfileModal({ customerId, initialCustomer, initialTa
         ...(current || fullCustomer),
         contracts,
         serviceOrders,
-        serviceOrdersPage: ordersResult.status === 'fulfilled' ? ordersResult.value.data : null,
-        customer360,
+        serviceOrdersPage: ordersResult.status === 'fulfilled'
+          ? ordersResult.value.data
+          : (current?.serviceOrdersPage || fullCustomer?.serviceOrdersPage || null),
+        customer360: customer360 || current?.customer360 || null,
         operationalSummary: {
           ...(current?.operationalSummary || fullCustomer?.operationalSummary || {}),
           contracts: contracts.length,
@@ -648,8 +668,9 @@ function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoad
   // O LCDDIGITALWEB é a fonte única. Uma resposta oficial vazia continua
   // sendo válida: não podemos reexibir equipamentos antigos de fonte legada.
   const equipments = customer360.equipmentSync?.source === 'ilux_web'
+    && customer360.equipmentSync?.status !== 'error'
     ? arrayOf(customer360.equipments)
-    : [];
+    : arrayOf(customer.equipments);
   const contracts = arrayOf(customer.contracts);
   const serviceOrders = arrayOf(customer.serviceOrders, customer.orders, customer.osHistory);
   const serverFinancialAllowed = customer360.capabilities?.tabs?.financial;
@@ -661,6 +682,11 @@ function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoad
     && (typeof serverCanSendFinancial === 'boolean' ? serverCanSendFinancial : can('crm.financial.send'));
   const resourceForTab = { overview: 'view360', contracts: 'contracts', os: 'os', units: 'view360', contacts: 'view360', financial: 'view360' }[activeTab];
   const activeResourceStatus = loading ? 'loading' : (resourceForTab ? resourceStatus[resourceForTab] : 'ready');
+  // The base customer record is enough to keep the Summary usable while a
+  // complementary 360 request is temporarily unavailable.
+  const canRenderDegraded = !loading
+    && activeResourceStatus === 'error'
+    && (activeTab === 'overview' || (activeTab === 'equipments' && equipments.length > 0));
 
   useEffect(() => {
     if (financialAllowed === false && activeTab === 'financial') setActiveTab('overview');
@@ -710,14 +736,14 @@ function CustomerModal({ customer, activeTab, setActiveTab, loading, relatedLoad
         <div className="crm-profile-body" style={s.modalBody}>
           {activeResourceStatus === 'loading' ? <TabSkeleton tab={activeTab} /> : null}
           {!loading && error ? <div style={s.errorBox}><AlertCircle size={17} /><span style={{ flex: 1 }}>{error}</span><button type="button" style={s.retryBtn} onClick={onRetry}>Tentar novamente</button></div> : null}
-          {activeResourceStatus === 'error' ? <ResourceError onRetry={onRetry} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'overview' ? <OverviewTab customer={customer} equipments={equipments} contracts={contracts} serviceOrders={serviceOrders} customer360={customer360} onOpenConversation={onOpenConversation} onOpenServiceOrder={onOpenServiceOrder} setActiveTab={setActiveTab} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'units' ? <UnitsTab units={arrayOf(customer360.units)} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'contacts' ? <ContactsTab contacts={arrayOf(customer360.contacts)} quickActions={customer360.quickActions} onOpenConversation={onOpenConversation} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'equipments' ? <EquipmentsTab equipments={equipments} evolution={arrayOf(customer360.equipmentEvolution)} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'contracts' ? <ContractsTab contracts={contracts} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'financial' && financialAllowed ? <FinancialTab financial={customer360.financial} loading={relatedLoading} customerId={customer.id} ticketId={customer360.quickActions?.ticketId} canSend={canSendFinancial} /> : null}
-          {activeResourceStatus === 'ready' && activeTab === 'os' ? <OsTab customerId={customer.id} serviceOrders={serviceOrders} initialPage={customer.serviceOrdersPage} onRefresh={onRetry} /> : null}
+          {activeResourceStatus === 'error' && !canRenderDegraded ? <ResourceError onRetry={onRetry} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'overview' ? <OverviewTab customer={customer} equipments={equipments} contracts={contracts} serviceOrders={serviceOrders} customer360={customer360} onOpenConversation={onOpenConversation} onOpenServiceOrder={onOpenServiceOrder} setActiveTab={setActiveTab} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'units' ? <UnitsTab units={arrayOf(customer360.units)} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'contacts' ? <ContactsTab contacts={arrayOf(customer360.contacts)} quickActions={customer360.quickActions} onOpenConversation={onOpenConversation} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'equipments' ? <EquipmentsTab equipments={equipments} evolution={arrayOf(customer360.equipmentEvolution)} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'contracts' ? <ContractsTab contracts={contracts} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'financial' && financialAllowed ? <FinancialTab financial={customer360.financial} loading={relatedLoading} customerId={customer.id} ticketId={customer360.quickActions?.ticketId} canSend={canSendFinancial} /> : null}
+          {(activeResourceStatus === 'ready' || canRenderDegraded) && activeTab === 'os' ? <OsTab customerId={customer.id} serviceOrders={serviceOrders} initialPage={customer.serviceOrdersPage} onRefresh={onRetry} /> : null}
         </div>
 
         <footer style={s.modalFooter}>
