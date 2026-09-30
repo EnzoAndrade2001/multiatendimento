@@ -643,9 +643,17 @@ export default function Inbox() {
   async function handleTransfer(agentId, teamId, note) {
     try {
       await assignTicket(selectedId, agentId, teamId, note);
+      const transferredToMe = Boolean(agentId) && String(agentId) === String(me?.id);
+      const alreadyOnMineTab = tab === 'mine';
       setTransferModal(false);
       setSelectedId(null);
-      loadTickets();
+      if (transferredToMe && !alreadyOnMineTab) {
+        // A conversa foi assumida pelo usuário atual. Trocar a aba faz o
+        // efeito de mudança de tab recarregar a lista usando mine=true.
+        setTab('mine');
+      } else {
+        loadTickets();
+      }
       toast.success('Atendimento transferido!');
     } catch (e) { toast.error('Erro ao transferir: ' + (e.response?.data?.error || e.message)); }
   }
