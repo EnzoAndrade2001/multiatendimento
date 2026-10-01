@@ -80,6 +80,21 @@ class FinancialDocumentTests(unittest.TestCase):
                     "documentType": "invoice",
                 })
 
+    def test_fatura_alias_returns_the_requested_document_type(self):
+        official = {
+            "pdfBase64": base64.b64encode(b"%PDF-1.7 official").decode("ascii"),
+            "fileName": "NF 14494 - POSTAL DIGITAL.pdf",
+            "mimeType": "application/pdf",
+            "documentType": "invoice",
+        }
+        with patch.object(self.repo, "_fetch_billing_document_context", return_value=self.context), \
+             patch.object(self.repo, "_fetch_official_financial_document", return_value=official):
+            result = self.repo.fetch_billing_document({
+                "receivableExternalId": 18741,
+                "documentType": "fatura",
+            })
+        self.assertEqual(result["documentType"], "fatura")
+
     def test_unknown_document_type_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Tipo de documento invalido"):
             self.repo.fetch_billing_document({

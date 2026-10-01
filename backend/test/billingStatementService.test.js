@@ -60,12 +60,13 @@ test('renderStatementPdf: sem demonstrativo sincronizado -> 501', async (context
 });
 
 test('renderStatementPdf: caminho feliz -> PDF base64 do demonstrativo', async (context) => {
+  let statementQuery;
   patch(context, {
     settings: async () => ({
       statementRerenderEnabled: true, osAccentColor: '#1D4ED8',
       companyName: 'EMPRESA X', companyCnpj: '12.345.678/0001-90',
     }),
-    statement: async () => STATEMENT,
+    statement: async (args) => { statementQuery = args; return STATEMENT; },
   });
   const result = await svc.renderStatementPdf({ tenantId: 't1', receivable: RECEIVABLE, customerName: 'ACME LTDA' });
   assert.equal(result.documentType, 'statement');
@@ -75,6 +76,7 @@ test('renderStatementPdf: caminho feliz -> PDF base64 do demonstrativo', async (
   const pdf = Buffer.from(result.pdfBase64, 'base64');
   assert.ok(pdf.subarray(0, 4).equals(Buffer.from('%PDF')), 'deve comecar com %PDF');
   assert.ok(pdf.length > 800);
+  assert.deepEqual(statementQuery.where.externalSource, { in: ['firebird', 'ilux_web'] });
 });
 
 test('isStatementRerenderable: true so com flag ligada e demonstrativo presente', async (context) => {

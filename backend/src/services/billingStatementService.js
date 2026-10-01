@@ -11,6 +11,7 @@ const { getLatestCompanyProfile } = require('./companyProfileService');
 const { buildStatementDocDefinition } = require('../templates/statementTemplate');
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
+const STATEMENT_SOURCES = Object.freeze(['firebird', 'ilux_web']);
 let fontsReady = false;
 
 function billingError(message, statusCode = 502) {
@@ -77,7 +78,9 @@ async function resolveStatement(tenantId, receivable = {}) {
   if (!or.length) return null;
 
   return prisma.crmBillingStatement.findFirst({
-    where: { tenantId, externalSource: 'ilux_web', OR: or },
+    // O agente local grava os demonstrativos sincronizados como `firebird`.
+    // `ilux_web` fica aceito para preservar registros de instalações antigas.
+    where: { tenantId, externalSource: { in: STATEMENT_SOURCES }, OR: or },
     include: { lines: { orderBy: { lineNo: 'asc' } } },
     orderBy: { syncedAt: 'desc' },
   });

@@ -2002,22 +2002,28 @@ class FirebirdRepository:
         File names are deliberately ignored. The local index matches the PDF contents
         against the customer, document number, dates and amount stored in Firebird.
         """
-        document_type = str(payload.get("documentType") or "").strip().lower()
+        requested_document_type = str(payload.get("documentType") or "").strip().lower()
         aliases = {
             "bill": "boleto",
             "invoice": "invoice",
             "nf": "invoice",
+            # Em títulos legados, a fatura de locação é exportada pelo iLux
+            # com o mesmo PDF/indexador usado para a nota/fatura. Mantemos o
+            # tipo original no retorno para o callback do CRM aceitar o PDF.
+            "fatura": "invoice",
             "statement": "statement",
             "demonstrativo": "statement",
             "boleto": "boleto",
         }
-        document_type = aliases.get(document_type, document_type)
+        document_type = aliases.get(requested_document_type, requested_document_type)
         if document_type not in {"invoice", "statement", "boleto"}:
             raise ValueError("Tipo de documento invalido. Use invoice, statement ou boleto.")
 
         context = self._fetch_billing_document_context(payload)
         official = self._fetch_official_financial_document(document_type, context)
         if official:
+            if requested_document_type == "fatura":
+                official = {**official, "documentType": "fatura"}
             return official
 
         # The bank API remains a safe fallback for boletos that have not yet been
@@ -2028,7 +2034,7 @@ class FirebirdRepository:
         if document_type == "invoice":
             if not context.get("seqincnfs"):
                 raise ValueError("Nota fiscal nao vinculada a este titulo no iLux.")
-            label = "Nota/Fatura"
+            label = "Fatura" if requested_document_type == "fatura" else "Nota/Fatura"
         else:
             if not context.get("seqdemonstrativo"):
                 raise ValueError("Demonstrativo nao vinculado a este titulo no iLux.")
