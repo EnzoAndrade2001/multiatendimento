@@ -24,6 +24,7 @@ const scheduleProcessor = require('./services/scheduleProcessor');
 const campaignProcessor = require('./services/campaignProcessor');
 const printGuardScheduler = require('./services/printGuardScheduler');
 const { setIo: setIoWebhook } = require('./controllers/webhookController');
+const { setIo: setIoLcdWebEvents } = require('./controllers/lcdWebEventController');
 const { setIo: setIoTicket } = require('./controllers/ticketController');
 const { setIo: setIoInternal } = require('./controllers/internalMessageController');
 const campaignRoutes = require('./routes/campaignRoutes');
@@ -86,6 +87,7 @@ const io = new Server(server, {
 });
 
 setIoWebhook(io);
+setIoLcdWebEvents(io);
 setIoTicket(io);
 setIoInternal(io);
 setIoCampaign(io);
@@ -102,7 +104,10 @@ app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({
   limit: '100mb',
   verify(req, _res, buf) {
-    if (req.headers['x-printguard-signature'] || req.path === '/api/integrations/printguard/webhook') {
+    if (req.headers['x-printguard-signature']
+      || req.headers['x-lcd-web-signature']
+      || req.path === '/api/integrations/printguard/webhook'
+      || req.path === '/api/webhook/lcd-web/events') {
       req.rawBody = Buffer.from(buf);
     }
   },

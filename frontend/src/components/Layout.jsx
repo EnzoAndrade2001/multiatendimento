@@ -291,6 +291,13 @@ export default function Layout() {
       );
     });
 
+    // Alterações vindas do LCD Digital Web chegam ao CRM pelo backend e são
+    // redistribuídas como um evento leve. As telas interessadas refazem a
+    // consulta oficial; nenhum dado financeiro sensível é colocado no socket.
+    socket.on('lcd_web_update', (update) => {
+      window.dispatchEvent(new CustomEvent('lcd-web-update', { detail: update }));
+    });
+
     return () => {
       window.clearTimeout(notificationTimerRef.current);
       window.removeEventListener('user-profile-updated', onProfileUpdated);

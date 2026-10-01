@@ -97,8 +97,42 @@ export default function CRM() {
   const [billingScanStatus, setBillingScanStatus] = useState(null);
   const [billingAudit, setBillingAudit] = useState([]);
   const [flaggedExpanded, setFlaggedExpanded] = useState(false);
+  const selectedCustomerRef = React.useRef(null);
+  const activeTabRef = React.useRef(activeTab);
+  const loadRef = React.useRef(null);
+  const openCustomerRef = React.useRef(null);
+  const refreshTimerRef = React.useRef(null);
+
+  selectedCustomerRef.current = selectedCustomer;
+  activeTabRef.current = activeTab;
 
   useEffect(() => { load(new URLSearchParams(window.location.search).get('q') || '', 1); }, []);
+  useEffect(() => {
+    loadRef.current = load;
+    openCustomerRef.current = openCustomer;
+  });
+
+  useEffect(() => {
+    const onLcdWebUpdate = (event) => {
+      const update = event.detail || {};
+      const selected = selectedCustomerRef.current;
+      const affectsSelected = !update.customerExternalId
+        || String(update.customerExternalId) === String(selected?.externalId);
+
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = window.setTimeout(() => {
+        loadRef.current?.(q, page);
+        if (selected && affectsSelected) {
+          openCustomerRef.current?.(selected, activeTabRef.current);
+        }
+      }, 350);
+    };
+    window.addEventListener('lcd-web-update', onLcdWebUpdate);
+    return () => {
+      window.removeEventListener('lcd-web-update', onLcdWebUpdate);
+      window.clearTimeout(refreshTimerRef.current);
+    };
+  }, [q, page]);
   useEffect(() => {
     // Reativo: só existe aqui o que alguém já tentou abrir e falhou (documento
     // ambíguo ou ainda não localizado nas pastas). Usuário sem acesso financeiro
