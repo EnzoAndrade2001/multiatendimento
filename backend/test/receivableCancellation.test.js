@@ -26,6 +26,31 @@ test('titulo cancelado ou removido da origem nunca permanece em aberto', () => {
   assert.equal(cancelledStatus.status, 'cancelled');
 });
 
+test('titulo do LCD WEB nao exibe o UUID interno como nome', () => {
+  const normalized = normalizeReceivable({
+    id: '1b401d3a-f23b-42c4-bb27-9429c504af59',
+    externalId: '1b401d3a-f23b-42c4-bb27-9429c504af59',
+    seqReceita: 18741,
+    title: 'Locação mensal - Outubro/2026',
+    value: 388.82,
+    openValue: 388.82,
+  });
+
+  assert.equal(normalized.displayTitle, 'Locação mensal - Outubro/2026');
+  assert.notEqual(normalized.displayTitle, normalized.externalId);
+});
+
+test('titulo do LCD WEB usa o numero da receita quando nao ha nome comercial', () => {
+  const normalized = normalizeReceivable({
+    externalId: '1b401d3a-f23b-42c4-bb27-9429c504af59',
+    seqReceita: 18741,
+    value: 388.82,
+    openValue: 388.82,
+  });
+
+  assert.equal(normalized.displayTitle, 'Título #18741');
+});
+
 test('snapshot marca apenas titulos ausentes dentro da janela autoritativa', async (context) => {
   const originalFindMany = prisma.externalSyncRecord.findMany;
   const originalUpdate = prisma.externalSyncRecord.update;

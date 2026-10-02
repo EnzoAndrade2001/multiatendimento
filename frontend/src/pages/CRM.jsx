@@ -1745,11 +1745,26 @@ function normalizeBillingDocuments(documents, receivable) {
 
 function receivableTitle(receivable) {
   if (!receivable) return 'Título financeiro';
+  if (receivable.displayTitle && !containsUuid(receivable.displayTitle)) return receivable.displayTitle;
   if (receivable.invoiceNumber) return `NF ${receivable.invoiceNumber}`;
   if (receivable.documentNumber) return `Documento ${receivable.documentNumber}`;
   if (receivable.hasBoleto && receivable.ourNumber) return `Boleto nº ${receivable.ourNumber}`;
-  if (receivable.description) return receivable.description;
+  const sourceTitle = [
+    receivable.title,
+    receivable.titulo,
+    receivable.name,
+    receivable.nome,
+    receivable.label,
+    receivable.description,
+  ].find((value) => value && !containsUuid(value));
+  if (sourceTitle) return String(sourceTitle).trim();
+  const titleNumber = receivable.titleNumber || receivable.tituloNumero || receivable.numeroTitulo || receivable.number || receivable.numero || receivable.seqReceita || receivable.seqreceita;
+  if (titleNumber && !containsUuid(titleNumber)) return `Título #${titleNumber}`;
   return 'Título financeiro';
+}
+
+function containsUuid(value) {
+  return /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(String(value || ''));
 }
 
 function documentLoadingPageHtml(label) {

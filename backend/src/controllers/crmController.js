@@ -188,6 +188,18 @@ function isTruthyIntegrationFlag(value) {
   return ['1', 'S', 'SIM', 'Y', 'YES', 'TRUE'].includes(String(value ?? '').trim().toUpperCase());
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+function firstHumanText(...values) {
+  for (const value of values) {
+    const normalized = text(value);
+    if (normalized && !isUuid(normalized)) return normalized;
+  }
+  return null;
+}
+
 function receivableIsCancelled(record) {
   const payload = record?.payload || record || {};
   const statusCode = String(rawValue(payload, 'statusCode', 'cd_receita_status') || '').trim().toUpperCase();
@@ -203,6 +215,10 @@ function receivableIsCancelled(record) {
 
 function normalizeReceivable(record) {
   const payload = record?.payload || record || {};
+  const externalId = first(
+    record?.externalId,
+    rawValue(payload, 'externalId', 'seqreceita', 'seqReceita', 'receivableId', 'receivableExternalId'),
+  );
   const dueAt = asCalendarDate(rawValue(payload, 'dueAt', 'dtvectorec'));
   const paidAt = asCalendarDate(rawValue(payload, 'paidAt', 'dtpagtorec'));
   const value = asNumber(rawValue(payload, 'value', 'valreceita')) || 0;
@@ -211,10 +227,35 @@ function normalizeReceivable(record) {
   const isCancelled = receivableIsCancelled(record);
   const isPaid = Boolean(paidAt) || (value > 0 && openValue <= 0);
   const isOverdue = !isPaid && dueAt && dueAt < brazilCalendarToday();
+  const invoiceNumber = first(rawValue(payload, 'invoiceNumber', 'numnf'));
+  const documentNumber = first(rawValue(payload, 'documentNumber', 'numeroDocumento', 'numpedcli'));
+  const description = first(rawValue(payload, 'description', 'descricao', 'historico'));
+  const ourNumber = first(rawValue(payload, 'ourNumber', 'titulonossonumero', 'nossonumero'));
+  const hasBoleto = Boolean(
+    first(rawValue(payload, 'boletoId', 'id_boleto'), rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo'))
+    || String(first(rawValue(payload, 'paymentMethod', 'nmformapagto')) || '').toUpperCase().includes('BOLETO')
+  );
+  const titleNumber = first(rawValue(
+    payload,
+    'titleNumber', 'tituloNumero', 'numeroTitulo', 'number', 'numero', 'seqReceita', 'seqreceita',
+  ), externalId);
+  const titleText = firstHumanText(
+    rawValue(payload, 'title', 'titulo', 'name', 'nome', 'label'),
+    description,
+  );
+  const displayTitle = invoiceNumber
+    ? `NF ${invoiceNumber}`
+    : documentNumber
+      ? `Documento ${documentNumber}`
+      : hasBoleto && ourNumber
+        ? `Boleto nº ${ourNumber}`
+        : titleText
+          || (!isUuid(titleNumber) && titleNumber ? `Título #${titleNumber}` : 'Título financeiro');
   return {
     id: record?.id || null,
-    externalId: first(record?.externalId, rawValue(payload, 'externalId', 'seqreceita')),
-    clientExternalId: first(rawValue(payload, 'clientExternalId', 'cdcliente')),
+    externalId,
+    displayTitle,
+    clientExternalId: first(rawValue(payload, 'clientExternalId', 'cdCliente', 'cdcliente')),
     issuedAt: asCalendarDate(first(
       rawValue(payload, 'invoiceIssuedAt', 'dtemissaonfs'),
       rawValue(payload, 'issuedAt', 'dtemissaorec'),
@@ -224,10 +265,10 @@ function normalizeReceivable(record) {
     value,
     paidValue,
     openValue,
-    invoiceNumber: first(rawValue(payload, 'invoiceNumber', 'numnf')),
+    invoiceNumber,
     invoiceExternalId: first(rawValue(payload, 'invoiceExternalId', 'seqincnfs')),
-    documentNumber: first(rawValue(payload, 'documentNumber', 'numeroDocumento', 'numpedcli')),
-    description: first(rawValue(payload, 'description', 'descricao', 'historico')),
+    documentNumber,
+    description,
     origin: first(rawValue(payload, 'origin', 'origem')),
     invoiceValue: asNumber(rawValue(payload, 'invoiceValue', 'valtotalnfs')) || value,
     invoiceCancelled: isTruthyIntegrationFlag(rawValue(payload, 'invoiceCancelled', 'tfnfscancelada')),
@@ -244,13 +285,10 @@ function normalizeReceivable(record) {
     boletoStatus: first(rawValue(payload, 'boletoStatus', 'boleto_situacao')),
     boletoUrl: first(rawValue(payload, 'boletoUrl', 'urlboleto')),
     boletoPdfProtocol: first(rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo')),
-    ourNumber: first(rawValue(payload, 'ourNumber', 'titulonossonumero', 'nossonumero')),
+    ourNumber,
     digitableLine: first(rawValue(payload, 'digitableLine', 'titulolinhadigitavel', 'linha_digitavel')),
     barcode: first(rawValue(payload, 'barcode', 'titulocodigobarras')),
-    hasBoleto: Boolean(
-      first(rawValue(payload, 'boletoId', 'id_boleto'), rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo'))
-      || String(first(rawValue(payload, 'paymentMethod', 'nmformapagto')) || '').toUpperCase().includes('BOLETO')
-    ),
+    hasBoleto,
     statusLabel: first(rawValue(payload, 'statusLabel', 'ds_receita_status')),
     status: isCancelled ? 'cancelled' : isPaid ? 'paid' : isOverdue ? 'overdue' : 'open',
   };
