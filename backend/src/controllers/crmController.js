@@ -205,6 +205,9 @@ function receivableIsCancelled(record) {
   const statusCode = String(rawValue(payload, 'statusCode', 'cd_receita_status') || '').trim().toUpperCase();
   const status = [
     rawValue(payload, 'statusLabel', 'ds_receita_status'),
+    rawValue(payload, 'status', 'situation', 'situacao', 'statusReceita'),
+    rawValue(payload, 'faturaStatus', 'fatura_situacao'),
+    rawValue(payload, 'boletoStatus', 'boleto_situacao'),
     statusCode,
   ].filter(Boolean).join(' ').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
   return isTruthyIntegrationFlag(rawValue(payload, 'sourceDeleted'))

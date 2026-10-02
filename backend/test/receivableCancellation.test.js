@@ -26,6 +26,23 @@ test('titulo cancelado ou removido da origem nunca permanece em aberto', () => {
   assert.equal(cancelledStatus.status, 'cancelled');
 });
 
+test('titulo com fatura ou boleto cancelado nao permanece no financeiro', () => {
+  const cancelledBilling = normalizeReceivable({
+    externalId: '6eaeb6ea-bcdc-43cf-b9df-b1c2a059f4c2',
+    payload: {
+      value: 822,
+      openValue: 822,
+      statusCode: 'PENDENTE',
+      statusLabel: 'PENDENTE',
+      faturaStatus: 'CANCELADA',
+      boletoStatus: 'CANCELADO',
+    },
+  });
+
+  assert.equal(cancelledBilling.isCancelled, true);
+  assert.equal(cancelledBilling.status, 'cancelled');
+});
+
 test('titulo do LCD WEB nao exibe o UUID interno como nome', () => {
   const normalized = normalizeReceivable({
     id: '1b401d3a-f23b-42c4-bb27-9429c504af59',
