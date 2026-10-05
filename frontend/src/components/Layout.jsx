@@ -1105,22 +1105,3 @@ const styles = {
   },
   commandEmpty: { padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' },
 };
-color: 'var(--text-main)',
-  cursor: 'pointer',
-    fontFamily: 'inherit',
-      fontSize: '0.9rem',
-        fontWeight: 600,
-          textAlign: 'left',
-  },
-commandResultIcon: {
-  width: '32px',
-    height: '32px',
-      borderRadius: '9px',
-        display: 'inline-flex',
-          alignItems: 'center',
-            justifyContent: 'center',
-              color: 'var(--accent)',
-                background: 'var(--accent-light)',
-  },
-commandEmpty: { padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' },
-};
