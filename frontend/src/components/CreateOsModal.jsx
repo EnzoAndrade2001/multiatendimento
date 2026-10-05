@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api, { BACKEND_URL, getEquipments, getOpenOrdersForEquipment } from '../services/api';
-import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, LoaderCircle, MapPin, Printer, Wand2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, LoaderCircle, MapPin, Minus, Package, Plus, Printer, Trash2, Wand2 } from 'lucide-react';
 import EquipmentPickerModal, { equipmentAddress, equipmentOperationalLocation } from './EquipmentPickerModal';
 import { toast } from '../utils/toast';
 
@@ -23,11 +23,57 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const [formData, setFormData] = useState({ equipmentId: '', defect: '', cdOstp: '', cdDefeito: '', nmsuportet: '' });
   const [openOrders, setOpenOrders] = useState([]);
   const [checkingOpen, setCheckingOpen] = useState(false);
+  const [availableProducts, setAvailableProducts] = useState([]);
+  const [produtos, setProdutos] = useState([]);
+  const [produtoSearch, setProdutoSearch] = useState('');
+  const [produtoQtd, setProdutoQtd] = useState(1);
+  const [showProdDropdown, setShowProdDropdown] = useState(false);
   const formEditedRef = useRef(false);
 
   function updateFormData(updater) {
     formEditedRef.current = true;
     setFormData(updater);
+  }
+
+  function addProdutoItem(prodItem = null) {
+    const nome = (prodItem?.nome || produtoSearch).trim();
+    if (!nome) return;
+    const qtd = Math.max(1, parseInt(produtoQtd, 10) || 1);
+    const existingIndex = produtos.findIndex(
+      (p) => (prodItem?.id && p.produtoId === prodItem.id) || p.nome.toLowerCase() === nome.toLowerCase()
+    );
+    if (existingIndex >= 0) {
+      const next = [...produtos];
+      next[existingIndex].quantidade += qtd;
+      setProdutos(next);
+    } else {
+      setProdutos([
+        ...produtos,
+        {
+          produtoId: prodItem?.id || nome,
+          nome: prodItem?.nome || nome.toUpperCase(),
+          codigo: prodItem?.codigo || null,
+          tipo: prodItem?.tipo || 'SUPRIMENTO',
+          quantidade: qtd,
+        },
+      ]);
+    }
+    setProdutoSearch('');
+    setProdutoQtd(1);
+    setShowProdDropdown(false);
+  }
+
+  function removeProdutoItem(idx) {
+    setProdutos((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateProdutoQtd(idx, delta) {
+    setProdutos((prev) => {
+      const next = [...prev];
+      const n = Math.max(1, (next[idx].quantidade || 1) + delta);
+      next[idx] = { ...next[idx], quantidade: n };
+      return next;
+    });
   }
 
   const selectedEquipment = equipments.find((equipment) => equipment.id === formData.equipmentId);
@@ -97,17 +143,23 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         return;
       }
       
-      const [resEquips, resTypes, resTechs, resDefectTypes] = await Promise.all([
+      const [resEquips, resTypes, resTechs, resDefectTypes, resProducts] = await Promise.all([
         getEquipments(contactId),
         api.get('/os/types'),
         api.get('/os/technicians'),
-        api.get('/os/defect-types')
+        api.get('/os/defect-types'),
+        api.get('/os/products').catch(() => ({ data: { items: [] } })),
       ]);
 
       setEquipments(resEquips.data);
       setOsTypes(resTypes.data);
       setTechnicians(resTechs.data);
       setDefectTypes(resDefectTypes.data);
+      setAvailableProducts(
+        Array.isArray(resProducts.data?.items)
+          ? resProducts.data.items
+          : (Array.isArray(resProducts.data) ? resProducts.data : [])
+      );
       
       const foundType = resTypes.data.find(t => t.code === '01')
         || resTypes.data.find(t => t.name.toUpperCase().includes('CONTRAT'))
@@ -171,7 +223,14 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         defect: formData.defect,
         cdOstp: formData.cdOstp,
         cdDefeito: formData.cdDefeito,
-        nmsuportet: formData.nmsuportet
+        nmsuportet: formData.nmsuportet,
+        produtos: produtos.map((p) => ({
+          produtoId: p.produtoId,
+          nome: p.nome,
+          codigo: p.codigo,
+          tipo: p.tipo,
+          quantidade: p.quantidade,
+        })),
       });
       completeOrder(res.data);
     } catch (e) {
@@ -202,7 +261,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
 
   const s = {
     overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-    modal: { background: 'var(--bg-panel)', width: '500px', maxWidth: '95%', borderRadius: '16px', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column' },
+    modal: { background: 'var(--bg-panel)', width: '560px', maxWidth: '95%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column' },
     title: { fontSize: 'var(--text-lg)', fontWeight: 800, color: 'var(--text-main)', marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' },
     input: { width: '100%', padding: 'var(--space-3)', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', outline: 'none', marginBottom: 'var(--space-4)' },
     equipmentTrigger: { width: '100%', minHeight: '54px', padding: '10px 12px', marginBottom: 'var(--space-4)', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', cursor: 'pointer', display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '10px', textAlign: 'left' },
@@ -343,6 +402,212 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                 <option key={t.id} value={t.name}>{t.name}</option>
               ))}
             </select>
+
+            <div style={{ marginBottom: 'var(--space-4)', padding: '12px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <label style={{ ...s.label, marginBottom: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Package size={14} /> PEÇAS / TONERS UTILIZADOS (OPCIONAL)
+                </label>
+                {produtos.length > 0 && (
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontWeight: 700 }}>
+                    {produtos.reduce((acc, p) => acc + (p.quantidade || 1), 0)} un selecionada(s)
+                  </span>
+                )}
+              </div>
+
+              {/* Input de busca/digitação e quantidade */}
+              <div style={{ position: 'relative', display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <input
+                    type="text"
+                    style={{ ...s.input, marginBottom: 0, paddingRight: '28px' }}
+                    placeholder="Buscar ou digitar nome do toner / peça..."
+                    value={produtoSearch}
+                    onChange={(e) => {
+                      setProdutoSearch(e.target.value);
+                      setShowProdDropdown(true);
+                    }}
+                    onFocus={() => setShowProdDropdown(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addProdutoItem();
+                      }
+                    }}
+                  />
+                  {showProdDropdown && availableProducts.length > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        background: 'var(--bg-panel)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                        maxHeight: '180px',
+                        overflowY: 'auto',
+                        zIndex: 50,
+                        marginTop: '4px',
+                      }}
+                    >
+                      {availableProducts
+                        .filter((p) => !produtoSearch || p.nome?.toLowerCase().includes(produtoSearch.toLowerCase()) || p.codigo?.toLowerCase().includes(produtoSearch.toLowerCase()))
+                        .slice(0, 15)
+                        .map((prod) => (
+                          <div
+                            key={prod.id}
+                            style={{
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              borderBottom: '1px solid var(--border-color)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: 'var(--text-xs)',
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addProdutoItem(prod);
+                            }}
+                          >
+                            <div>
+                              <strong style={{ display: 'block', color: 'var(--text-main)' }}>{prod.nome}</strong>
+                              {prod.codigo && <span style={{ color: 'var(--text-muted)' }}>Cód: {prod.codigo} · {prod.tipo}</span>}
+                            </div>
+                            <span style={{ color: 'var(--accent)', fontWeight: 700 }}>+ Selecionar</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', width: '90px' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    style={{ ...s.input, marginBottom: 0, textAlign: 'center', padding: 'var(--space-2)' }}
+                    value={produtoQtd}
+                    onChange={(e) => setProdutoQtd(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    title="Quantidade"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  style={{
+                    background: 'var(--accent)',
+                    color: 'var(--text-inverse)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontWeight: 700,
+                    fontSize: 'var(--text-xs)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                  onClick={() => addProdutoItem()}
+                >
+                  <Plus size={14} /> Adicionar
+                </button>
+              </div>
+
+              {/* Lista de itens adicionados */}
+              {produtos.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                  {produtos.map((item, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 10px',
+                        background: 'var(--bg-panel)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        fontSize: 'var(--text-xs)',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1, marginRight: '8px' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-main)', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          {item.nome}
+                        </span>
+                        {item.codigo && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Cód: {item.codigo}</span>}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => updateProdutoQtd(idx, -1)}
+                          style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--bg-base)',
+                            color: 'var(--text-main)',
+                            borderRadius: '4px',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span style={{ fontWeight: 800, minWidth: '24px', textAlign: 'center', color: 'var(--text-main)' }}>
+                          {item.quantidade}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateProdutoQtd(idx, 1)}
+                          style={{
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--bg-base)',
+                            color: 'var(--text-main)',
+                            borderRadius: '4px',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Plus size={12} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => removeProdutoItem(idx)}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--danger)',
+                            padding: '4px',
+                            marginLeft: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                          title="Remover produto"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textAlign: 'center', padding: '6px 0' }}>
+                  Nenhum toner ou peça adicionado a esta O.S.
+                </div>
+              )}
+            </div>
 
             <label style={s.label}>RELATO DO CLIENTE (Extraído pela IA)</label>
             <textarea

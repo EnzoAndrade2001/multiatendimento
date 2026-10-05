@@ -60,6 +60,34 @@ function renderHistory(history) {
     </tr>`).join('');
 }
 
+function renderProdutos(produtos) {
+  if (!Array.isArray(produtos) || produtos.length === 0) return '';
+  const rows = produtos.map((p) => `
+    <tr>
+      <td style="width: 25mm; text-align: center;">${escapeHtml(p.codigo || '-')}</td>
+      <td>${escapeHtml(p.nome || 'Produto')}</td>
+      <td style="width: 25mm; text-align: center;">${escapeHtml(p.tipo || 'SUPRIMENTO')}</td>
+      <td style="width: 20mm; text-align: center; font-weight: bold;">${p.quantidade || 1}</td>
+    </tr>
+  `).join('');
+  return `
+    <div class="section-title section-title-red" style="margin-top: 2px;">Peças / Suprimentos Entregues</div>
+    <table class="produtos-table" style="margin-bottom: 2px;">
+      <thead>
+        <tr style="background: #f3f4f6; font-size: 11px;">
+          <th style="width: 25mm; text-align: center;">Código</th>
+          <th style="text-align: left;">Descrição da Peça / Toner</th>
+          <th style="width: 25mm; text-align: center;">Tipo</th>
+          <th style="width: 20mm; text-align: center;">Qtd</th>
+        </tr>
+      </thead>
+      <tbody style="font-size: 11px;">
+        ${rows}
+      </tbody>
+    </table>
+  `;
+}
+
 function renderOfficialOsTemplate(model) {
   // Cor de destaque por empresa (cabeçalho da marca + bandas "Descrição/Visita"
   // e "Follow-up/Ação"). O corpo do documento segue preto. Valor inválido volta
@@ -129,6 +157,8 @@ function renderOfficialOsTemplate(model) {
     .technical-note b { padding-top: 5px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
     .technical-note span { min-width: 0; font-size: 19px; line-height: 1.24; overflow-wrap: anywhere; }
     .followup { min-height: 8mm; }
+    .produtos-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 2px; }
+    .produtos-table th, .produtos-table td { border: 1px solid #111; padding: 2px 4px; font-size: 11px; line-height: 1.15; }
     .history-block { flex: 1 1 0 !important; min-height: 0; border: 1px solid #111; border-top: 0; padding: 3px; overflow: hidden; }
     .history-table { table-layout: fixed; }
     .history-table td { padding: 3px 4px; font-size: 11px; line-height: 1.14; }
@@ -203,6 +233,8 @@ function renderOfficialOsTemplate(model) {
 
     <div class="section-title section-title-red">Follow-up/Ação</div>
     <table class="followup"><tr><td class="spaced-cell">${model.followUp ? multiline(model.followUp) : '&nbsp;'}</td></tr></table>
+
+    ${renderProdutos(model.produtos)}
 
     <div class="section-title">HISTÓRICO DOS ÚLTIMOS CHAMADOS</div>
     <div class="history-block"><table class="history-table"><tbody>${renderHistory(model.history)}</tbody></table></div>

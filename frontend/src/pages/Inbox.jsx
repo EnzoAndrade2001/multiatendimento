@@ -158,7 +158,7 @@ export default function Inbox() {
     let active = true;
     getInstances()
       .then((res) => { if (active && Array.isArray(res.data)) setFallbackInstances(res.data); })
-      .catch(() => {});
+      .catch(() => { });
     return () => { active = false; };
   }, [contextInstances]);
   const instances = (Array.isArray(contextInstances) && contextInstances.length)
@@ -234,10 +234,10 @@ export default function Inbox() {
     messages,
     setMessages,
   } = useInboxMessages({
-      messagePageSize: MESSAGE_PAGE_SIZE,
-      historySearch,
-      scrollRef,
-      selectedId,
+    messagePageSize: MESSAGE_PAGE_SIZE,
+    historySearch,
+    scrollRef,
+    selectedId,
     selectedIdRef,
     setSummary,
     shouldScrollToBottomRef,
@@ -274,14 +274,14 @@ export default function Inbox() {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 44100, channelCount: 1 } 
+        audio: { sampleRate: 44100, channelCount: 1 }
       });
       const recorder = new MediaRecorder(stream);
       const chunks = [];
       recorder.ondataavailable = e => chunks.push(e.data);
       recorder.onstop = async () => {
-        const mimeType = MediaRecorder.isTypeSupported('audio/ogg; codecs=opus') 
-          ? 'audio/ogg; codecs=opus' 
+        const mimeType = MediaRecorder.isTypeSupported('audio/ogg; codecs=opus')
+          ? 'audio/ogg; codecs=opus'
           : MediaRecorder.isTypeSupported('audio/webm; codecs=opus')
             ? 'audio/webm; codecs=opus'
             : 'audio/webm';
@@ -575,7 +575,7 @@ export default function Inbox() {
       setText('');
       setFiles([]);
       setReplyingTo(null);
-      
+
       toast.info(`Enviando ${currentFiles.length} anexo(s) em segundo plano...`);
       (async () => {
         const failedFiles = [];
@@ -730,7 +730,7 @@ export default function Inbox() {
   // do backend nunca pode impedir que o atendente escolha a resposta rápida.
   const registerQuickResponseUse = useCallback((id) => {
     if (!id) return;
-    useQuickResponse(id).catch(() => {});
+    useQuickResponse(id).catch(() => { });
   }, []);
 
   const selectedTicket = useMemo(
@@ -809,15 +809,15 @@ export default function Inbox() {
     setSelectedId(id);
     if (isMobile) setView('chat');
     if (!isMobile && viewport.width <= 1199 && sidebarMode === 'auto') setNotebookListHidden(true);
-    
+
     // Zera o contador localmente para feedback imediato
     const ticket = tickets.find((item) => item.id === id);
     // Guarda uma copia do ticket seguindo o selecionado: se ele sair da lista
     // da aba atual (mudou de status/dono), a conversa nao some da tela.
     setDirectTicket(ticket || null);
     setTickets(prev => prev.map(t => t.id === id ? { ...t, unreadCount: 0, isUnread: false } : t));
-    if (ticket?.isUnread) updateTicketPreferences(id, { isUnread: false }).catch(() => {});
-    
+    if (ticket?.isUnread) updateTicketPreferences(id, { isUnread: false }).catch(() => { });
+
     // O backend ja zera ao chamar getMessages pelo useEffect do selectedId
   }, [selectedId, historySearch, isMobile, tickets, setTickets, viewport.width, sidebarMode]);
 
@@ -839,21 +839,21 @@ export default function Inbox() {
 
   if (!me) {
     return (
-      <div style={{ 
-        height: '100vh', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
+      <div style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
         background: 'var(--bg-surface)',
         color: 'var(--text-muted)',
         gap: 'var(--space-5)'
       }}>
-        <div className="loading-spinner" style={{ 
-          width: '40px', 
-          height: '40px', 
-          border: '4px solid var(--border-color)', 
-          borderTop: '4px solid var(--accent)', 
+        <div className="loading-spinner" style={{
+          width: '40px',
+          height: '40px',
+          border: '4px solid var(--border-color)',
+          borderTop: '4px solid var(--accent)',
           borderRadius: '50%',
           animation: 'spin 1s linear infinite'
         }} />
@@ -976,7 +976,7 @@ export default function Inbox() {
       {/* Main Chat */}
       <main
         className="inbox-main"
-        style={{ 
+        style={{
           ...s.main,
           display: (isMobile && view === 'list') ? 'none' : 'flex'
         }}
@@ -1059,13 +1059,13 @@ export default function Inbox() {
                 historySearch={historySearch}
                 isMobile={isMobile}
                 loading={loading}
-              loadingMoreMessages={loadingMoreMessages}
-              messages={messages}
-              onImageClick={openPreviewImage}
-              onHistorySearch={setHistorySearch}
-              scrollRef={scrollRef}
-              selectedTicket={selectedTicket}
-              setForwardingMessage={setForwardingMessage}
+                loadingMoreMessages={loadingMoreMessages}
+                messages={messages}
+                onImageClick={openPreviewImage}
+                onHistorySearch={setHistorySearch}
+                scrollRef={scrollRef}
+                selectedTicket={selectedTicket}
+                setForwardingMessage={setForwardingMessage}
                 setReplyingTo={setReplyingTo}
                 styles={s}
               />
@@ -1112,7 +1112,7 @@ export default function Inbox() {
             </InboxSectionErrorBoundary>
           </>
         ) : (
-            <div style={s.emptyChat}>
+          <div style={s.emptyChat}>
             <div style={s.emptyIcon}>Chat</div>
             <h2>Central de Atendimento</h2>
             <p>Selecione uma conversa para começar ou use um dos atalhos abaixo.</p>
@@ -1181,7 +1181,7 @@ export default function Inbox() {
           onConfirm={confirmReopen}
         />
       ) : null}
-      
+
       {showScheduling && (
         <div style={s.overlay} onClick={() => setShowScheduling(false)}>
           <div style={s.modal} onClick={e => e.stopPropagation()}>
@@ -1193,8 +1193,8 @@ export default function Inbox() {
                   {instances.filter(i => !String(i.instanceName).startsWith('DELETED_')).map(i => <option key={i.id} value={i.id}>{i.name || i.instanceName}{i.status !== 'connected' ? ' (desconectada)' : ''}</option>)}
                 </select>
               </label>
-              <textarea style={s.modalInput} placeholder="Texto da mensagem..." value={scheduleData.body} onChange={e => setScheduleData({...scheduleData, body: e.target.value})} />
-              <input style={s.modalInput} type="datetime-local" value={scheduleData.sendAt} onChange={e => setScheduleData({...scheduleData, sendAt: e.target.value})} />
+              <textarea style={s.modalInput} placeholder="Texto da mensagem..." value={scheduleData.body} onChange={e => setScheduleData({ ...scheduleData, body: e.target.value })} />
+              <input style={s.modalInput} type="datetime-local" value={scheduleData.sendAt} onChange={e => setScheduleData({ ...scheduleData, sendAt: e.target.value })} />
               <button style={s.saveBtn} onClick={handleSchedule}>Confirmar Agendamento</button>
               <ScheduledMessagesPanel contactId={ticket?.contactId} />
             </div>
@@ -1247,7 +1247,7 @@ export default function Inbox() {
 
 
       {transferModal && (can('inbox.assign') || can('inbox.transfer')) && (
-        <TransferModal 
+        <TransferModal
           users={users}
           teams={teams}
           onClose={() => setTransferModal(false)}
@@ -1311,12 +1311,12 @@ export default function Inbox() {
       )}
 
       {linkModal && (
-        <LinkContactModal 
+        <LinkContactModal
           onClose={() => setLinkModal(false)}
           onLink={async (targetId) => {
             try {
               const res = await api.patch(`/tickets/${selectedTicket.id}/link-contact`, { crmCustomerId: targetId });
-              loadTickets(); 
+              loadTickets();
               setUpdateTrigger(prev => prev + 1);
               setLinkModal(false);
               toast.success('Cliente vinculado com sucesso!');
@@ -1344,12 +1344,12 @@ export const inboxStyles = {
   sidebarCounter: { minWidth: '42px', height: '42px', borderRadius: 'var(--radius-md)', background: 'var(--rail-raise)', border: '1px solid var(--rail-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rail-ink)', fontWeight: 600, fontSize: '0.9rem' },
   tabsWrap: { padding: '0.85rem 1rem 0.75rem', borderBottom: '1px solid var(--rail-line)' },
   tabs: { display: 'flex', gap: '4px', background: 'var(--rail-raise)', padding: '4px', borderRadius: 'var(--radius-md)' },
-  tab: { 
-    flex: 1, 
-    padding: '0.55rem 0.4rem', 
-    border: 'none', 
-    background: 'none', 
-    cursor: 'pointer', 
+  tab: {
+    flex: 1,
+    padding: '0.55rem 0.4rem',
+    border: 'none',
+    background: 'none',
+    cursor: 'pointer',
     color: 'var(--rail-dim)',
     fontSize: '0.82rem',
     fontWeight: 600,
@@ -1365,7 +1365,7 @@ export const inboxStyles = {
   tabActive: { background: 'var(--rail-bg)', color: 'var(--rail-ink)', border: '1px solid var(--rail-line)', boxShadow: 'var(--shadow-xs)' },
   badge: {
     background: 'var(--rail-cyan)',
-    color: '#FFFFFF',
+    color: '#0B2B33',
     borderRadius: 'var(--radius-xs)',
     padding: '1px 6px',
     fontSize: '0.72rem',
@@ -1466,7 +1466,7 @@ export const inboxStyles = {
   headerMenuPanel: { position: 'absolute', top: 'calc(100% + 0.45rem)', right: 0, minWidth: '220px', background: 'var(--paper-raise)', border: '1px solid var(--paper-line)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)', padding: '0.4rem', zIndex: 20 },
   headerMenuItem: { width: '100%', border: 'none', background: 'transparent', color: 'var(--ink)', textAlign: 'left', padding: '0.7rem 0.8rem', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.55rem' },
   resolveBtn: { background: 'var(--brand-solid)', color: 'var(--brand-on-solid)', border: '1px solid var(--brand-solid)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', padding: '0 1rem', minHeight: '38px', boxShadow: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' },
-  
+
   messages: { flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', width: '100%', boxSizing: 'border-box' },
   loadMoreWrap: { display: 'flex', justifyContent: 'center', marginBottom: '0.15rem' },
   loadMoreBtn: { background: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '0.6rem 1rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.76rem' },
@@ -1536,7 +1536,7 @@ export const inboxStyles = {
   documentPreviewBadge: { minWidth: '84px', minHeight: '84px', borderRadius: 'var(--radius-lg)', background: 'var(--accent-light)', color: 'var(--accent)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', fontSize: '0.88rem', fontWeight: 800, letterSpacing: '0.06em' },
   documentPreviewLabel: { fontSize: '0.88rem', color: 'var(--text-muted)', fontWeight: 500, textAlign: 'center' },
   transcription: { fontSize: '0.85rem', fontStyle: 'italic', padding: '10px 14px', marginTop: 10, background: 'var(--border-light)', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)', userSelect: 'text', WebkitUserSelect: 'text' },
-  
+
   inputArea: { padding: '1rem 1.5rem', background: 'var(--paper-raise)', borderTop: '1px solid var(--paper-line)', width: '100%', boxSizing: 'border-box', position: 'relative', display: 'flex', flexDirection: 'column', gap: '0.75rem' },
   sendingStatus: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', minHeight: '28px', color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 700 },
   sendingStatusHint: { color: 'var(--text-dim)', fontWeight: 500 },
@@ -1572,7 +1572,7 @@ export const inboxStyles = {
   recordingDot: { width: 12, height: 12, borderRadius: '50%', background: 'var(--danger)', animation: 'pulse 1.5s infinite' },
   recordingTime: { color: 'var(--text-main)', fontWeight: 900, fontSize: '1.1rem', fontFamily: 'monospace' },
   stopBtn: { marginLeft: 'auto', background: 'var(--danger)', color: '#fff', border: 'none', padding: '0.6rem 1rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer' },
-  
+
   emptyChat: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.7rem', padding: '2rem', textAlign: 'center', color: 'var(--text-dim)', background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%)' },
   emptyIcon: { fontSize: '2.2rem', marginBottom: '0.25rem', opacity: 0.22, background: 'rgba(255,255,255,0.05)', padding: '1.25rem', borderRadius: '50%' },
   emptyQuickGrid: { width: 'min(100%, 620px)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.7rem', marginTop: '1rem' },
@@ -1583,7 +1583,7 @@ export const inboxStyles = {
   modal: { background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: '440px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-lg)' },
   modalHeader: { padding: '2rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   modalBody: { padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' },
-  modalInput: { width: '100%', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1rem', color: 'var(--text-main)', fontSize: '1rem', outline: 'none' },  saveBtn: { background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: '1rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer', fontSize: '1rem' },
+  modalInput: { width: '100%', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1rem', color: 'var(--text-main)', fontSize: '1rem', outline: 'none' }, saveBtn: { background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: '1rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer', fontSize: '1rem' },
 
   previewViewport: { width: '100vw', height: '100vh', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5.5rem 2rem 2rem', boxSizing: 'border-box', touchAction: 'none' },
   previewToolbar: { position: 'absolute', top: '1.5rem', right: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'var(--overlay-bg)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 'var(--radius-lg)', padding: '0.45rem 0.55rem', zIndex: 2, backdropFilter: 'blur(8px)' },
@@ -1594,7 +1594,7 @@ export const inboxStyles = {
   summaryCard: { margin: '0 1.5rem 1rem', background: 'var(--bg-msg-ai)', border: '1px solid var(--border-msg-ai)', borderRadius: 'var(--radius-md)', padding: '1rem 1.15rem' },
   summaryHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.72rem', fontWeight: 500, color: 'var(--text-msg-ai)', marginBottom: 10, letterSpacing: '0' },
   summaryBody: { fontSize: '0.92rem', color: 'var(--text-main)', lineHeight: '1.6' },
-  
+
   separator: { display: 'flex', alignItems: 'center', gap: '0.9rem', margin: '1.25rem 0 0.35rem' },
   sepLine: { flex: 1, height: '1px', background: 'var(--border-color)' },
   sepLabel: { fontFamily: 'var(--font-mono)', fontSize: '0.7rem', fontWeight: 500, padding: '0.3rem 0.7rem', borderRadius: 'var(--radius-pill)', color: 'var(--ink-faint)', background: 'var(--paper-raise)', letterSpacing: '0', textAlign: 'center', border: '1px solid var(--paper-line)' },
@@ -1605,7 +1605,7 @@ export const inboxStyles = {
   noteHeader: { display: 'flex', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', fontWeight: 500, color: 'var(--note-ink)', letterSpacing: '0' },
   noteBody: { fontSize: '0.92rem', color: 'var(--text-main)', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text', WebkitUserSelect: 'text' },
   noteTime: { fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'right', fontWeight: 500 },
-  
+
   infoPanelBackdrop: { position: 'absolute', inset: 0, zIndex: 190, border: 'none', padding: 0, background: 'rgba(5,8,14,0.48)', cursor: 'default' },
   infoPanel: { width: '356px', maxWidth: '100%', minWidth: 0, borderLeft: '1px solid var(--rail-line)', background: 'var(--rail-bg)', color: 'var(--rail-ink)', display: 'flex', flexDirection: 'column', boxShadow: 'none' },
   infoPanelHeader: { padding: '1.05rem 1.15rem', borderBottom: '1px solid var(--rail-line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' },

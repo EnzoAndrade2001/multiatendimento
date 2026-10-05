@@ -74,8 +74,8 @@ function getEvolutionErrorDetail(error) {
 async function sendText(url, key, instanceName, phone, text, quoted = null) {
   const client = getClient(url, key);
   try {
-    const payload = { 
-      number: phone, 
+    const payload = {
+      number: phone,
       text,
       linkPreview: false,
       options: { linkPreview: false }
@@ -222,7 +222,7 @@ async function sendMessage(url, key, instanceName, phone, body, quoted = null) {
 
 async function getMediaBase64(url, key, instanceName, messageKey) {
   const client = getClient(url, key);
-  
+
   // Lista de tentativas em ordem de probabilidade para Evolution v2
   const attempts = [
     { url: `/chat/getBase64FromMediaMessage/${instanceName}`, payload: { message: { key: messageKey } } },
@@ -254,7 +254,7 @@ async function saveMediaFile(base64, mimetype, messageId) {
   const extMap = {
     'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
     'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/opus': 'ogg', 'audio/webm': 'webm',
-    'application/pdf': 'pdf', 
+    'application/pdf': 'pdf',
     'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/3gpp': '3gp', 'video/webm': 'webm', 'video/x-matroska': 'mkv',
   };
   const ext = extMap[mainType] || (isAudio ? 'ogg' : 'bin');
@@ -325,13 +325,8 @@ async function getConnectionState(url, key, instanceName, options = {}) {
 // interno (ex.: http://<servico>:8000) quando houver rota interna verificada --
 // tira DNS/proxy/TLS/internet do caminho, que e onde os soluços acontecem.
 function getWebhookCallbackUrl() {
-  let envUrl = process.env.EVOLUTION_WEBHOOK_URL;
-  if (envUrl && envUrl.includes('multiatendimento-nova-backend')) {
-    envUrl = envUrl.replace('http://multiatendimento-nova-backend', 'http://lcddigitalweb_multiatendimento-nova-backend');
-  }
-
   const base = String(
-    envUrl
+    process.env.EVOLUTION_WEBHOOK_URL
     || process.env.PUBLIC_URL
     || `http://localhost:${process.env.PORT || 3002}`,
   ).replace(/\/+$/, '');
@@ -597,7 +592,7 @@ async function fetchInstanceInfo(url, key, instanceName) {
 async function revokeMessage(url, key, instanceName, remoteJid, messageId) {
   const client = getClient(url, key);
   const jid = remoteJid.includes('@') ? remoteJid : `${remoteJid}@s.whatsapp.net`;
-  
+
   // Tenta DELETE /chat/deleteMessageForEveryone (Evolution API v2+)
   try {
     const { data } = await client.delete(`/chat/deleteMessageForEveryone/${instanceName}`, {

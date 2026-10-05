@@ -50,8 +50,11 @@ async function login(req, res) {
     return res.status(401).json({ error: 'Este usuário não possui permissão para acessar esta empresa.' });
   }
 
-  // Se o login for feito sem slug (ex: /login padrão), o usuário autentica diretamente
-  // no seu respectivo tenant se estiver ativo.
+  // Se for um usuário comum tentando login global (sem slug), bloquear se não for superadmin
+  if (!slug && user.role !== 'superadmin') {
+    auditLogin(req, user, 'AUTH_LOGIN_FAILED', { reason: 'tenant_slug_required' });
+    return res.status(401).json({ error: 'Por favor, utilize o link de acesso exclusivo da sua empresa.' });
+  }
 
   if (req.supportOnly && user.role !== 'superadmin') {
     return res.status(401).json({ error: 'Acesso exclusivo da equipe de suporte.' });

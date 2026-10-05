@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import api, { BACKEND_URL } from '../services/api';
-import { Plus, Search, FileText, Settings, User, Calendar, X, Archive, History, MapPin, Hash, Clock, LoaderCircle } from 'lucide-react';
+import api from '../services/api';
+import { Plus, Search, FileText, Settings, User, Calendar, X, Archive, History, MapPin, Hash, Clock, LoaderCircle, Package } from 'lucide-react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { toast } from '../utils/toast';
+
+const BACKEND_URL = import.meta.env.VITE_API_URL || '';
 
 export default function ServiceOrders() {
   const isMobile = useIsMobile();
@@ -12,7 +14,7 @@ export default function ServiceOrders() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);
-  
+
   const [showModal, setShowModal] = useState(false);
   const [selectedOs, setSelectedOs] = useState(null);
   const [notes, setNotes] = useState('');
@@ -72,7 +74,7 @@ export default function ServiceOrders() {
     setDragOverCol(null);
     const osId = e.dataTransfer.getData('osId');
     const os = orders.find(o => o.id === osId);
-    
+
     // Se for arquivar/finalizar por drag, exige que já tenha nota
     if ((newStatus === 'FINALIZADA' || newStatus === 'ARQUIVADA') && (!os.technicalNotes || os.technicalNotes.length < 5)) {
       toast.error('Esta O.S. não pode ser fechada sem um Relatório Técnico. Abra a O.S. para preencher.');
@@ -188,20 +190,20 @@ export default function ServiceOrders() {
       <div style={s.header}>
         <div style={s.title}><FileText size={32} color="var(--accent)" /> Gestão de O.S.</div>
         <div style={s.filterBar}>
-          <div style={{display: 'flex', alignItems: 'center', gap: 'var(--space-2)'}}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <Calendar size={16} color="var(--text-muted)" />
-            <input type="date" style={s.dateInput} value={startDate} onChange={e=>setStartDate(e.target.value)} />
-            <span style={{color: 'var(--text-muted)'}}>até</span>
-            <input type="date" style={s.dateInput} value={endDate} onChange={e=>setEndDate(e.target.value)} />
+            <input type="date" style={s.dateInput} value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <span style={{ color: 'var(--text-muted)' }}>até</span>
+            <input type="date" style={s.dateInput} value={endDate} onChange={e => setEndDate(e.target.value)} />
           </div>
-          <div style={{width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 var(--space-2)'}} />
-          <div style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
-            <Search size={16} color="var(--text-muted)" style={{position: 'absolute', left: '10px'}} />
+          <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 var(--space-2)' }} />
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '10px' }} />
             <input
-              style={{...s.input, paddingLeft: 'var(--space-8)', width: isMobile ? '150px' : '220px'}}
+              style={{ ...s.input, paddingLeft: 'var(--space-8)', width: isMobile ? '150px' : '220px' }}
               placeholder="Nº O.S. ou Cliente..."
               value={search}
-              onChange={e=>setSearch(e.target.value)}
+              onChange={e => setSearch(e.target.value)}
             />
           </div>
           <button
@@ -220,13 +222,13 @@ export default function ServiceOrders() {
               gap: '6px'
             }}
           >
-            {isSearchMode ? <X size={14}/> : <History size={14}/>}
+            {isSearchMode ? <X size={14} /> : <History size={14} />}
             {isSearchMode ? 'Sair da Busca' : 'Histórico'}
           </button>
         </div>
       </div>
 
-      <div style={{display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-5)', flexWrap: 'wrap'}}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-5)', flexWrap: 'wrap' }}>
         <button
           onClick={() => setSearch('')}
           style={{
@@ -270,8 +272,8 @@ export default function ServiceOrders() {
 
       <div style={s.kanban}>
         {activeColumns.map(col => (
-          <div 
-            key={col.id} 
+          <div
+            key={col.id}
             style={{
               ...s.column,
               opacity: col.id === 'ARQUIVADA' ? 0.7 : 1,
@@ -284,7 +286,7 @@ export default function ServiceOrders() {
           >
             <div style={s.colHeader(col.color)}>
               {col.title}
-              <span style={{background: 'var(--bg-base)', padding: 'var(--space-1) var(--space-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--text-xs)', color: 'var(--text-main)', border: '1px solid var(--border-color)', fontVariantNumeric: 'tabular-nums'}}>
+              <span style={{ background: 'var(--bg-base)', padding: 'var(--space-1) var(--space-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--text-xs)', color: 'var(--text-main)', border: '1px solid var(--border-color)', fontVariantNumeric: 'tabular-nums' }}>
                 {(ordersByStatus[col.id] || []).length}
               </span>
             </div>
@@ -297,71 +299,71 @@ export default function ServiceOrders() {
                 const equipmentLabel = `${os.equipment?.manufacturer || ''} ${os.equipment?.model || ''}`.trim();
                 const printable = /^\d+$/.test(String(os.externalId || '')) && os.status !== 'ERRO_INTEGRACAO';
                 return (
-                <div
-                  key={os.id}
-                  style={s.card}
-                  draggable={os.status !== 'ARQUIVADA'}
-                  onDragStart={(e) => onDragStart(e, os.id)}
-                  onClick={() => openOsModal(os)}
-                >
-                  <div style={s.cardTitle}>
-                    <div style={{display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0}}>
-                      <span>{printable ? `#${os.externalId}` : 'Aguardando ILUX WEB'}</span>
-                      {printable ? <a
-                        href={`${BACKEND_URL}/api/os/${os.id}/pdf?token=${localStorage.getItem('token')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{color: 'var(--accent)', opacity: 0.7, display: 'flex', alignItems: 'center', padding: '4px', margin: '-4px'}}
-                        title="Abrir e imprimir O.S."
-                      >
-                        <FileText size={12} />
-                      </a> : null}
+                  <div
+                    key={os.id}
+                    style={s.card}
+                    draggable={os.status !== 'ARQUIVADA'}
+                    onDragStart={(e) => onDragStart(e, os.id)}
+                    onClick={() => openOsModal(os)}
+                  >
+                    <div style={s.cardTitle}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+                        <span>{printable ? `#${os.externalId}` : 'Aguardando ILUX WEB'}</span>
+                        {printable ? <a
+                          href={`${BACKEND_URL}/api/os/${os.id}/pdf?token=${localStorage.getItem('token')}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ color: 'var(--accent)', opacity: 0.7, display: 'flex', alignItems: 'center', padding: '4px', margin: '-4px' }}
+                          title="Abrir e imprimir O.S."
+                        >
+                          <FileText size={12} />
+                        </a> : null}
+                      </div>
+                      {os.status === 'FINALIZADA' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedOs(os); handleUpdate('ARQUIVADA'); }}
+                          disabled={saving}
+                          title="Arquivar O.S."
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.5 : 1 }}
+                        >
+                          <Archive size={14} />
+                        </button>
+                      )}
                     </div>
-                    {os.status === 'FINALIZADA' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedOs(os); handleUpdate('ARQUIVADA'); }}
-                        disabled={saving}
-                        title="Arquivar O.S."
-                        style={{background: 'none', border: 'none', color: 'var(--text-muted)', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.5 : 1}}
-                      >
-                        <Archive size={14} />
-                      </button>
+                    <div style={{ ...s.cardText, color: 'var(--text-main)', fontWeight: 800, fontSize: 'var(--text-md)', minWidth: 0 }}>
+                      <User size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={clientName}>{clientName}</span>
+                    </div>
+                    <div style={{ ...s.cardText, fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)' }}>Sol: {os.contact?.name}</div>
+                    <div style={{ ...s.cardText, minWidth: 0 }}>
+                      <Settings size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={equipmentLabel}>{equipmentLabel}</span>
+                    </div>
+                    <div style={{ ...s.cardText, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                      <Hash size={12} color="var(--accent)" /> {os.equipment?.serialNumber || 'S/N não inf.'}
+                    </div>
+                    <div style={s.cardDefect}>{os.defect}</div>
+
+                    {os.status === 'ARQUIVADA' ? (
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)', marginTop: 'var(--space-3)', background: 'var(--bg-base)', padding: 'var(--space-2)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                        <div>Fechada em: {new Date(os.closedAt || os.updatedAt).toLocaleString('pt-BR')}</div>
+                        <div>Por: {os.closedBy?.name || 'Sistema'}</div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginTop: 'var(--space-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>{os.user?.name || 'Atendente'}</span>
+                        <span style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          color: days >= 3 ? 'var(--danger)' : days >= 1 ? 'var(--warning)' : 'var(--text-dim)',
+                          fontWeight: days >= 3 ? 800 : 500
+                        }}>
+                          <Clock size={11} />
+                          {days === 0 ? 'hoje' : `${days}d`}
+                        </span>
+                      </div>
                     )}
                   </div>
-                  <div style={{...s.cardText, color: 'var(--text-main)', fontWeight: 800, fontSize: 'var(--text-md)', minWidth: 0}}>
-                    <User size={14} color="var(--accent)" style={{flexShrink: 0}}/>
-                    <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={clientName}>{clientName}</span>
-                  </div>
-                  <div style={{...s.cardText, fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)'}}>Sol: {os.contact?.name}</div>
-                  <div style={{...s.cardText, minWidth: 0}}>
-                    <Settings size={14} color="var(--accent)" style={{flexShrink: 0}}/>
-                    <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={equipmentLabel}>{equipmentLabel}</span>
-                  </div>
-                  <div style={{...s.cardText, fontSize: 'var(--text-xs)', color: 'var(--text-muted)'}}>
-                    <Hash size={12} color="var(--accent)"/> {os.equipment?.serialNumber || 'S/N não inf.'}
-                  </div>
-                  <div style={s.cardDefect}>{os.defect}</div>
-
-                  {os.status === 'ARQUIVADA' ? (
-                    <div style={{fontSize: 'var(--text-xs)', color: 'var(--accent)', marginTop: 'var(--space-3)', background: 'var(--bg-base)', padding: 'var(--space-2)', borderRadius: '4px', border: '1px solid var(--border-color)'}}>
-                      <div>Fechada em: {new Date(os.closedAt || os.updatedAt).toLocaleString('pt-BR')}</div>
-                      <div>Por: {os.closedBy?.name || 'Sistema'}</div>
-                    </div>
-                  ) : (
-                    <div style={{fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginTop: 'var(--space-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                      <span>{os.user?.name || 'Atendente'}</span>
-                      <span style={{
-                        display: 'flex', alignItems: 'center', gap: '4px',
-                        color: days >= 3 ? 'var(--danger)' : days >= 1 ? 'var(--warning)' : 'var(--text-dim)',
-                        fontWeight: days >= 3 ? 800 : 500
-                      }}>
-                        <Clock size={11} />
-                        {days === 0 ? 'hoje' : `${days}d`}
-                      </span>
-                    </div>
-                  )}
-                </div>
                 );
               })}
             </div>
@@ -373,72 +375,111 @@ export default function ServiceOrders() {
         <div style={s.overlay}>
           <div style={s.modal}>
             <div style={s.modalHeader}>
-              <div style={{display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0}}>
-                <FileText color="var(--accent)" size={24} style={{flexShrink: 0}} />
-                <h2 style={{color: 'var(--text-main)', margin: 0, fontSize: 'var(--text-xl)', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>O.S. #{selectedOs.id.substring(selectedOs.id.length - 6).toUpperCase()}</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}>
+                <FileText color="var(--accent)" size={24} style={{ flexShrink: 0 }} />
+                <h2 style={{ color: 'var(--text-main)', margin: 0, fontSize: 'var(--text-xl)', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>O.S. #{selectedOs.id.substring(selectedOs.id.length - 6).toUpperCase()}</h2>
               </div>
-              <button onClick={() => setShowModal(false)} aria-label="Fechar" style={{background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--text-sm)', flexShrink: 0}}>✕</button>
+              <button onClick={() => setShowModal(false)} aria-label="Fechar" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--text-sm)', flexShrink: 0 }}>✕</button>
             </div>
 
             <div style={s.modalContent}>
               <div style={s.sidebar}>
-                <h4 style={{color: 'var(--accent)', marginTop: 0, marginBottom: 'var(--space-4)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.1em'}}>DADOS DO CLIENTE</h4>
-                <div style={{marginBottom: 'var(--space-5)'}}>
-                  <div style={{color: 'var(--text-main)', fontWeight: 800, fontSize: 'var(--text-lg)', marginBottom: '4px', wordBreak: 'break-word'}}>{getClientName(selectedOs)}</div>
-                  <div style={{color: 'var(--text-muted)', fontSize: 'var(--text-sm)'}}>Solicitante: {selectedOs.contact?.name}</div>
-                  <div style={{color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-3)'}}><Hash size={12} style={{display: 'inline', marginRight: '4px'}}/> {selectedOs.equipment?.contact?.cpfCnpj || selectedOs.contact?.cpfCnpj || 'CNPJ não informado'}</div>
+                <h4 style={{ color: 'var(--accent)', marginTop: 0, marginBottom: 'var(--space-4)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>DADOS DO CLIENTE</h4>
+                <div style={{ marginBottom: 'var(--space-5)' }}>
+                  <div style={{ color: 'var(--text-main)', fontWeight: 800, fontSize: 'var(--text-lg)', marginBottom: '4px', wordBreak: 'break-word' }}>{getClientName(selectedOs)}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>Solicitante: {selectedOs.contact?.name}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-3)' }}><Hash size={12} style={{ display: 'inline', marginRight: '4px' }} /> {selectedOs.equipment?.contact?.cpfCnpj || selectedOs.contact?.cpfCnpj || 'CNPJ não informado'}</div>
                 </div>
 
-                <h4 style={{color: 'var(--accent)', marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)', textTransform: 'uppercase'}}>EQUIPAMENTO</h4>
-                <div style={{color: 'var(--text-main)', fontSize: 'var(--text-sm)', marginBottom: '4px', wordBreak: 'break-word'}}>{selectedOs.equipment?.model}</div>
-                <div style={{color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)'}}>Série: {selectedOs.equipment?.serialNumber}</div>
-                <div style={{color: 'var(--text-muted)', fontSize: 'var(--text-sm)', display: 'flex', gap: '4px'}}>
-                  <MapPin size={14} color="var(--accent)" style={{flexShrink: 0}} />
-                  <span style={{wordBreak: 'break-word'}}>{selectedOs.equipment?.address || selectedOs.contact?.address}</span>
+                <h4 style={{ color: 'var(--accent)', marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>EQUIPAMENTO</h4>
+                <div style={{ color: 'var(--text-main)', fontSize: 'var(--text-sm)', marginBottom: '4px', wordBreak: 'break-word' }}>{selectedOs.equipment?.model}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)' }}>Série: {selectedOs.equipment?.serialNumber}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', display: 'flex', gap: '4px' }}>
+                  <MapPin size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+                  <span style={{ wordBreak: 'break-word' }}>{selectedOs.equipment?.address || selectedOs.contact?.address}</span>
                 </div>
               </div>
 
-              <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', minWidth: 0}}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', minWidth: 0 }}>
                 <div>
-                  <label style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block'}}>Status da Ordem</label>
-                  <select style={{...s.input, width: '100%', height: '45px'}} value={status} onChange={e=>setStatus(e.target.value)}>
+                  <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block' }}>Status da Ordem</label>
+                  <select style={{ ...s.input, width: '100%', height: '45px' }} value={status} onChange={e => setStatus(e.target.value)}>
                     {columns.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                     <option value="ARQUIVADA">Arquivada</option>
                   </select>
                 </div>
 
                 <div>
-                  <label style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block'}}>Leitura de Contadores</label>
-                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)'}}>
-                     <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                       <span style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)'}}>P&B</span>
-                       <input style={{...s.input, padding: '12px'}} placeholder="000" value={meters.mono} onChange={e=>setMeters({...meters, mono: e.target.value})} />
-                     </div>
-                     <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                       <span style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)'}}>COLOR</span>
-                       <input style={{...s.input, padding: '12px'}} placeholder="000" value={meters.color} onChange={e=>setMeters({...meters, color: e.target.value})} />
-                     </div>
-                     <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                       <span style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)'}}>SCANNER</span>
-                       <input style={{...s.input, padding: '12px'}} placeholder="000" value={meters.scan} onChange={e=>setMeters({...meters, scan: e.target.value})} />
-                     </div>
+                  <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block' }}>Leitura de Contadores</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>P&B</span>
+                      <input style={{ ...s.input, padding: '12px' }} placeholder="000" value={meters.mono} onChange={e => setMeters({ ...meters, mono: e.target.value })} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>COLOR</span>
+                      <input style={{ ...s.input, padding: '12px' }} placeholder="000" value={meters.color} onChange={e => setMeters({ ...meters, color: e.target.value })} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>SCANNER</span>
+                      <input style={{ ...s.input, padding: '12px' }} placeholder="000" value={meters.scan} onChange={e => setMeters({ ...meters, scan: e.target.value })} />
+                    </div>
                   </div>
                 </div>
 
                 <div>
-                  <label style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block'}}>Defeito / Solicitação do Cliente</label>
-                  <div style={{background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 'var(--space-4)', color: 'var(--text-main)', fontWeight: 700, fontSize: 'var(--text-md)', borderLeft: '4px solid var(--accent)', wordBreak: 'break-word', overflowWrap: 'break-word'}}>
+                  <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block' }}>Defeito / Solicitação do Cliente</label>
+                  <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 'var(--space-4)', color: 'var(--text-main)', fontWeight: 700, fontSize: 'var(--text-md)', borderLeft: '4px solid var(--accent)', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                     {selectedOs.defect}
                   </div>
                 </div>
 
+                {Array.isArray(selectedOs.produtos) && selectedOs.produtos.length > 0 && (
+                  <div>
+                    <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Package size={14} /> Peças / Toners Entregues
+                    </label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {selectedOs.produtos.map((p, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            background: 'var(--bg-base)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            padding: '6px 12px',
+                            fontSize: 'var(--text-xs)',
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{p.nome}</span>
+                          <span
+                            style={{
+                              background: 'var(--accent)',
+                              color: 'var(--text-inverse)',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontWeight: 800,
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            × {p.quantidade}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <label style={{fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block'}}>Relatório Técnico / Peças Substituídas</label>
+                  <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 'var(--space-2)', display: 'block' }}>Relatório Técnico / Peças Substituídas</label>
                   <textarea
-                    style={{...s.input, minHeight: '180px', resize: 'vertical', padding: 'var(--space-4)', lineHeight: 'var(--leading-normal)', width: '100%'}}
+                    style={{ ...s.input, minHeight: '180px', resize: 'vertical', padding: 'var(--space-4)', lineHeight: 'var(--leading-normal)', width: '100%' }}
                     placeholder="Descreva detalhadamente o serviço executado..."
                     value={notes}
-                    onChange={e=>setNotes(e.target.value)}
+                    onChange={e => setNotes(e.target.value)}
                   />
                 </div>
               </div>
@@ -448,7 +489,7 @@ export default function ServiceOrders() {
               {/^\d+$/.test(String(selectedOs.externalId || '')) && selectedOs.status !== 'ERRO_INTEGRACAO'
                 ? <a href={`${BACKEND_URL}/api/os/${selectedOs.id}/pdf?token=${localStorage.getItem('token')}`} target="_blank" rel="noreferrer" style={s.pdfBtn}>Abrir / Imprimir O.S.</a>
                 : <span style={{ ...s.pdfBtn, opacity: 0.55, cursor: 'not-allowed' }}>Aguardando confirmação do ILUX WEB</span>}
-              <button style={{...s.saveBtn, opacity: saving ? 0.7 : 1, cursor: saving ? 'default' : 'pointer'}} onClick={() => handleUpdate()} disabled={saving}>
+              <button style={{ ...s.saveBtn, opacity: saving ? 0.7 : 1, cursor: saving ? 'default' : 'pointer' }} onClick={() => handleUpdate()} disabled={saving}>
                 {saving ? 'Salvando...' : 'Salvar Atualizações'}
               </button>
             </div>

@@ -57,7 +57,7 @@ const TAB_GROUPS = [
 // Respostas rápidas possui uma área própria em Operação. Mantemos o índice
 // interno 5 para compatibilidade com links antigos, mas não o exibimos no
 // menu de Configurações para evitar duas entradas para a mesma função.
-const HIDDEN_TAB_INDEXES = new Set([5, 7]);
+const HIDDEN_TAB_INDEXES = new Set([5]);
 const SUPPORT_ONLY_TAB_INDEXES = new Set([7, 9, 10]);
 const SUPPORT_ONLY_FORM_FIELDS = [
   'aiProvider', 'aiModel', 'aiAuxProvider', 'aiModelCatalog', 'geminiKey', 'openaiKey', 'anthropicKey',
@@ -787,7 +787,7 @@ export default function Settings() {
       ? 'Sincronizado com o ILUX WEB'
       : companySyncStatus === 'failed'
         ? 'Falha na última consulta'
-      : 'Ainda não sincronizado';
+        : 'Ainda não sincronizado';
 
   const firebirdEnvPreview = [
     'FIREBIRD_HOST=127.0.0.1',
@@ -802,9 +802,9 @@ export default function Settings() {
     `CRM_TENANT_SLUG=${tenant?.slug || 'lcddigital'}`,
     ...(firebirdTokenIsMasked
       ? [
-          '# CRM_SYNC_TOKEN já configurado e protegido pelo CRM.',
-          '# Mantenha no agente o token atual ou gere e salve um novo nesta tela.',
-        ]
+        '# CRM_SYNC_TOKEN já configurado e protegido pelo CRM.',
+        '# Mantenha no agente o token atual ou gere e salve um novo nesta tela.',
+      ]
       : [`CRM_SYNC_TOKEN=${form.firebirdClientToken || 'gere_um_token_no_crm_e_salve'}`]),
     'SYNC_INTERVAL_SECONDS=300',
     'BATCH_SIZE=250',
@@ -1140,85 +1140,85 @@ export default function Settings() {
               <p>Configure quando a equipe atende e qual mensagem o cliente recebe fora do expediente.</p>
             </div>
             <div className="attendance-settings-grid attendance-journey-grid">
-          <div style={s.card}>
-            <h2 style={s.cardTitle}>Horário de atendimento</h2>
-            <div style={s.form}>
-              {hours.map((hour, index) => (
-                <div key={hour.dayOfWeek} className="settings-hour-row" style={s.hourRow}>
-                  <div className="settings-hour-day" style={s.hourDay}>
-                    {DAYS[hour.dayOfWeek]}
-                  </div>
+              <div style={s.card}>
+                <h2 style={s.cardTitle}>Horário de atendimento</h2>
+                <div style={s.form}>
+                  {hours.map((hour, index) => (
+                    <div key={hour.dayOfWeek} className="settings-hour-row" style={s.hourRow}>
+                      <div className="settings-hour-day" style={s.hourDay}>
+                        {DAYS[hour.dayOfWeek]}
+                      </div>
 
-                  <div className="settings-hour-controls" style={s.hourControls}>
-                    <input
-                      type="checkbox"
-                      checked={hour.active}
-                      onChange={(e) => {
-                        const next = [...hours];
-                        next[index].active = e.target.checked;
-                        setHours(next);
-                      }}
-                    />
-                    <input
-                      type="time"
-                      style={s.hourInput}
-                      value={hour.start}
-                      disabled={!hour.active}
-                      onChange={(e) => {
-                        const next = [...hours];
-                        next[index].start = e.target.value;
-                        setHours(next);
-                      }}
-                    />
-                    <span className="settings-hour-until" style={s.hourUntil}>ate</span>
-                    <input
-                      type="time"
-                      style={s.hourInput}
-                      value={hour.end}
-                      disabled={!hour.active}
-                      onChange={(e) => {
-                        const next = [...hours];
-                        next[index].end = e.target.value;
-                        setHours(next);
-                      }}
-                    />
-                  </div>
+                      <div className="settings-hour-controls" style={s.hourControls}>
+                        <input
+                          type="checkbox"
+                          checked={hour.active}
+                          onChange={(e) => {
+                            const next = [...hours];
+                            next[index].active = e.target.checked;
+                            setHours(next);
+                          }}
+                        />
+                        <input
+                          type="time"
+                          style={s.hourInput}
+                          value={hour.start}
+                          disabled={!hour.active}
+                          onChange={(e) => {
+                            const next = [...hours];
+                            next[index].start = e.target.value;
+                            setHours(next);
+                          }}
+                        />
+                        <span className="settings-hour-until" style={s.hourUntil}>ate</span>
+                        <input
+                          type="time"
+                          style={s.hourInput}
+                          value={hour.end}
+                          disabled={!hour.active}
+                          onChange={(e) => {
+                            const next = [...hours];
+                            next[index].end = e.target.value;
+                            setHours(next);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <button style={s.saveBtn} onClick={handleSave} disabled={saving}>{saving ? 'Salvando...' : 'Salvar horarios'}</button>
                 </div>
-              ))}
-              <button style={s.saveBtn} onClick={handleSave} disabled={saving}>{saving ? 'Salvando...' : 'Salvar horarios'}</button>
-            </div>
-          </div>
-
-          <div style={s.card}>
-            <h2 style={s.cardTitle}>Mensagem de ausência</h2>
-            <div style={s.form}>
-              <div style={s.field}>
-                <label style={s.label}>Texto automatico</label>
-                <textarea
-                  style={{ ...s.input, minHeight: '120px' }}
-                  value={form.outOfOfficeMessage}
-                  onChange={(e) => setForm({ ...form, outOfOfficeMessage: e.target.value })}
-                  placeholder="Olá! No momento nossa equipe está descansando. Deixe sua dúvida que responderemos em breve..."
-                />
-                <p style={s.hint}>Enviada automaticamente fora do horário comercial.</p>
               </div>
 
-              <div style={s.field}>
-                <label style={s.label}>WhatsApp para alertas técnicos (fallback)</label>
-                <input
-                  style={s.input}
-                  value={form.notificationPhone}
-                  onChange={(e) => setForm({ ...form, notificationPhone: e.target.value })}
-                  placeholder="5511999999999"
-                />
-                <p style={s.hint}>Usado apenas quando não houver um gestor configurado abaixo para receber cópias de O.S.</p>
-              </div>
+              <div style={s.card}>
+                <h2 style={s.cardTitle}>Mensagem de ausência</h2>
+                <div style={s.form}>
+                  <div style={s.field}>
+                    <label style={s.label}>Texto automatico</label>
+                    <textarea
+                      style={{ ...s.input, minHeight: '120px' }}
+                      value={form.outOfOfficeMessage}
+                      onChange={(e) => setForm({ ...form, outOfOfficeMessage: e.target.value })}
+                      placeholder="Olá! No momento nossa equipe está descansando. Deixe sua dúvida que responderemos em breve..."
+                    />
+                    <p style={s.hint}>Enviada automaticamente fora do horário comercial.</p>
+                  </div>
 
-              <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar configurações de ausência'}
-              </button>
-            </div>
-          </div>
+                  <div style={s.field}>
+                    <label style={s.label}>WhatsApp para alertas técnicos (fallback)</label>
+                    <input
+                      style={s.input}
+                      value={form.notificationPhone}
+                      onChange={(e) => setForm({ ...form, notificationPhone: e.target.value })}
+                      placeholder="5511999999999"
+                    />
+                    <p style={s.hint}>Usado apenas quando não houver um gestor configurado abaixo para receber cópias de O.S.</p>
+                  </div>
+
+                  <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
+                    {saving ? 'Salvando...' : 'Salvar configurações de ausência'}
+                  </button>
+                </div>
+              </div>
 
             </div>
           </section>
@@ -1231,102 +1231,102 @@ export default function Settings() {
             </div>
             <div className="attendance-settings-grid attendance-automation-grid">
 
-          <div style={s.card}>
-            <h2 style={s.cardTitle}>Cópia automática de O.S.</h2>
-            <div style={s.form}>
-              <div style={s.field}>
-                  <label style={s.label}>Enviar ao gestor após abrir no ILUX WEB</label>
-                <div style={s.toggleCard}>
-                  <div style={s.toggleInfo}>
-                    <span style={{ ...s.toggleStatus, color: form.serviceOrderManagerCopyEnabled ? 'var(--accent)' : 'var(--text-dim)' }}>
-                      {form.serviceOrderManagerCopyEnabled ? 'Ativa' : 'Desativada'}
-                    </span>
-                    <p style={s.toggleHint}>O envio ocorre somente após o banco do ILUX WEB confirmar o número da O.S.</p>
+              <div style={s.card}>
+                <h2 style={s.cardTitle}>Cópia automática de O.S.</h2>
+                <div style={s.form}>
+                  <div style={s.field}>
+                    <label style={s.label}>Enviar ao gestor após abrir no ILUX WEB</label>
+                    <div style={s.toggleCard}>
+                      <div style={s.toggleInfo}>
+                        <span style={{ ...s.toggleStatus, color: form.serviceOrderManagerCopyEnabled ? 'var(--accent)' : 'var(--text-dim)' }}>
+                          {form.serviceOrderManagerCopyEnabled ? 'Ativa' : 'Desativada'}
+                        </span>
+                        <p style={s.toggleHint}>O envio ocorre somente após o banco do ILUX WEB confirmar o número da O.S.</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        style={s.switch}
+                        checked={Boolean(form.serviceOrderManagerCopyEnabled)}
+                        onChange={(e) => setForm({ ...form, serviceOrderManagerCopyEnabled: e.target.checked })}
+                      />
+                    </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    style={s.switch}
-                    checked={Boolean(form.serviceOrderManagerCopyEnabled)}
-                    onChange={(e) => setForm({ ...form, serviceOrderManagerCopyEnabled: e.target.checked })}
-                  />
+
+                  <div style={s.field}>
+                    <label style={s.label}>WhatsApp do gestor</label>
+                    <input
+                      type="tel"
+                      style={s.input}
+                      value={form.serviceOrderManagerPhone || ''}
+                      disabled={!form.serviceOrderManagerCopyEnabled}
+                      onChange={(e) => setForm({ ...form, serviceOrderManagerPhone: e.target.value })}
+                      placeholder="5551999999999"
+                    />
+                    <p style={s.hint}>Informe país, DDD e número. Este mesmo gestor receberá os alertas enviados pelo botão “Gestor” do Sentinela.</p>
+                  </div>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Instância de saída</label>
+                    <select
+                      style={s.input}
+                      value={form.serviceOrderManagerInstanceId || ''}
+                      disabled={!form.serviceOrderManagerCopyEnabled}
+                      onChange={(e) => setForm({ ...form, serviceOrderManagerInstanceId: e.target.value })}
+                    >
+                      <option value="">Selecione uma instância...</option>
+                      {instances.map((instance) => {
+                        const connected = instance.status === 'connected' && (instance.state === 'open' || instance.healthStatus === 'healthy' || (!instance.state && !instance.healthStatus));
+                        return <option key={instance.id} value={instance.id}>{instance.instanceName} — {connected ? 'Conectada' : 'Desconectada'}</option>;
+                      })}
+                    </select>
+                    <p style={s.hint}>
+                      {instances.length ? 'A mensagem será enviada exclusivamente pela instância selecionada.' : 'Nenhuma instância de WhatsApp cadastrada.'}
+                    </p>
+                  </div>
+
+                  <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
+                    {saving ? 'Salvando...' : 'Salvar cópia automática'}
+                  </button>
                 </div>
               </div>
 
-              <div style={s.field}>
-                <label style={s.label}>WhatsApp do gestor</label>
-                <input
-                  type="tel"
-                  style={s.input}
-                  value={form.serviceOrderManagerPhone || ''}
-                  disabled={!form.serviceOrderManagerCopyEnabled}
-                  onChange={(e) => setForm({ ...form, serviceOrderManagerPhone: e.target.value })}
-                  placeholder="5551999999999"
-                />
-                <p style={s.hint}>Informe país, DDD e número. Este mesmo gestor receberá os alertas enviados pelo botão “Gestor” do Sentinela.</p>
-              </div>
-
-              <div style={s.field}>
-                <label style={s.label}>Instância de saída</label>
-                <select
-                  style={s.input}
-                  value={form.serviceOrderManagerInstanceId || ''}
-                  disabled={!form.serviceOrderManagerCopyEnabled}
-                  onChange={(e) => setForm({ ...form, serviceOrderManagerInstanceId: e.target.value })}
-                >
-                  <option value="">Selecione uma instância...</option>
-                  {instances.map((instance) => {
-                    const connected = instance.status === 'connected' && (instance.state === 'open' || instance.healthStatus === 'healthy' || (!instance.state && !instance.healthStatus));
-                    return <option key={instance.id} value={instance.id}>{instance.instanceName} — {connected ? 'Conectada' : 'Desconectada'}</option>;
-                  })}
-                </select>
-                <p style={s.hint}>
-                  {instances.length ? 'A mensagem será enviada exclusivamente pela instância selecionada.' : 'Nenhuma instância de WhatsApp cadastrada.'}
-                </p>
-              </div>
-
-              <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar cópia automática'}
-              </button>
-            </div>
-          </div>
-
-          <div style={s.card}>
-            <h2 style={s.cardTitle}>Pesquisa de satisfação (CSAT)</h2>
-            <div style={s.form}>
-              <div style={s.field}>
-                <label style={s.label}>Habilitar avaliacao ao encerrar</label>
-                <div style={s.toggleCard}>
-                  <div style={s.toggleInfo}>
-                    <span style={{ ...s.toggleStatus, color: form.ratingEnabled ? 'var(--accent)' : 'var(--text-dim)' }}>
-                      {form.ratingEnabled ? 'Ativa' : 'Desativada'}
-                    </span>
-                    <p style={s.toggleHint}>O cliente receberá uma pergunta de 1 a 5 após o encerramento.</p>
+              <div style={s.card}>
+                <h2 style={s.cardTitle}>Pesquisa de satisfação (CSAT)</h2>
+                <div style={s.form}>
+                  <div style={s.field}>
+                    <label style={s.label}>Habilitar avaliacao ao encerrar</label>
+                    <div style={s.toggleCard}>
+                      <div style={s.toggleInfo}>
+                        <span style={{ ...s.toggleStatus, color: form.ratingEnabled ? 'var(--accent)' : 'var(--text-dim)' }}>
+                          {form.ratingEnabled ? 'Ativa' : 'Desativada'}
+                        </span>
+                        <p style={s.toggleHint}>O cliente receberá uma pergunta de 1 a 5 após o encerramento.</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        style={s.switch}
+                        checked={form.ratingEnabled}
+                        onChange={(e) => setForm({ ...form, ratingEnabled: e.target.checked })}
+                      />
+                    </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    style={s.switch}
-                    checked={form.ratingEnabled}
-                    onChange={(e) => setForm({ ...form, ratingEnabled: e.target.checked })}
-                  />
+
+                  <div style={s.field}>
+                    <label style={s.label}>Mensagem de avaliação</label>
+                    <textarea
+                      style={{ ...s.input, minHeight: '80px' }}
+                      value={form.ratingMessage}
+                      onChange={(e) => setForm({ ...form, ratingMessage: e.target.value })}
+                      placeholder="Como você avalia nosso atendimento de 1 a 5?"
+                    />
+                    <p style={s.hint}>Use números de 1 a 5 para que o sistema identifique a nota.</p>
+                  </div>
+
+                  <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
+                    {saving ? 'Salvando...' : 'Salvar configurações CSAT'}
+                  </button>
                 </div>
               </div>
-
-              <div style={s.field}>
-                <label style={s.label}>Mensagem de avaliação</label>
-                <textarea
-                  style={{ ...s.input, minHeight: '80px' }}
-                  value={form.ratingMessage}
-                  onChange={(e) => setForm({ ...form, ratingMessage: e.target.value })}
-                  placeholder="Como você avalia nosso atendimento de 1 a 5?"
-                />
-                <p style={s.hint}>Use números de 1 a 5 para que o sistema identifique a nota.</p>
-              </div>
-
-              <button style={s.saveBtn} onClick={handleSave} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar configurações CSAT'}
-              </button>
-            </div>
-          </div>
             </div>
           </section>
         </div>
@@ -1844,89 +1844,89 @@ export default function Settings() {
               />
             </div>
 
-                <div style={s.saveRow}>
-                  {profileSaved && <span style={s.savedMsg}>Perfil atualizado</span>}
-                  <button style={s.saveBtn} type="button" onClick={handleProfileSave} disabled={saving}>Salvar perfil</button>
+            <div style={s.saveRow}>
+              {profileSaved && <span style={s.savedMsg}>Perfil atualizado</span>}
+              <button style={s.saveBtn} type="button" onClick={handleProfileSave} disabled={saving}>Salvar perfil</button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === 9 && (
+        <div style={s.sections}>
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
+              <h2 style={s.cardTitle}>Agente Local (Integração Firebird & Boletos)</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }} title={form.firebirdLastSyncAt ? `Último sinal do agente: ${new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR')}` : 'O agente nunca se conectou'}>
+                <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: agentIsOnline ? 'var(--success)' : 'var(--danger)' }} />
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
+                  {agentIsOnline ? 'Conectado' : 'Desconectado'}
+                </span>
+                {agentOutdatedCount > 0 && (
+                  <span style={{
+                    fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap',
+                    padding: '0.2rem 0.5rem', borderRadius: '999px',
+                    color: 'var(--danger)', border: '1px solid var(--danger)',
+                  }}>
+                    ⚠ {agentOutdatedCount} desatualizada(s)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div style={s.form}>
+              <div style={s.integrationGuide}>
+                <strong style={s.integrationGuideTitle}>Integração com Aplicativo Desktop</strong>
+                <p style={s.hint}>
+                  A configuração de banco de dados e pastas locais agora é feita diretamente no Aplicativo Desktop no servidor da empresa. Copie o token abaixo e cole no aplicativo para autenticar a conexão.
+                </p>
+              </div>
+
+              <div style={s.field}>
+                <label style={s.label}>Token de Autenticação (CRM_SYNC_TOKEN)</label>
+                <div style={{ display: 'flex', gap: '0.75rem', flexDirection: isMobile ? 'column' : 'row', flexWrap: isMobile ? 'nowrap' : 'wrap', minWidth: 0 }}>
+                  <input
+                    style={{ ...s.input, flex: '1 1 240px', minWidth: 0 }}
+                    type={showToken ? "text" : "password"}
+                    value={form.firebirdClientToken}
+                    onChange={(e) => setForm({ ...form, firebirdClientToken: e.target.value })}
+                    placeholder="Gere um token e salve a integração"
+                    readOnly={firebirdTokenIsMasked}
+                    title={firebirdTokenIsMasked ? 'Token já configurado e protegido pelo CRM' : undefined}
+                  />
+                  <button
+                    type="button"
+                    style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
+                    onClick={() => setShowToken(!showToken)}
+                    disabled={firebirdTokenIsMasked}
+                  >
+                    {firebirdTokenIsMasked ? 'Protegido' : showToken ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
+                    onClick={handleCopyToken}
+                    disabled={firebirdTokenIsMasked}
+                  >
+                    Copiar
+                  </button>
+                  <button type="button" style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap' }} onClick={generateFirebirdClientToken}>
+                    Gerar token
+                  </button>
+                </div>
+                {firebirdTokenIsMasked && (
+                  <p style={s.hint}>
+                    O token já está configurado e não pode ser exibido novamente. Mantenha o valor atual no agente instalado ou clique em <strong>Gerar token</strong>, salve as configurações e copie o novo valor.
+                  </p>
+                )}
+              </div>
+
+              <div style={s.field}>
+                <label style={s.label}>Última Comunicação do Agente</label>
+                <div style={{ ...s.input, backgroundColor: 'var(--bg-main)' }}>
+                  {form.firebirdLastSyncAt ? new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR') : 'Nunca'}
                 </div>
               </div>
-            </section>
-          )}
-
-          {tab === 9 && (
-            <div style={s.sections}>
-              <div style={s.card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
-                  <h2 style={s.cardTitle}>Agente Local (Integração Firebird & Boletos)</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }} title={form.firebirdLastSyncAt ? `Último sinal do agente: ${new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR')}` : 'O agente nunca se conectou'}>
-                    <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: agentIsOnline ? 'var(--success)' : 'var(--danger)' }} />
-                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
-                      {agentIsOnline ? 'Conectado' : 'Desconectado'}
-                    </span>
-                    {agentOutdatedCount > 0 && (
-                      <span style={{
-                        fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap',
-                        padding: '0.2rem 0.5rem', borderRadius: '999px',
-                        color: 'var(--danger)', border: '1px solid var(--danger)',
-                      }}>
-                        ⚠ {agentOutdatedCount} desatualizada(s)
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div style={s.form}>
-                  <div style={s.integrationGuide}>
-                    <strong style={s.integrationGuideTitle}>Integração com Aplicativo Desktop</strong>
-                    <p style={s.hint}>
-                      A configuração de banco de dados e pastas locais agora é feita diretamente no Aplicativo Desktop no servidor da empresa. Copie o token abaixo e cole no aplicativo para autenticar a conexão.
-                    </p>
-                  </div>
-
-                  <div style={s.field}>
-                    <label style={s.label}>Token de Autenticação (CRM_SYNC_TOKEN)</label>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexDirection: isMobile ? 'column' : 'row', flexWrap: isMobile ? 'nowrap' : 'wrap', minWidth: 0 }}>
-                      <input
-                        style={{ ...s.input, flex: '1 1 240px', minWidth: 0 }}
-                        type={showToken ? "text" : "password"}
-                        value={form.firebirdClientToken}
-                        onChange={(e) => setForm({ ...form, firebirdClientToken: e.target.value })}
-                        placeholder="Gere um token e salve a integração"
-                        readOnly={firebirdTokenIsMasked}
-                        title={firebirdTokenIsMasked ? 'Token já configurado e protegido pelo CRM' : undefined}
-                      />
-                      <button
-                        type="button"
-                        style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
-                        onClick={() => setShowToken(!showToken)}
-                        disabled={firebirdTokenIsMasked}
-                      >
-                        {firebirdTokenIsMasked ? 'Protegido' : showToken ? 'Ocultar' : 'Mostrar'}
-                      </button>
-                      <button
-                        type="button"
-                        style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
-                        onClick={handleCopyToken}
-                        disabled={firebirdTokenIsMasked}
-                      >
-                        Copiar
-                      </button>
-                      <button type="button" style={{ ...s.saveBtn, marginTop: 0, whiteSpace: 'nowrap' }} onClick={generateFirebirdClientToken}>
-                        Gerar token
-                      </button>
-                    </div>
-                    {firebirdTokenIsMasked && (
-                      <p style={s.hint}>
-                        O token já está configurado e não pode ser exibido novamente. Mantenha o valor atual no agente instalado ou clique em <strong>Gerar token</strong>, salve as configurações e copie o novo valor.
-                      </p>
-                    )}
-                  </div>
-
-                  <div style={s.field}>
-                    <label style={s.label}>Última Comunicação do Agente</label>
-                    <div style={{ ...s.input, backgroundColor: 'var(--bg-main)' }}>
-                      {form.firebirdLastSyncAt ? new Date(form.firebirdLastSyncAt).toLocaleString('pt-BR') : 'Nunca'}
-                    </div>
-                  </div>
 
                   <div style={s.field}>
                     <label style={s.label}>Template da Mensagem de Cobrança</label>

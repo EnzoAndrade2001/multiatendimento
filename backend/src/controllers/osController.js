@@ -12,8 +12,10 @@ const { parseFirebirdDate } = require('../utils/firebirdDate');
 const {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
+  getCustomerProductsHistoryFromIluxWeb,
   isIluxWebConfigured,
   listDefectTypesFromIluxWeb,
+  listProductsFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
 
@@ -394,7 +396,7 @@ async function getOSList(req, res) {
 }
 
 async function createOS(req, res) {
-  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet } = req.body;
+  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet, produtos } = req.body;
   const { tenantId } = req.user;
 
   try {
@@ -566,6 +568,7 @@ async function createOS(req, res) {
           tipoAtendimento: String(cdOstp) === '01' ? 'CONTRATOS' : 'CORRETIVA',
           descricaoProblema: String(defect).trim(),
           dataAbertura: os.createdAt?.toISOString?.() || undefined,
+          produtos: Array.isArray(produtos) ? produtos : undefined,
         });
         const externalId = String(
           respostaIlux.seqos
@@ -1347,6 +1350,7 @@ async function generatePdf(req, res) {
         closedBy: item.closedBy,
         technician: item.technician,
       })),
+      produtos: iluxOrderData.produtos || [],
     });
 
     if (typeof res.capturePdf !== 'function') {
@@ -2043,4 +2047,61 @@ async function draftOS(req, res) {
   }
 }
 
-module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes };
+async function getProducts(req, res) {
+  try {
+    const { q, tipo } = req.query;
+    const products = await listProductsFromIluxWeb({ q, tipo });
+    res.json({ items: products });
+  } catch (error) {
+    console.error('[getProducts] erro ao listar produtos do ILUX WEB:', error);
+    res.status(500).json({ error: 'Erro ao listar produtos do ILUX WEB.' });
+  }
+}
+
+async function getCustomerProductsHistory(req, res) {
+  const { contactId } = req.params;
+  const { mes } = req.query;
+  const { tenantId } = req.user;
+
+  try {
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, tenantId },
+      include: { crmCustomer: true },
+    });
+    if (!contact) {
+      return res.status(404).json({ error: 'Contato não encontrado.' });
+    }
+
+    const customerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+    if (!customerExternalId) {
+      return res.json({ cliente: null, mes: mes || null, ordens: [], totalProdutos: [] });
+    }
+
+    const history = await getCustomerProductsHistoryFromIluxWeb(customerExternalId, mes);
+    res.json(history);
+  } catch (error) {
+    console.error('[getCustomerProductsHistory] erro ao buscar consumo de suprimentos:', error);
+    res.status(500).json({ error: 'Erro ao buscar histórico de consumo de suprimentos.' });
+  }
+}
+
+module.exports = {
+  addEquipment,
+  createOS,
+  deleteEquipment,
+  draftOS,
+  generatePdf,
+  generatePdfBuffer,
+  getCustomerProductsHistory,
+  getEquipments,
+  getOpenOrdersForEquipment,
+  getOSDefectTypes,
+  getOSList,
+  getOSStatus,
+  getOSTechnicians,
+  getOSTypes,
+  getProducts,
+  resolveServiceOrderForPdf,
+  updateEquipment,
+  updateOS,
+};

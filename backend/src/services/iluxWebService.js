@@ -4,6 +4,7 @@ const DEFAULT_FINANCIAL_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_CONTRACTS_PATH = '/api/assistencia/os/integracao-crm/clientes';
 const DEFAULT_COMPANY_PATH = '/api/assistencia/os/integracao-crm/empresa';
 const DEFAULT_DEFECT_TYPES_PATH = '/api/assistencia/os/integracao-crm/tipos-defeito';
+const DEFAULT_PRODUCTS_PATH = '/api/assistencia/os/integracao-crm/produtos';
 const DEFAULT_SUMMARY_PATH = '/api/assistencia/os/integracao-crm/resumo';
 const REQUEST_TIMEOUT_MS = Math.max(
   5000,
@@ -153,13 +154,51 @@ async function listDefectTypesFromIluxWeb() {
     .filter((item) => item.code && item.name && !item.inactive);
 }
 
+async function listProductsFromIluxWeb({ q, tipo } = {}) {
+  if (!isIluxWebConfigured()) return [];
+  const basePath = process.env.ILUX_WEB_PRODUCTS_PATH || DEFAULT_PRODUCTS_PATH;
+  const params = new URLSearchParams();
+  if (q) params.set('q', String(q).trim());
+  if (tipo) params.set('tipo', String(tipo).trim());
+  const path = `${basePath}${params.toString() ? `?${params.toString()}` : ''}`;
+  const data = await requestJson(path, { method: 'GET' });
+  const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+  return items.map((p) => ({
+    id: p.id,
+    codigo: p.codigo,
+    nome: p.nome,
+    tipo: p.tipo,
+    estoque: p.estoque,
+  }));
+}
+
+async function getCustomerProductsHistoryFromIluxWeb(customerExternalId, mes) {
+  if (!isIluxWebConfigured() || !customerExternalId) {
+    return { cliente: null, mes: mes || null, ordens: [], totalProdutos: [] };
+  }
+  const basePath = process.env.ILUX_WEB_ORDERS_PATH || DEFAULT_ORDERS_PATH;
+  const params = new URLSearchParams();
+  if (mes) params.set('mes', String(mes).trim());
+  const path = `${basePath.replace(/\/+$/, '')}/${encodeURIComponent(String(customerExternalId))}/suprimentos${params.toString() ? `?${params.toString()}` : ''}`;
+  const data = await requestJson(path, { method: 'GET' });
+  return {
+    cliente: data?.cliente || null,
+    mes: data?.mes || mes || null,
+    ordens: Array.isArray(data?.ordens) ? data.ordens : [],
+    totalProdutos: Array.isArray(data?.totalProdutos) ? data.totalProdutos : [],
+  };
+}
+
 module.exports = {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
+  getCustomerProductsHistoryFromIluxWeb,
   getSummaryFromIluxWeb,
   isIluxWebConfigured,
   listContractsFromIluxWeb,
-  listReceivablesFromIluxWeb,
   listDefectTypesFromIluxWeb,
+  listProductsFromIluxWeb,
+  listReceivablesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 };
+

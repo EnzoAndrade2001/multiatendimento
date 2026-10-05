@@ -148,7 +148,7 @@ export default function Layout() {
         setCurrentUser(res.data);
         setTenant(res.data.tenant);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     const onProfileUpdated = (event) => {
       if (event.detail) setCurrentUser((previous) => ({ ...previous, ...event.detail }));
@@ -164,7 +164,7 @@ export default function Layout() {
             mentions: conversations.reduce((sum, item) => sum + Number(item.mentionCount || 0), 0),
           });
         })
-        .catch(() => {});
+        .catch(() => { });
     }
 
     const token = localStorage.getItem('token');
@@ -205,7 +205,7 @@ export default function Layout() {
       if (fromMe) return;
 
       const notificationBody = getNotificationBody(message);
-      audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(() => { });
       setNotification({ name: contact?.name || contact?.phone || 'Contato', body: notificationBody });
       window.clearTimeout(notificationTimerRef.current);
       notificationTimerRef.current = window.setTimeout(() => setNotification(null), 5000);
@@ -234,7 +234,7 @@ export default function Layout() {
 
       if (isChatOpenRef.current) return;
 
-      audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(() => { });
       setNotification({
         name: `Equipe: ${msg.sender?.name || 'Colega'}`,
         body: msg.body || (msg.attachmentName ? `Anexo: ${msg.attachmentName}` : 'Nova mensagem interna'),
@@ -271,7 +271,7 @@ export default function Layout() {
     });
 
     socket.on('connection_update', ({ instance, data }) => {
-      setInstances((prev) => 
+      setInstances((prev) =>
         prev.map((inst) => {
           if (inst.instanceName === instance) {
             const state = String(data?.state || '').toLowerCase();
@@ -361,18 +361,18 @@ export default function Layout() {
     { section: 'Clientes & conversas', to: '/contacts', icon: <Users size={18} />, label: 'Clientes WhatsApp', permission: 'crm.view', feature: 'contacts', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Clientes & conversas', to: '/quick-responses', icon: <Zap size={18} />, label: 'Respostas Rápidas', permission: 'quick_responses.manage', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Aquisição
-    // { section: 'Clientes & conversas', to: '/tasks', icon: <ClipboardCheck size={18} />, label: 'Minhas pendências', permission: 'inbox.view', feature: 'inbox' },
+    { section: 'Clientes & conversas', to: '/tasks', icon: <ClipboardCheck size={18} />, label: 'Minhas pendências', permission: 'inbox.view', feature: 'inbox' },
     { section: 'Aquisição', to: '/campaigns', icon: <Megaphone size={18} />, label: 'Campanhas', permission: 'campaigns.manage', feature: 'campaigns', roles: ['admin', 'agent', 'superadmin'] },
-    // { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', feature: 'lead_generation', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Aquisição', to: '/leads', icon: <Radar size={18} />, label: 'Prospecção', permission: 'leads.manage', feature: 'lead_generation', roles: ['admin', 'agent', 'superadmin'] },
     // Operação › Inteligência & gestão
     { section: 'Inteligência & gestão', to: '/knowledge', icon: <HelpCircle size={18} />, label: 'Treinamento IA', permission: 'settings.bot.manage', feature: 'ai_knowledge', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/assistente-ilux', icon: <Bot size={18} />, label: 'Assistente ILUX WEB', permission: 'ai.assistant.query', feature: 'ai_assistant', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Inteligência & gestão', to: '/telemetry', icon: <Activity size={18} />, label: 'Telemetria', permission: 'telemetry.view', feature: 'telemetry', roles: ['admin', 'supervisor', 'agent', 'tecnico', 'superadmin'] },
-    // { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', feature: 'billing_reports', roles: ['admin', 'superadmin'] },
+    { section: 'Inteligência & gestão', to: '/billing-reports', icon: <BarChart2 size={18} />, label: 'Relatórios de Cobrança', permission: 'billing.view', feature: 'billing_reports', roles: ['admin', 'superadmin'] },
     // Operação › Sistema
     { section: 'Sistema', to: '/connections', icon: <LinkIcon size={18} />, label: 'Conexões', permission: 'connections.manage', roles: ['admin', 'agent', 'superadmin'] },
-    // { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', feature: 'audit', roles: ['admin', 'superadmin'] },
-    // { section: 'Sistema', to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
+    { section: 'Sistema', to: '/audit', icon: <ClipboardCheck size={18} />, label: 'Auditoria do sistema', permission: 'audit.view', feature: 'audit', roles: ['admin', 'superadmin'] },
+    { section: 'Sistema', to: '/privacy', icon: <ShieldCheck size={18} />, label: 'Privacidade', roles: ['admin', 'agent', 'superadmin'] },
     { section: 'Sistema', to: '/settings', icon: <Settings size={18} />, label: 'Ajustes', roles: ['admin', 'agent', 'superadmin'] },
   ], [setIsChatOpen]);
 
@@ -565,10 +565,10 @@ export default function Layout() {
         </div>
       )}
 
-      {disconnectedInstances.length > 0 && (
+      {(!realtimeConnected || disconnectedInstances.length > 0) && (
         <div className="layout-connection-banner" style={{
-          backgroundColor: 'var(--danger, #EF4444)',
-          color: '#fff',
+          backgroundColor: !realtimeConnected ? 'var(--warning, #F59E0B)' : 'var(--danger, #EF4444)',
+          color: !realtimeConnected ? '#17130A' : '#fff',
           padding: '0.65rem 1rem',
           textAlign: 'center',
           fontWeight: 700,
@@ -581,25 +581,6 @@ export default function Layout() {
           boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)'
         }}>
           ⚠️ Atenção: Você tem {disconnectedInstances.length === 1 ? 'uma conexão do WhatsApp desconectada' : `${disconnectedInstances.length} conexões do WhatsApp desconectadas`}! Clique em "Conexões" no menu para reconectar e voltar a receber mensagens.
-        </div>
-      )}
-
-      {!realtimeConnected && (
-        <div className="layout-connection-banner" style={{
-          backgroundColor: 'var(--warning, #F59E0B)',
-          color: '#17130A',
-          padding: '0.65rem 1rem',
-          textAlign: 'center',
-          fontWeight: 700,
-          fontSize: isMobile ? '0.8rem' : '0.9rem',
-          zIndex: 90,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 'var(--space-2)',
-          boxShadow: '0 4px 12px rgba(245, 158, 11, 0.2)'
-        }}>
-          ⚠️ Reconectando ao servidor em tempo real...
         </div>
       )}
 
@@ -732,8 +713,8 @@ const styles = {
     fontSize: '0.8rem',
     letterSpacing: '0.04em',
   },
-  brand: { fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-main)', fontFamily: 'var(--font-display)' },
-  proTag: { color: 'var(--accent)', fontSize: '0.62rem', verticalAlign: 'top', marginLeft: '0.2rem', fontWeight: 800, fontFamily: 'var(--font-display)' },
+  brand: { fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-main)' },
+  proTag: { color: 'var(--accent)', fontSize: '0.62rem', verticalAlign: 'top', marginLeft: '0.2rem' },
   centerNav: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.65rem', justifyContent: 'center' },
   links: { display: 'flex', gap: '0.45rem', minWidth: 0, overflow: 'visible' },
   primaryLink: {
@@ -1123,4 +1104,23 @@ const styles = {
     background: 'var(--accent-light)',
   },
   commandEmpty: { padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' },
+};
+color: 'var(--text-main)',
+  cursor: 'pointer',
+    fontFamily: 'inherit',
+      fontSize: '0.9rem',
+        fontWeight: 600,
+          textAlign: 'left',
+  },
+commandResultIcon: {
+  width: '32px',
+    height: '32px',
+      borderRadius: '9px',
+        display: 'inline-flex',
+          alignItems: 'center',
+            justifyContent: 'center',
+              color: 'var(--accent)',
+                background: 'var(--accent-light)',
+  },
+commandEmpty: { padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' },
 };

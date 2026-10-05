@@ -67,11 +67,7 @@ const configuredOrigins = String(process.env.FRONTEND_URL || '')
 const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...configuredOrigins])];
 const corsOrigin = (origin, callback) => {
   // Non-browser requests have no Origin and must remain usable (agents/webhooks).
-  if (!origin) return callback(null, true);
-  if (allowedOrigins.includes(origin)) return callback(null, true);
-  // Aceita qualquer host easypanel do projeto lcddigitalweb para evitar quebras
-  // em redeploys que geram novos IDs de hash no hostname.
-  if (origin.includes('lcddigitalweb') && origin.includes('easypanel.host')) return callback(null, true);
+  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
   return callback(new Error('Origem nao autorizada pelo CORS'));
 };
 
@@ -90,7 +86,7 @@ const server = http.createServer(app);
 const bootAt = Date.now();
 
 const io = new Server(server, {
-  cors: { 
+  cors: {
     origin: corsOrigin,
     credentials: true,
     methods: ["GET", "POST"]
@@ -279,7 +275,7 @@ function leaveInternalConversation(socket) {
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.query.token;
   if (!token) return next(new Error('Autenticação requerida'));
-  
+
   if (!process.env.JWT_SECRET) {
     console.error('[CRITICAL] JWT_SECRET não configurada!');
     return next(new Error('Erro interno do servidor'));
@@ -427,12 +423,12 @@ server.listen(PORT, () => {
           // Ignore deleted Evolution records and isolate failures per instance.
           if (String(inst.instanceName || '').startsWith('DELETED_')) continue;
           try {
-          const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: inst.tenantId } });
-          const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, inst);
-          if (evolutionUrl && evolutionKey) {
-            console.log(`[startup-webhook-fix] Atualizando webhook da instância ${inst.instanceName} com URL ${webhookUrl}...`);
-           await evolution.setWebhook(evolutionUrl, evolutionKey, inst.instanceName, webhookUrl);
-          }
+            const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: inst.tenantId } });
+            const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(settings, inst);
+            if (evolutionUrl && evolutionKey) {
+              console.log(`[startup-webhook-fix] Atualizando webhook da instância ${inst.instanceName} com URL ${webhookUrl}...`);
+              await evolution.setWebhook(evolutionUrl, evolutionKey, inst.instanceName, webhookUrl);
+            }
           } catch (err) {
             console.error(`[startup-webhook-fix] Falha na instÃ¢ncia ${inst.instanceName}:`, err.message);
           }

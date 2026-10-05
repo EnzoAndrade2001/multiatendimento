@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api, { BACKEND_URL, updateContact, deleteContact, getEquipments, updateEquipment, deleteEquipment } from '../services/api';
-
 import { toast } from '../utils/toast';
-import { Printer, FileText, User, Trash2, Edit3 } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Edit3, FileText, LoaderCircle, Package, Printer, Trash2, User } from 'lucide-react';
 import ActionButton from './ui/ActionButton';
 import ModalShell from './ui/ModalShell';
 
@@ -43,11 +42,20 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
   const [editingEquipId, setEditingEquipId] = useState(null);
   const [savingData, setSavingData] = useState(false);
   const [savingEquip, setSavingEquip] = useState(false);
+  const [suppliesHistory, setSuppliesHistory] = useState(null);
+  const [loadingSupplies, setLoadingSupplies] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    const ano = now.getFullYear();
+    const mes = String(now.getMonth() + 1).padStart(2, '0');
+    return `${ano}-${mes}`;
+  });
 
   useEffect(() => {
     if (activeTab === 'equipamentos') loadEquipments();
     if (activeTab === 'os') loadOsHistory();
-  }, [activeTab, contact.id]);
+    if (activeTab === 'suprimentos') loadSuppliesHistory();
+  }, [activeTab, contact.id, selectedMonth]);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -84,6 +92,45 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
     } catch (e) {
       // noop
     }
+  }
+
+  async function loadSuppliesHistory() {
+    setLoadingSupplies(true);
+    try {
+      const res = await api.get(`/os/contacts/${contact.id}/products-history`, {
+        params: { mes: selectedMonth },
+      });
+      setSuppliesHistory(res.data);
+    } catch (e) {
+      console.error('[loadSuppliesHistory]', e);
+      setSuppliesHistory(null);
+    } finally {
+      setLoadingSupplies(false);
+    }
+  }
+
+  function changeMonth(delta) {
+    const [anoStr, mesStr] = selectedMonth.split('-');
+    let ano = parseInt(anoStr, 10);
+    let mes = parseInt(mesStr, 10) + delta;
+    if (mes > 12) {
+      mes = 1;
+      ano += 1;
+    } else if (mes < 1) {
+      mes = 12;
+      ano -= 1;
+    }
+    setSelectedMonth(`${ano}-${String(mes).padStart(2, '0')}`);
+  }
+
+  function formatMonthTitle(mesAno) {
+    if (!mesAno) return '';
+    const [ano, mes] = mesAno.split('-');
+    const meses = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    return `${meses[parseInt(mes, 10) - 1]} de ${ano}`;
   }
 
   async function handleUpdateData() {
@@ -236,164 +283,417 @@ export default function ContactProfileModal({ contact, onClose, onUpdated, initi
           <button type="button" role="tab" aria-selected={activeTab === 'os'} style={{ ...s.tab, ...(activeTab === 'os' ? s.tabActive : {}) }} onClick={() => setActiveTab('os')}>
             <FileText size={16} /> Histórico O.S. {osHistory.length ? `(${osHistory.length})` : ''}
           </button>
+          <button type="button" role="tab" aria-selected={activeTab === 'suprimentos'} style={{ ...s.tab, ...(activeTab === 'suprimentos' ? s.tabActive : {}) }} onClick={() => setActiveTab('suprimentos')}>
+            <Package size={16} /> Suprimentos / Toners
+          </button>
         </div>
 
         <div className="contact-profile-content" style={s.content}>
           {activeTab === 'dados' ? (
             <div style={s.sectionStack}>
-            <section style={s.fieldCard}>
-            <h3 style={s.fieldCardTitle}>Identificação</h3>
-            <div style={s.inputGroup}>
-              <div>
-                <label style={s.label}>Nome</label>
-                <input style={s.input} value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
-              </div>
-              <div>
-                <label style={s.label}>Nome fantasia / departamento</label>
-                <input style={s.input} value={formData.fantasyName} onChange={(e) => setFormData({ ...formData, fantasyName: e.target.value })} />
-              </div>
-            </div>
-            <div style={s.inputGroup}>
-              <div>
-                <label style={s.label}>CPF / CNPJ</label>
-                <input style={s.input} value={formData.cpfCnpj} onChange={(e) => setFormData({ ...formData, cpfCnpj: e.target.value })} />
-              </div>
-            </div>
-            </section>
-            <section style={s.fieldCard}>
-            <h3 style={s.fieldCardTitle}>Canais de contato</h3>
-            <div style={s.inputGroup}>
-              <div>
-                <label style={s.label}>Telefone do cadastro</label>
-                <input style={s.input} value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
-              </div>
-              <div>
-                <label style={s.label}>WhatsApp para envios</label>
-                <input style={s.input} value={formData.whatsapp} onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })} placeholder="Ex.: 5551999999999" />
-              </div>
-            </div>
-            <div><label style={s.label}>E-mail</label><input style={s.input} value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
-            </section>
-            <section style={s.fieldCard}>
-            <h3 style={s.fieldCardTitle}>Autorizações de WhatsApp</h3>
-            <p style={s.fieldCardHint}>Registre separadamente o que este contato autorizou receber. O sistema nunca usa uma autorização para outra finalidade.</p>
-            <div style={s.consentGrid}>
-              {[
-                ['enableWhatsAppBilling', 'Cobranças e documentos financeiros'],
-                ['enableWhatsAppMarketing', 'Promoções e novidades'],
-                ['enableWhatsAppAlerts', 'Alertas operacionais'],
-                ['enableWhatsAppCounters', 'Solicitação de contadores'],
-              ].map(([key, label]) => (
-                <label key={key} style={s.consentRow}>
-                  <input type="checkbox" checked={Boolean(formData[key])} onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })} />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-            </section>
-            <section style={s.fieldCard}>
-            <h3 style={s.fieldCardTitle}>Endereço principal</h3>
-            <div>
-              <label style={s.label}>Endereço (rua, número, bairro)</label>
-              <input style={s.input} value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
-            </div>
-            <div style={{ ...s.inputGroup, marginTop: 16 }}>
-              <div>
-                <label style={s.label}>Cidade</label>
-                <input style={s.input} value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} />
-              </div>
-              <div>
-                <label style={s.label}>Estado (UF)</label>
-                <input style={s.input} value={formData.state} onChange={(e) => setFormData({ ...formData, state: e.target.value })} />
-              </div>
-            </div>
-            </section>
+              <section style={s.fieldCard}>
+                <h3 style={s.fieldCardTitle}>Identificação</h3>
+                <div style={s.inputGroup}>
+                  <div>
+                    <label style={s.label}>Nome</label>
+                    <input style={s.input} value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={s.label}>Nome fantasia / departamento</label>
+                    <input style={s.input} value={formData.fantasyName} onChange={(e) => setFormData({ ...formData, fantasyName: e.target.value })} />
+                  </div>
+                </div>
+                <div style={s.inputGroup}>
+                  <div>
+                    <label style={s.label}>CPF / CNPJ</label>
+                    <input style={s.input} value={formData.cpfCnpj} onChange={(e) => setFormData({ ...formData, cpfCnpj: e.target.value })} />
+                  </div>
+                </div>
+              </section>
+              <section style={s.fieldCard}>
+                <h3 style={s.fieldCardTitle}>Canais de contato</h3>
+                <div style={s.inputGroup}>
+                  <div>
+                    <label style={s.label}>Telefone do cadastro</label>
+                    <input style={s.input} value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={s.label}>WhatsApp para envios</label>
+                    <input style={s.input} value={formData.whatsapp} onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })} placeholder="Ex.: 5551999999999" />
+                  </div>
+                </div>
+                <div><label style={s.label}>E-mail</label><input style={s.input} value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
+              </section>
+              <section style={s.fieldCard}>
+                <h3 style={s.fieldCardTitle}>Autorizações de WhatsApp</h3>
+                <p style={s.fieldCardHint}>Registre separadamente o que este contato autorizou receber. O sistema nunca usa uma autorização para outra finalidade.</p>
+                <div style={s.consentGrid}>
+                  {[
+                    ['enableWhatsAppBilling', 'Cobranças e documentos financeiros'],
+                    ['enableWhatsAppMarketing', 'Promoções e novidades'],
+                    ['enableWhatsAppAlerts', 'Alertas operacionais'],
+                    ['enableWhatsAppCounters', 'Solicitação de contadores'],
+                  ].map(([key, label]) => (
+                    <label key={key} style={s.consentRow}>
+                      <input type="checkbox" checked={Boolean(formData[key])} onChange={(e) => setFormData({ ...formData, [key]: e.target.checked })} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+              <section style={s.fieldCard}>
+                <h3 style={s.fieldCardTitle}>Endereço principal</h3>
+                <div>
+                  <label style={s.label}>Endereço (rua, número, bairro)</label>
+                  <input style={s.input} value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
+                </div>
+                <div style={{ ...s.inputGroup, marginTop: 16 }}>
+                  <div>
+                    <label style={s.label}>Cidade</label>
+                    <input style={s.input} value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={s.label}>Estado (UF)</label>
+                    <input style={s.input} value={formData.state} onChange={(e) => setFormData({ ...formData, state: e.target.value })} />
+                  </div>
+                </div>
+              </section>
             </div>
           ) : null}
 
           {activeTab === 'equipamentos' ? (
             <div>
-            <div style={{ ...s.equipFormCard, borderColor: editingEquipId ? 'var(--accent-border)' : 'var(--border-color)' }}>
-              <div style={s.equipFormTitle}>{editingEquipId ? 'Editando equipamento' : 'Novo equipamento'}</div>
-              <div style={s.inputGroup}>
-                <input style={s.input} placeholder="Marca (ex: Xerox)" value={newEquip.manufacturer} onChange={(e) => setNewEquip({ ...newEquip, manufacturer: e.target.value })} />
-                <input style={s.input} placeholder="Modelo (ex: 7845)" value={newEquip.model} onChange={(e) => setNewEquip({ ...newEquip, model: e.target.value })} />
-              </div>
-              <div style={s.inputGroup}>
-                <input style={s.input} placeholder="Número de série" value={newEquip.serialNumber} onChange={(e) => setNewEquip({ ...newEquip, serialNumber: e.target.value })} />
-                <input style={s.input} placeholder="Setor (ex: Recepção)" value={newEquip.sector} onChange={(e) => setNewEquip({ ...newEquip, sector: e.target.value })} />
-              </div>
-              <div style={s.inputGroup}>
-                <input style={s.input} placeholder="Tipo (ex: Multifuncional)" value={newEquip.type} onChange={(e) => setNewEquip({ ...newEquip, type: e.target.value })} />
-                <input style={s.input} placeholder="Endereço específico (opcional)" value={newEquip.address} onChange={(e) => setNewEquip({ ...newEquip, address: e.target.value })} />
-              </div>
-              {editingEquipId ? (
-                <div style={s.actionsRow}>
-                  <ActionButton
-                    variant="secondary"
-                    onClick={() => {
-                      setEditingEquipId(null);
-                      setNewEquip({ ...EMPTY_EQUIPMENT });
-                    }}
-                  >
-                    Cancelar edição
-                  </ActionButton>
+              <div style={{ ...s.equipFormCard, borderColor: editingEquipId ? 'var(--accent-border)' : 'var(--border-color)' }}>
+                <div style={s.equipFormTitle}>{editingEquipId ? 'Editando equipamento' : 'Novo equipamento'}</div>
+                <div style={s.inputGroup}>
+                  <input style={s.input} placeholder="Marca (ex: Xerox)" value={newEquip.manufacturer} onChange={(e) => setNewEquip({ ...newEquip, manufacturer: e.target.value })} />
+                  <input style={s.input} placeholder="Modelo (ex: 7845)" value={newEquip.model} onChange={(e) => setNewEquip({ ...newEquip, model: e.target.value })} />
                 </div>
-              ) : null}
-            </div>
+                <div style={s.inputGroup}>
+                  <input style={s.input} placeholder="Número de série" value={newEquip.serialNumber} onChange={(e) => setNewEquip({ ...newEquip, serialNumber: e.target.value })} />
+                  <input style={s.input} placeholder="Setor (ex: Recepção)" value={newEquip.sector} onChange={(e) => setNewEquip({ ...newEquip, sector: e.target.value })} />
+                </div>
+                <div style={s.inputGroup}>
+                  <input style={s.input} placeholder="Tipo (ex: Multifuncional)" value={newEquip.type} onChange={(e) => setNewEquip({ ...newEquip, type: e.target.value })} />
+                  <input style={s.input} placeholder="Endereço específico (opcional)" value={newEquip.address} onChange={(e) => setNewEquip({ ...newEquip, address: e.target.value })} />
+                </div>
+                {editingEquipId ? (
+                  <div style={s.actionsRow}>
+                    <ActionButton
+                      variant="secondary"
+                      onClick={() => {
+                        setEditingEquipId(null);
+                        setNewEquip({ ...EMPTY_EQUIPMENT });
+                      }}
+                    >
+                      Cancelar edição
+                    </ActionButton>
+                  </div>
+                ) : null}
+              </div>
 
-            {equipments.length === 0 ? <div style={s.emptyText}>Nenhum equipamento cadastrado para este cliente ainda.</div> : null}
-            {equipments.map((equipment) => (
-              <div key={equipment.id} style={s.equipCard}>
-                <div style={s.equipActions}>
-                  <button style={s.actionBtn('var(--accent)')} onClick={() => startEditEquip(equipment)} title="Editar">
-                    <Edit3 size={16} />
-                  </button>
-                  <button style={s.actionBtn('#ff4d4f')} onClick={() => handleDeleteEquip(equipment.id)} title="Excluir">
-                    <Trash2 size={16} />
-                  </button>
+              {equipments.length === 0 ? <div style={s.emptyText}>Nenhum equipamento cadastrado para este cliente ainda.</div> : null}
+              {equipments.map((equipment) => (
+                <div key={equipment.id} style={s.equipCard}>
+                  <div style={s.equipActions}>
+                    <button style={s.actionBtn('var(--accent)')} onClick={() => startEditEquip(equipment)} title="Editar">
+                      <Edit3 size={16} />
+                    </button>
+                    <button style={s.actionBtn('#ff4d4f')} onClick={() => handleDeleteEquip(equipment.id)} title="Excluir">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                  <div style={s.equipTitle}>
+                    {equipment.model.toLowerCase().startsWith(equipment.manufacturer?.toLowerCase())
+                      ? equipment.model
+                      : equipment.manufacturer
+                        ? `${equipment.manufacturer} ${equipment.model}`
+                        : equipment.model}
+                  </div>
+                  <div style={s.equipType}>{equipment.type}</div>
+                  <div style={s.equipText}>Série: {equipment.serialNumber || 'N/A'} | Setor: {equipment.sector || 'Geral'}</div>
+                  {equipment.address ? <div style={s.equipText}>Local: {equipment.address}</div> : null}
                 </div>
-                <div style={s.equipTitle}>
-                  {equipment.model.toLowerCase().startsWith(equipment.manufacturer?.toLowerCase())
-                    ? equipment.model
-                    : equipment.manufacturer
-                      ? `${equipment.manufacturer} ${equipment.model}`
-                      : equipment.model}
-                </div>
-                <div style={s.equipType}>{equipment.type}</div>
-                <div style={s.equipText}>Série: {equipment.serialNumber || 'N/A'} | Setor: {equipment.sector || 'Geral'}</div>
-                {equipment.address ? <div style={s.equipText}>Local: {equipment.address}</div> : null}
-              </div>
-            ))}
+              ))}
             </div>
           ) : null}
 
           {activeTab === 'os' ? (
             <div>
-            {osHistory.length === 0 ? <div style={s.emptyText}>Nenhuma O.S. registrada para este cliente ainda.</div> : null}
-            {osHistory.map((os) => {
-              const printable = /^\d+$/.test(String(os.externalId || '')) && os.status !== 'ERRO_INTEGRACAO';
-              return (
-              <div key={os.id} style={s.osCard}>
-                <div>
-                  <div style={s.osTitle}>{printable ? `O.S. #${os.externalId}` : 'O.S. aguardando confirmação do ILUX WEB'}</div>
-                  <div style={s.osMeta}>Data: {new Date(os.createdAt).toLocaleDateString()}</div>
-                  <div style={s.osDefect}>Defeito: {os.defect}</div>
-                </div>
-                <div style={s.osRight}>
-                  <span style={statusBadge(os.status)}>{os.status}</span>
-                  {printable ? <a
-                    href={`${BACKEND_URL}/api/os/${os.id}/pdf?token=${localStorage.getItem('token')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={s.osLink}
+              {osHistory.length === 0 ? <div style={s.emptyText}>Nenhuma O.S. registrada para este cliente ainda.</div> : null}
+              {osHistory.map((os) => {
+                const printable = /^\d+$/.test(String(os.externalId || '')) && os.status !== 'ERRO_INTEGRACAO';
+                return (
+                  <div key={os.id} style={s.osCard}>
+                    <div>
+                      <div style={s.osTitle}>{printable ? `O.S. #${os.externalId}` : 'O.S. aguardando confirmação do ILUX WEB'}</div>
+                      <div style={s.osMeta}>Data: {new Date(os.createdAt).toLocaleDateString()}</div>
+                      <div style={s.osDefect}>Defeito: {os.defect}</div>
+                    </div>
+                    <div style={s.osRight}>
+                      <span style={statusBadge(os.status)}>{os.status}</span>
+                      {printable ? <a
+                        href={`${BACKEND_URL}/api/os/${os.id}/pdf?token=${localStorage.getItem('token')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={s.osLink}
+                      >
+                        Ver O.S.
+                      </a> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {activeTab === 'suprimentos' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Barra de navegação de Mês */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 16px',
+                  background: 'var(--bg-panel)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '12px',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => changeMonth(-1)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-base)',
+                      color: 'var(--text-main)',
+                      cursor: 'pointer',
+                    }}
+                    title="Mês anterior"
                   >
-                    Ver O.S.
-                  </a> : null}
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Calendar size={16} color="var(--accent)" />
+                    <span style={{ fontSize: 'var(--text-base)', fontWeight: 800, color: 'var(--text-main)' }}>
+                      {formatMonthTitle(selectedMonth)}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => changeMonth(1)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-base)',
+                      color: 'var(--text-main)',
+                      cursor: 'pointer',
+                    }}
+                    title="Próximo mês"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      const ano = now.getFullYear();
+                      const mes = String(now.getMonth() + 1).padStart(2, '0');
+                      setSelectedMonth(`${ano}-${mes}`);
+                    }}
+                    style={{
+                      fontSize: 'var(--text-xs)',
+                      fontWeight: 700,
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-base)',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mês Atual
+                  </button>
                 </div>
               </div>
-              );
-            })}
+
+              {loadingSupplies ? (
+                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                  <LoaderCircle size={28} style={{ animation: 'ui-spin 1s linear infinite', marginBottom: '8px' }} />
+                  <div>Carregando consumo de suprimentos...</div>
+                </div>
+              ) : suppliesHistory ? (
+                <>
+                  {/* KPI Cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
+                    <div style={{ padding: '14px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+                        Total de Peças/Toners
+                      </div>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>
+                        {(suppliesHistory.totalProdutos || []).reduce((acc, p) => acc + (p.quantidade || 0), 0)} un
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '14px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+                        Modelos Distintos
+                      </div>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
+                        {(suppliesHistory.totalProdutos || []).length}
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '14px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+                        Atendimentos no Mês
+                      </div>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
+                        {(suppliesHistory.ordens || []).length}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Resumo por produto */}
+                  {(suppliesHistory.totalProdutos || []).length > 0 ? (
+                    <div style={{ padding: '14px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>
+                        Consumo Consolidado do Mês
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {suppliesHistory.totalProdutos.map((item, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              background: 'var(--bg-base)',
+                              border: '1px solid var(--border-color)',
+                              fontSize: 'var(--text-xs)',
+                            }}
+                          >
+                            <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{item.nome}</span>
+                            <span
+                              style={{
+                                background: 'var(--accent)',
+                                color: 'var(--text-inverse)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontWeight: 800,
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              {item.quantidade} un
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Lista de Ordens de Serviço com Peças */}
+                  <div>
+                    <div style={{ fontSize: 'var(--text-xs)', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>
+                      Ordens de Serviço do Período ({(suppliesHistory.ordens || []).length})
+                    </div>
+
+                    {(suppliesHistory.ordens || []).length === 0 ? (
+                      <div style={s.emptyText}>Nenhuma entrega de toner ou peça registrada para este cliente em {formatMonthTitle(selectedMonth)}.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {suppliesHistory.ordens.map((os) => (
+                          <div
+                            key={os.id}
+                            style={{
+                              padding: '14px',
+                              background: 'var(--bg-panel)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: '10px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                              <div>
+                                <strong style={{ color: 'var(--text-main)', fontSize: 'var(--text-sm)', display: 'block' }}>
+                                  O.S. #{os.numero || os.id} · {os.tipoAtendimento || 'Atendimento'}
+                                </strong>
+                                <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+                                  {new Date(os.dataAbertura).toLocaleDateString()} {os.equipamento ? `· ${os.equipamento}` : ''}
+                                </span>
+                              </div>
+                              <span style={statusBadge(os.status)}>{os.status}</span>
+                            </div>
+
+                            {os.descricaoProblema ? (
+                              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                                <strong>Relato:</strong> {os.descricaoProblema}
+                              </div>
+                            ) : null}
+
+                            {/* Itens entregues nesta OS */}
+                            {(os.produtos || []).length > 0 ? (
+                              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                  Peças / Toners Entregues:
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {os.produtos.map((p, pIdx) => (
+                                    <span
+                                      key={pIdx}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        padding: '3px 8px',
+                                        background: 'var(--bg-base)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '6px',
+                                        fontSize: 'var(--text-xs)',
+                                        color: 'var(--text-main)',
+                                      }}
+                                    >
+                                      <span>{p.nome}</span>
+                                      <strong style={{ color: 'var(--accent)' }}>× {p.quantidade}</strong>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                Sem peças discriminadas nesta O.S.
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={s.emptyText}>Não foi possível consultar os suprimentos deste cliente.</div>
+              )}
             </div>
           ) : null}
         </div>
