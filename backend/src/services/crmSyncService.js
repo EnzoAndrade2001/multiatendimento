@@ -22,6 +22,17 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
       }
     });
 
+    const validExternalIds = crmEquipments.map((e) => e.externalId).filter(Boolean);
+    if (validExternalIds.length > 0) {
+      await prisma.equipment.deleteMany({
+        where: {
+          tenantId,
+          contactId: contact.id,
+          externalId: { notIn: validExternalIds }
+        }
+      });
+    }
+
     for (const crmEquip of crmEquipments) {
       const externalSource = crmEquip.externalSource || 'firebird';
       const externalId = crmEquip.externalId;

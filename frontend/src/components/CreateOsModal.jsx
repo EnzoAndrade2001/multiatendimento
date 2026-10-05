@@ -255,7 +255,10 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
       completeOrder(res.data);
     } catch (e) {
       setPendingOrderId(e.response?.data?.serviceOrderId || '');
-      setError(e.response?.data?.error || 'Não foi possível confirmar a abertura no ILUX WEB. Tente novamente.');
+      const backendError = typeof e.response?.data === 'string'
+        ? e.response.data
+        : (e.response?.data?.error || e.response?.data?.message || e.message);
+      setError(backendError || 'Não foi possível confirmar a abertura no ILUX WEB. Tente novamente.');
     } finally {
       setSaving(false);
     }
@@ -273,7 +276,10 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
       }
       completeOrder(data);
     } catch (e) {
-      setError(e.response?.data?.error || 'Não foi possível consultar a abertura. Tente novamente.');
+      const backendError = typeof e.response?.data === 'string'
+        ? e.response.data
+        : (e.response?.data?.error || e.response?.data?.message || e.message);
+      setError(backendError || 'Não foi possível consultar a abertura. Tente novamente.');
     } finally {
       setSaving(false);
     }

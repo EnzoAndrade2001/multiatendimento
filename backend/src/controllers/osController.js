@@ -432,28 +432,31 @@ async function createOS(req, res) {
     // O vínculo confiável é a identidade do cliente no ILUX WEB, não Equipment.contactId:
     // Equipment é uma linha por máquina (única por externalId) e esse contactId é
     // reescrito toda vez que QUALQUER contato do mesmo cliente abre este modal
-    // (syncCrmEquipmentsToEquipment). Comparar por contactId fazia dois atendentes
-    // ou dois contatos da mesma empresa colidirem em "não pertence ao cliente".
-    let equipmentBelongsToCustomer = equipment.contactId === contactId;
-    if (!equipmentBelongsToCustomer) {
-      const crmEquip = await prisma.crmEquipment.findFirst({
-        where: {
-          tenantId,
-          externalId: equipment.externalId,
-          externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
-        },
-        select: { customerId: true, customer: { select: { externalId: true } } },
-      });
-      const contactCustomerId = contact.crmCustomerId || null;
-      const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+    const contactCustomerId = contact.crmCustomerId || null;
+    const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+
+    const crmEquip = await prisma.crmEquipment.findFirst({
+      where: {
+        tenantId,
+        externalId: equipment.externalId,
+        externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
+      },
+      select: { customerId: true, customer: { select: { externalId: true } } },
+    });
+
+    let equipmentBelongsToCustomer = false;
+    if (crmEquip) {
       equipmentBelongsToCustomer = Boolean(
-        (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
-        || (crmEquip?.customer?.externalId && contactCustomerExternalId
+        (crmEquip.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
+        || (crmEquip.customer?.externalId && contactCustomerExternalId
           && String(crmEquip.customer.externalId).trim() === contactCustomerExternalId),
       );
+    } else {
+      equipmentBelongsToCustomer = equipment.contactId === contactId;
     }
+
     if (!equipmentBelongsToCustomer) {
-      return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
+      return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa no ILUX WEB.' });
     }
     if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do ILUX WEB.' });
 
@@ -599,7 +602,7 @@ async function createOS(req, res) {
           include: { contact: true, equipment: true },
         });
         console.error(`[createOS] falha ao abrir O.S. ${os.id} no ILUX_WEB:`, detail);
-        return res.status(502).json({
+        return res.status(400).json({
           error: `Não foi possível abrir a O.S. no ILUX_WEB: ${detail}`,
           serviceOrderId: erroIntegracao.id,
         });
