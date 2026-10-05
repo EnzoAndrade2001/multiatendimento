@@ -61,24 +61,42 @@ function renderHistory(history) {
 }
 
 function renderProdutos(produtos) {
-  if (!Array.isArray(produtos) || produtos.length === 0) return '';
-  const rows = produtos.map((p) => `
-    <tr>
-      <td style="width: 25mm; text-align: center;">${escapeHtml(p.codigo || '-')}</td>
-      <td>${escapeHtml(p.nome || 'Produto')}</td>
-      <td style="width: 25mm; text-align: center;">${escapeHtml(p.tipo || 'SUPRIMENTO')}</td>
-      <td style="width: 20mm; text-align: center; font-weight: bold;">${p.quantidade || 1}</td>
-    </tr>
-  `).join('');
+  const hasProdutos = Array.isArray(produtos) && produtos.length > 0;
+  let rows = '';
+  if (hasProdutos) {
+    rows = produtos.map((p) => `
+      <tr>
+        <td style="width: 38px; text-align: center; font-weight: bold;">${p.quantidade || 1}</td>
+        <td style="width: 80px;">${escapeHtml(p.codigo || '-')}</td>
+        <td>${escapeHtml(p.nome || 'Produto')}</td>
+        <td style="width: 140px;">${escapeHtml(p.observacao || '-')}</td>
+      </tr>
+    `).join('');
+  } else {
+    rows = `
+      <tr>
+        <td style="width: 38px; text-align: center; height: 18px;">&nbsp;</td>
+        <td style="width: 80px;">&nbsp;</td>
+        <td>&nbsp;</td>
+        <td style="width: 140px;">&nbsp;</td>
+      </tr>
+      <tr>
+        <td style="width: 38px; text-align: center; height: 18px;">&nbsp;</td>
+        <td style="width: 80px;">&nbsp;</td>
+        <td>&nbsp;</td>
+        <td style="width: 140px;">&nbsp;</td>
+      </tr>
+    `;
+  }
   return `
-    <div class="section-title section-title-red" style="margin-top: 2px;">Peças / Suprimentos Entregues</div>
-    <table class="produtos-table" style="margin-bottom: 2px;">
+    <div class="section-title section-title-red" style="margin-top: 1px;">PEÇAS / SUPRIMENTOS UTILIZADOS</div>
+    <table class="produtos-table" style="margin-bottom: 0;">
       <thead>
         <tr style="background: #f3f4f6; font-size: 11px;">
-          <th style="width: 25mm; text-align: center;">Código</th>
-          <th style="text-align: left;">Descrição da Peça / Toner</th>
-          <th style="width: 25mm; text-align: center;">Tipo</th>
-          <th style="width: 20mm; text-align: center;">Qtd</th>
+          <th style="width: 38px; text-align: center;">Qtd</th>
+          <th style="width: 80px;">Código</th>
+          <th style="text-align: left;">Descrição do Produto / Suprimento</th>
+          <th style="width: 140px;">Observação</th>
         </tr>
       </thead>
       <tbody style="font-size: 11px;">
@@ -151,12 +169,12 @@ function renderOfficialOsTemplate(model) {
     .spaced-cell { padding: 3px 4px; line-height: 1.2; }
     .description, .followup { border-left: 3px solid ${accent}; border-right: 3px solid ${accent}; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .description td, .followup td { border-left-color: ${accent}; border-right-color: ${accent}; }
-    .description { min-height: 29mm; }
-    .technical-notes { margin-top: 5px; }
-    .technical-note { display: grid; grid-template-columns: 100px minmax(0, 1fr); column-gap: 8px; min-height: 24px; }
-    .technical-note b { padding-top: 5px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
-    .technical-note span { min-width: 0; font-size: 19px; line-height: 1.24; overflow-wrap: anywhere; }
-    .followup { min-height: 8mm; }
+    .description { min-height: 32mm; }
+    .technical-notes { margin-top: 4px; }
+    .technical-note { display: grid; grid-template-columns: 100px minmax(0, 1fr); column-gap: 8px; min-height: 22px; }
+    .technical-note b { padding-top: 3px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
+    .technical-note span { min-width: 0; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
+    .followup { min-height: 24mm; }
     .produtos-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 2px; }
     .produtos-table th, .produtos-table td { border: 1px solid #111; padding: 2px 4px; font-size: 11px; line-height: 1.15; }
     .history-block { flex: 1 1 0 !important; min-height: 0; border: 1px solid #111; border-top: 0; padding: 3px; overflow: hidden; }
@@ -225,14 +243,14 @@ function renderOfficialOsTemplate(model) {
       <div class="technical-notes">
         <div class="technical-note"><b>Tipo de defeito:</b><span>${multiline(model.defectTypeName)}</span></div>
         <div class="technical-note"><b>Defeito:</b><span>${multiline(model.defect)}</span></div>
-        <div class="technical-note"><b>Sintoma:</b><span>${multiline(model.symptom)}</span></div>
-        <div class="technical-note"><b>Causa:</b><span>${multiline(model.cause)}</span></div>
-        <div class="technical-note"><b>Ação:</b><span>${multiline(model.action)}</span></div>
+        <div class="technical-note"><b>Sintoma:</b><span>${model.symptom ? multiline(model.symptom) : '&nbsp;'}</span></div>
+        <div class="technical-note"><b>Causa:</b><span>${model.cause ? multiline(model.cause) : '&nbsp;'}</span></div>
+        <div class="technical-note"><b>Ação:</b><span>${model.action ? multiline(model.action) : '&nbsp;'}</span></div>
       </div>
     </td></tr></table>
 
     <div class="section-title section-title-red">Follow-up/Ação</div>
-    <table class="followup"><tr><td class="spaced-cell">${model.followUp ? multiline(model.followUp) : '&nbsp;'}</td></tr></table>
+    <table class="followup"><tr><td class="spaced-cell" style="min-height: 24mm; height: 24mm; vertical-align: top;">${model.followUp ? multiline(model.followUp) : '<div style="height: 20mm;">&nbsp;</div>'}</td></tr></table>
 
     ${renderProdutos(model.produtos)}
 

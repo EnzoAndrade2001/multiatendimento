@@ -907,8 +907,10 @@ async function generatePdf(req, res) {
         : '';
       const status = item?.statusLabel || item?.status || raw.nmstatus || raw.status || '';
       const isClosed = /CONCL|FECH|FINALIZ/i.test(String(status));
+      const orderNum = item?.numero || item?.legacyNumber || raw.seqos || item?.externalId || '';
       return {
-        externalId: String(item?.externalId || raw.seqos || ''),
+        externalId: String(orderNum),
+        canonicalId: String(item?.id || item?.canonicalId || raw.id || ''),
         createdAt: openedAt,
         time: raw.hrinclusao || item?.time || openedAtTime,
         osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
@@ -961,10 +963,11 @@ async function generatePdf(req, res) {
     previousOrders = [...uniqueOrders.values()]
       .filter((item) => {
         const id = String(item.externalId || '').trim();
+        const canon = String(item.canonicalId || '').trim();
         if (!id) return false;
-        if (currentOrderId && id === currentOrderId) return false;
-        if (currentCanonicalId && id === currentCanonicalId) return false;
-        if (currentNumber && id === currentNumber) return false;
+        if (currentOrderId && (id === currentOrderId || canon === currentOrderId)) return false;
+        if (currentCanonicalId && (id === currentCanonicalId || canon === currentCanonicalId)) return false;
+        if (currentNumber && (id === currentNumber || canon === currentNumber)) return false;
         return true;
       })
       .sort((left, right) => {
@@ -1252,13 +1255,17 @@ async function generatePdf(req, res) {
       || crmEquipment?.raw?.DEPARTAMENTO
       || os.equipment.sector
       || 'N/A';
-    const installLocation = currentPrintOrder.localinstal
-      || firebirdEquipment.localinstal
-      || iluxOrderData.equipmentLocation
-      || crmEquipment?.installLocation
-      || crmEquipment?.raw?.localinstal
-      || crmEquipment?.raw?.LOCALINSTAL
-      || (iluxWebOrder ? '-' : (os.equipment.sector || 'N/A'));
+    const rawLocation = firstValue(
+      currentPrintOrder.localinstal,
+      firebirdEquipment.localinstal,
+      iluxOrderData.equipmentLocation,
+      crmEquipment?.installLocation,
+      crmEquipment?.raw?.localinstal,
+      crmEquipment?.raw?.LOCALINSTAL,
+      '-'
+    );
+    const isAddressDuplicate = rawLocation && (rawLocation === clientAddress || /CEP\s*\d/i.test(rawLocation) || /RUA\s+/i.test(rawLocation));
+    const installLocation = (isAddressDuplicate ? '-' : (rawLocation || '-'));
     const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
     const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
     const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
