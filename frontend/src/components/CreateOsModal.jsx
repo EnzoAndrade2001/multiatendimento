@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api, { BACKEND_URL, getEquipments, getOpenOrdersForEquipment } from '../services/api';
-import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, LoaderCircle, MapPin, Minus, Package, Plus, Printer, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, LoaderCircle, MapPin, Minus, Package, Plus, Printer, Search, Trash2, Wand2 } from 'lucide-react';
 import EquipmentPickerModal, { equipmentAddress, equipmentOperationalLocation } from './EquipmentPickerModal';
+import ProductPickerModal from './ProductPickerModal';
 import { toast } from '../utils/toast';
 
 export default function CreateOsModal({ ticket, onClose, onCreated }) {
@@ -17,6 +18,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const [pendingOrderId, setPendingOrderId] = useState('');
   const [createdOrder, setCreatedOrder] = useState(null);
   const [equipmentPickerOpen, setEquipmentPickerOpen] = useState(false);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
   const [requestKey] = useState(() => (
     globalThis.crypto?.randomUUID?.() || `os-${Date.now()}-${Math.random().toString(16).slice(2)}`
   ));
@@ -35,10 +37,10 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     setFormData(updater);
   }
 
-  function addProdutoItem(prodItem = null) {
+  function addProdutoItem(prodItem = null, explicitQtd = null) {
     const nome = (prodItem?.nome || produtoSearch).trim();
     if (!nome) return;
-    const qtd = Math.max(1, parseInt(produtoQtd, 10) || 1);
+    const qtd = explicitQtd ? Math.max(1, explicitQtd) : Math.max(1, parseInt(produtoQtd, 10) || 1);
     const existingIndex = produtos.findIndex(
       (p) => (prodItem?.id && p.produtoId === prodItem.id) || p.nome.toLowerCase() === nome.toLowerCase()
     );
@@ -67,10 +69,28 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     setProdutos((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function removeProdutoItemById(prodId) {
+    setProdutos((prev) => prev.filter((p) => p.produtoId !== prodId && p.nome !== prodId));
+  }
+
   function updateProdutoQtd(idx, delta) {
     setProdutos((prev) => {
       const next = [...prev];
       const n = Math.max(1, (next[idx].quantidade || 1) + delta);
+      next[idx] = { ...next[idx], quantidade: n };
+      return next;
+    });
+  }
+
+  function updateProdutoQtdById(prodId, delta) {
+    setProdutos((prev) => {
+      const idx = prev.findIndex((p) => p.produtoId === prodId || p.nome === prodId);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      const n = (next[idx].quantidade || 1) + delta;
+      if (n <= 0) {
+        return next.filter((_, i) => i !== idx);
+      }
       next[idx] = { ...next[idx], quantidade: n };
       return next;
     });
@@ -261,7 +281,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
 
   const s = {
     overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-    modal: { background: 'var(--bg-panel)', width: '560px', maxWidth: '95%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column' },
+    modal: { background: 'var(--bg-panel)', width: '740px', maxWidth: '95vw', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column' },
     title: { fontSize: 'var(--text-lg)', fontWeight: 800, color: 'var(--text-main)', marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' },
     input: { width: '100%', padding: 'var(--space-3)', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', outline: 'none', marginBottom: 'var(--space-4)' },
     equipmentTrigger: { width: '100%', minHeight: '54px', padding: '10px 12px', marginBottom: 'var(--space-4)', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', cursor: 'pointer', display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '10px', textAlign: 'left' },
@@ -341,6 +361,16 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               onSelect={(equipment) => updateFormData((current) => ({ ...current, equipmentId: equipment.id }))}
             />
 
+            <ProductPickerModal
+              open={productPickerOpen}
+              products={availableProducts}
+              selectedProducts={produtos}
+              onSelectProduct={(prod, qtd) => addProdutoItem(prod, qtd)}
+              onUpdateQuantidade={(prodId, delta) => updateProdutoQtdById(prodId, delta)}
+              onRemoveProduct={(prodId) => removeProdutoItemById(prodId)}
+              onClose={() => setProductPickerOpen(false)}
+            />
+
             {openOrders.length > 0 ? (
               <div style={s.openWarn}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, marginBottom: '6px' }}>
@@ -403,17 +433,42 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               ))}
             </select>
 
-            <div style={{ marginBottom: 'var(--space-4)', padding: '12px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ marginBottom: 'var(--space-4)', padding: '14px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                 <label style={{ ...s.label, marginBottom: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Package size={14} /> PEÇAS / TONERS UTILIZADOS (OPCIONAL)
                 </label>
                 {produtos.length > 0 && (
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontWeight: 700 }}>
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)', fontWeight: 800 }}>
                     {produtos.reduce((acc, p) => acc + (p.quantidade || 1), 0)} un selecionada(s)
                   </span>
                 )}
               </div>
+
+              {/* Botão de destaque para abrir o catálogo amplo com pesquisa e filtros */}
+              <button
+                type="button"
+                onClick={() => setProductPickerOpen(true)}
+                style={{
+                  width: '100%',
+                  padding: '11px 16px',
+                  marginBottom: '10px',
+                  background: 'rgba(234, 88, 12, 0.08)',
+                  border: '1.5px dashed var(--accent)',
+                  borderRadius: '9px',
+                  color: 'var(--accent)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: 700,
+                  fontSize: 'var(--text-sm)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Search size={16} /> Localizar Peça / Toner no Catálogo Completo...
+              </button>
 
               {/* Input de busca/digitação e quantidade */}
               <div style={{ position: 'relative', display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -421,7 +476,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                   <input
                     type="text"
                     style={{ ...s.input, marginBottom: 0, paddingRight: '28px' }}
-                    placeholder="Buscar ou digitar nome do toner / peça..."
+                    placeholder="Ou digite o nome do toner / peça para busca rápida..."
                     value={produtoSearch}
                     onChange={(e) => {
                       setProdutoSearch(e.target.value);
@@ -446,7 +501,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                         border: '1px solid var(--border-color)',
                         borderRadius: '8px',
                         boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-                        maxHeight: '180px',
+                        maxHeight: '260px',
                         overflowY: 'auto',
                         zIndex: 50,
                         marginTop: '4px',
@@ -454,12 +509,12 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                     >
                       {availableProducts
                         .filter((p) => !produtoSearch || p.nome?.toLowerCase().includes(produtoSearch.toLowerCase()) || p.codigo?.toLowerCase().includes(produtoSearch.toLowerCase()))
-                        .slice(0, 15)
+                        .slice(0, 20)
                         .map((prod) => (
                           <div
                             key={prod.id}
                             style={{
-                              padding: '8px 12px',
+                              padding: '9px 12px',
                               cursor: 'pointer',
                               borderBottom: '1px solid var(--border-color)',
                               display: 'flex',
@@ -472,11 +527,13 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                               addProdutoItem(prod);
                             }}
                           >
-                            <div>
-                              <strong style={{ display: 'block', color: 'var(--text-main)' }}>{prod.nome}</strong>
+                            <div style={{ minWidth: 0, flex: 1, marginRight: '10px' }}>
+                              <strong style={{ display: 'block', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {prod.nome}
+                              </strong>
                               {prod.codigo && <span style={{ color: 'var(--text-muted)' }}>Cód: {prod.codigo} · {prod.tipo}</span>}
                             </div>
-                            <span style={{ color: 'var(--accent)', fontWeight: 700 }}>+ Selecionar</span>
+                            <span style={{ color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>+ Selecionar</span>
                           </div>
                         ))}
                     </div>
