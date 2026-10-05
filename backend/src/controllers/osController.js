@@ -842,7 +842,14 @@ async function generatePdf(req, res) {
       if (iluxCustomerExternalId) {
         const result = await listServiceOrdersFromIluxWeb(iluxCustomerExternalId, { limit: 250 });
         iluxWebOrders = Array.isArray(result?.items) ? result.items : [];
-        iluxWebOrder = iluxWebOrders.find((item) => String(item?.externalId || item?.numero || '') === String(os.externalId)) || null;
+        const targetExternalId = String(os.externalId || '').trim();
+        iluxWebOrder = iluxWebOrders.find((item) => {
+          const matchNum = String(item?.numero || '').trim() === targetExternalId;
+          const matchLegacyNum = String(item?.legacyNumber || '').trim() === targetExternalId;
+          const matchExt = String(item?.externalId || '').trim() === targetExternalId;
+          const matchId = String(item?.id || '').trim() === targetExternalId;
+          return matchNum || matchLegacyNum || matchExt || matchId;
+        }) || null;
       }
       iluxWebCompany = await getCompanyProfileFromIluxWeb();
     }
@@ -937,8 +944,19 @@ async function generatePdf(req, res) {
     for (const item of previousOrders) {
       if (item.externalId && !uniqueOrders.has(item.externalId)) uniqueOrders.set(item.externalId, item);
     }
+    const currentOrderId = String(os.externalId || '').trim();
+    const currentCanonicalId = String(iluxWebOrder?.id || iluxWebOrder?.canonicalId || '').trim();
+    const currentNumber = String(iluxWebOrder?.numero || iluxWebOrder?.legacyNumber || '').trim();
+
     previousOrders = [...uniqueOrders.values()]
-      .filter((item) => item.externalId && item.externalId !== String(os.externalId || ''))
+      .filter((item) => {
+        const id = String(item.externalId || '').trim();
+        if (!id) return false;
+        if (currentOrderId && id === currentOrderId) return false;
+        if (currentCanonicalId && id === currentCanonicalId) return false;
+        if (currentNumber && id === currentNumber) return false;
+        return true;
+      })
       .sort((left, right) => {
         const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
         if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
