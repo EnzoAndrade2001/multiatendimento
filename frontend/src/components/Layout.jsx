@@ -24,6 +24,11 @@ import {
   X,
   LayoutGrid,
   AlertTriangle,
+  ClipboardCheck,
+  Radar,
+  Bot,
+  Activity,
+  BarChart2,
 } from 'lucide-react';
 import { endSupportSession, getMe, getMediaUrl, getInstances, getInternalConversations } from '../services/api';
 import UserAvatar from './ui/UserAvatar';
