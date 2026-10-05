@@ -13,6 +13,7 @@ const {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
   getCustomerProductsHistoryFromIluxWeb,
+  getServiceOrderFromIluxWeb,
   isIluxWebConfigured,
   listDefectTypesFromIluxWeb,
   listProductsFromIluxWeb,
@@ -834,22 +835,31 @@ async function generatePdf(req, res) {
   let iluxWebCompany = null;
   try {
     if (isIluxWebConfigured()) {
+      const targetExternalId = String(os.externalId || '').trim();
+      if (targetExternalId) {
+        iluxWebOrder = await getServiceOrderFromIluxWeb(targetExternalId);
+      }
+
       const iluxCustomerExternalId = String(
-        crmCustomer?.externalId
-        || os.contact.crmCustomer?.externalId
+        iluxWebOrder?.clientCodigoLegado
+        || iluxWebOrder?.clientExternalId
+        || crmCustomer?.externalId
+        || os.contact?.crmCustomer?.externalId
         || ''
       ).trim();
+
       if (iluxCustomerExternalId) {
         const result = await listServiceOrdersFromIluxWeb(iluxCustomerExternalId, { limit: 250 });
         iluxWebOrders = Array.isArray(result?.items) ? result.items : [];
-        const targetExternalId = String(os.externalId || '').trim();
-        iluxWebOrder = iluxWebOrders.find((item) => {
-          const matchNum = String(item?.numero || '').trim() === targetExternalId;
-          const matchLegacyNum = String(item?.legacyNumber || '').trim() === targetExternalId;
-          const matchExt = String(item?.externalId || '').trim() === targetExternalId;
-          const matchId = String(item?.id || '').trim() === targetExternalId;
-          return matchNum || matchLegacyNum || matchExt || matchId;
-        }) || null;
+        if (!iluxWebOrder && targetExternalId) {
+          iluxWebOrder = iluxWebOrders.find((item) => {
+            const matchNum = String(item?.numero || '').trim() === targetExternalId;
+            const matchLegacyNum = String(item?.legacyNumber || '').trim() === targetExternalId;
+            const matchExt = String(item?.externalId || '').trim() === targetExternalId;
+            const matchId = String(item?.id || '').trim() === targetExternalId;
+            return matchNum || matchLegacyNum || matchExt || matchId;
+          }) || null;
+        }
       }
       iluxWebCompany = await getCompanyProfileFromIluxWeb();
     }

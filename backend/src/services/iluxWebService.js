@@ -83,6 +83,17 @@ async function createServiceOrderInIluxWeb(payload) {
   });
 }
 
+async function getServiceOrderFromIluxWeb(orderIdentifier) {
+  if (!isIluxWebConfigured() || !orderIdentifier) return null;
+  const path = `/api/assistencia/os/integracao-crm/ordens/${encodeURIComponent(String(orderIdentifier).trim())}`;
+  try {
+    const data = await requestJson(path, { method: 'GET' });
+    return data?.os || null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function listServiceOrdersFromIluxWeb(customerExternalId, { limit = 100 } = {}) {
   if (!isIluxWebConfigured() || !customerExternalId) return { items: [], lastSyncedAt: null, source: null };
   const basePath = process.env.ILUX_WEB_OS_ORDERS_PATH || DEFAULT_ORDERS_PATH;
@@ -193,6 +204,7 @@ module.exports = {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
   getCustomerProductsHistoryFromIluxWeb,
+  getServiceOrderFromIluxWeb,
   getSummaryFromIluxWeb,
   isIluxWebConfigured,
   listContractsFromIluxWeb,
