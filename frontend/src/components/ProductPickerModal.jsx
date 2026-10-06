@@ -186,7 +186,7 @@ export default function ProductPickerModal({
                   padding: '12px 16px',
                   borderRadius: '11px',
                   border: added ? '1px solid var(--accent)' : '1px solid var(--border-color)',
-                  background: added ? 'rgba(234, 88, 12, 0.12)' : 'var(--bg-base)',
+                  background: added ? 'rgba(227, 30, 36, 0.12)' : 'var(--bg-base)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',

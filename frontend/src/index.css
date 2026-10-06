@@ -17,16 +17,16 @@
   --leading-normal: 1.5;
   --leading-relaxed: 1.65;
 
-  /* Graphite + laranja PrintGuard */
-  --brand-solid: #D4510B;
-  --brand-solid-hover: #B74408;
+  /* LCD Digital Brand - Vermelho Oficial (#E31E24) */
+  --brand-solid: #E31E24;
+  --brand-solid-hover: #C6191E;
   --brand-on-solid: #FFFFFF;
-  --accent: #FF6A00;
-  --accent-hover: #FF8533;
-  --accent-strong: #FFB070;
-  --accent-light: rgba(255, 106, 0, 0.13);
-  --accent-border: rgba(255, 106, 0, 0.34);
-  --focus-ring: rgba(255, 106, 0, 0.42);
+  --accent: #E31E24;
+  --accent-hover: #C6191E;
+  --accent-strong: #FF4D52;
+  --accent-light: rgba(227, 30, 36, 0.08);
+  --accent-border: rgba(227, 30, 36, 0.22);
+  --focus-ring: rgba(227, 30, 36, 0.35);
 
   /* Semantic colors */
   /* Criticidade: vermelho quente, sem o tom rosado dos vermelhos claros */
@@ -42,15 +42,14 @@
   --warning-text: #FCD34D;
   --warning-light: rgba(245, 158, 11, 0.1);
   --warning-border: rgba(245, 158, 11, 0.24);
-  --info: #F97316;
-  --info-text: #FDBA74;
-  --info-light: rgba(249, 115, 22, 0.1);
-  --info-border: rgba(249, 115, 22, 0.24);
-  /* Urgência real / SLA estourado — vermelho forte, um tom acima do --danger (ação destrutiva) */
-  --critical: #FF3B30;
-  --critical-light: rgba(151, 29, 24, 0.26);
-  --critical-border: rgba(255, 59, 48, 0.46);
-  --overlay-bg: rgba(0, 0, 0, 0.65);
+  --info: #E31E24;
+  --info-text: #FF6B70;
+  --info-light: rgba(227, 30, 36, 0.08);
+  --info-border: rgba(227, 30, 36, 0.22);
+  --critical: #C6191E;
+  --critical-light: rgba(198, 25, 30, 0.15);
+  --critical-border: rgba(198, 25, 30, 0.35);
+  --overlay-bg: rgba(0, 0, 0, 0.68);
 
   /* Spacing */
   --space-1: 0.25rem;
@@ -119,18 +118,21 @@ body.dark-theme {
   --text-main: #F4F6FA;
   --text-muted: #AAB4C5;
   --text-dim: #7C899E;
-  --text-inverse: #241006;
-  --accent: #FF6A00;
-  --accent-hover: #FF8533;
-  --accent-strong: #FFB070;
+  --text-inverse: #FFFFFF;
+  --accent: #E31E24;
+  --accent-hover: #FF4D52;
+  --accent-strong: #FF7075;
+  --accent-light: rgba(227, 30, 36, 0.14);
+  --accent-border: rgba(227, 30, 36, 0.28);
+  --focus-ring: rgba(227, 30, 36, 0.35);
   color-scheme: dark;
 
   /* Message Bubbles - Dark */
   --bg-msg-me: #1d5f52;
   --text-msg-me: #eefbf6;
-  --bg-msg-ai: rgba(255, 106, 0, 0.16);
-  --text-msg-ai: #ffe0c2;
-  --border-msg-ai: rgba(255, 106, 0, 0.26);
+  --bg-msg-ai: rgba(227, 30, 36, 0.14);
+  --text-msg-ai: #FFA8AB;
+  --border-msg-ai: rgba(227, 30, 36, 0.26);
   --bg-msg-contact: #181d27;
   --text-msg-contact: var(--text-main);
   --glass-bg: rgba(17, 21, 29, 0.86);
@@ -165,30 +167,30 @@ body.light-theme {
   --lead-preview-hint: #64748b;
   --lead-preview-time: #64748b;
   --lead-preview-image-bg: #e2e8f0;
-  --accent: #D4510B;
-  --accent-hover: #B74408;
-  --accent-strong: #963B06;
-  --accent-light: rgba(212, 81, 11, 0.10);
-  --accent-border: rgba(212, 81, 11, 0.28);
-  --focus-ring: rgba(212, 81, 11, 0.30);
+  --accent: #E31E24;
+  --accent-hover: #C6191E;
+  --accent-strong: #A81318;
+  --accent-light: rgba(227, 30, 36, 0.08);
+  --accent-border: rgba(227, 30, 36, 0.20);
+  --focus-ring: rgba(227, 30, 36, 0.30);
   --danger: #B42318;
-  --danger-light: rgba(180, 35, 24, 0.09);
-  --danger-border: rgba(180, 35, 24, 0.26);
-  --critical: #C81E1E;
-  --critical-light: rgba(200, 30, 30, 0.09);
-  --critical-border: rgba(200, 30, 30, 0.26);
+  --danger-light: rgba(180, 35, 24, 0.08);
+  --danger-border: rgba(180, 35, 24, 0.22);
+  --critical: #C6191E;
+  --critical-light: rgba(198, 25, 30, 0.08);
+  --critical-border: rgba(198, 25, 30, 0.22);
   --danger-text: #B91C1C;
   --success-text: #15803D;
   --warning-text: #A16207;
-  --info-text: #C2410C;
+  --info-text: #E31E24;
   color-scheme: light;
 
   /* Message Bubbles - Light */
   --bg-msg-me: #dff4ea;
   --text-msg-me: #113328;
-  --bg-msg-ai: rgba(212, 81, 11, 0.09);
-  --text-msg-ai: #7c2d0a;
-  --border-msg-ai: rgba(212, 81, 11, 0.20);
+  --bg-msg-ai: rgba(227, 30, 36, 0.07);
+  --text-msg-ai: #8A1014;
+  --border-msg-ai: rgba(227, 30, 36, 0.18);
   --bg-msg-contact: #FFFFFF;
   --text-msg-contact: var(--text-main);
   --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
@@ -215,8 +217,8 @@ body .inbox-workspace {
   --rail-ink: #E9EBEE;
   --rail-dim: #A2ABB5;
   --rail-faint: #7A838F;
-  --rail-cyan: #FF6A00;
-  --rail-magenta: #FF3B30;
+  --rail-cyan: #E31E24;
+  --rail-magenta: #FF453A;
   /* nome histórico; hoje é o vermelho de urgência/SLA */
 
   /* papel: a conversa. Neutro levemente frio, nunca creme. */
@@ -245,8 +247,8 @@ body.dark-theme .inbox-workspace {
   --rail-ink: #F4F6FA;
   --rail-dim: #AAB4C5;
   --rail-faint: #7C899E;
-  --rail-cyan: #FF6A00;
-  --rail-magenta: #F26D6D;
+  --rail-cyan: #E31E24;
+  --rail-magenta: #FF4D52;
 
   --paper: #0B0D12;
   --paper-raise: #11151D;

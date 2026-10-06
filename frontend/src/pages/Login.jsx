@@ -91,10 +91,10 @@ export default function Login({ supportPortal = false }) {
     }
   }
 
-  // Login sempre usa o acento do sistema (laranja PrintGuard = --accent).
+  // Login sempre usa o acento do sistema (vermelho LCD Digital = --accent).
   // O primaryColor de tenant nao tematiza mais nada no app; para reativar um
-  // login white-label no futuro, voltar a: tenantInfo?.primaryColor || '#FF6A00'.
-  const primaryColor = '#FF6A00';
+  // login white-label no futuro, voltar a: tenantInfo?.primaryColor || '#E31E24'.
+  const primaryColor = '#E31E24';
   const displayName = supportPortal ? 'Central de Suporte' : (tenantInfo?.name || (routeSlug ? routeSlug.toUpperCase() : 'Multiatendimento'));
   const hasTenant = Boolean(tenantInfo?.name);
   const year = new Date().getFullYear();
@@ -530,7 +530,7 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '0.5rem',
-    boxShadow: '0 12px 30px rgba(255, 106, 0, 0.28)',
+    boxShadow: '0 12px 30px rgba(227, 30, 36, 0.28)',
   },
   error: {
     color: '#FF9B9B',

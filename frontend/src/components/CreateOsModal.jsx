@@ -459,7 +459,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                   width: '100%',
                   padding: '11px 16px',
                   marginBottom: '10px',
-                  background: 'rgba(234, 88, 12, 0.08)',
+                  background: 'rgba(227, 30, 36, 0.08)',
                   border: '1.5px dashed var(--accent)',
                   borderRadius: '9px',
                   color: 'var(--accent)',
