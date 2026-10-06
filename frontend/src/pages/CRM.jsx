@@ -24,6 +24,7 @@ import {
   PackageSearch,
   Phone,
   Printer,
+  Receipt,
   RefreshCw,
   Search,
   Send,
@@ -972,9 +973,9 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
   // pode chegar aqui antes da visão 360 terminar de carregar em segundo plano.
   // Sem isso, o usuário via "Acesso restrito" por um instante antes dos dados reais.
   if (!financial && loading) return <div style={s.loadingInline}><RefreshCw size={16} className="spin" /> Carregando dados financeiros...</div>;
-  if (financial?.allowed && !financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Financeiro indisponivel" text={financial.sync?.error || 'Nao foi possivel sincronizar os titulos diretamente do ILUX WEB.'} />;
+  if (financial?.allowed && !financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Financeiro indisponivel" text={financial.sync?.error || 'Nao foi possivel sincronizar os titulos diretamente do LCDWEB.'} />;
   if (!financial?.allowed) return <Empty icon={<CreditCard size={28} />} title="Acesso financeiro restrito" text={financial?.reason || 'Esta área está disponível apenas para administradores.'} />;
-  if (!financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Aguardando sincronização financeira" text="Atualize a integração do ILUX WEB para carregar os títulos recentes." />;
+  if (!financial.synchronized) return <Empty icon={<RefreshCw size={28} />} title="Aguardando sincronização financeira" text="Atualize a integração do LCDWEB para carregar os títulos recentes." />;
 
   const documents = normalizeBillingDocuments(documentsData?.documents, selected);
   const delivery = documentsData?.delivery || {};
@@ -998,9 +999,6 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
     const preview = mode === 'open' ? window.open('about:blank', '_blank') : null;
     if (preview) {
       preview.opener = null;
-      // O agente pode levar alguns segundos para localizar o PDF oficial (ou
-      // gerá-lo sob demanda). Sem isso, a aba fica em branco nesse meio tempo e
-      // quem não conhece o sistema acha que deu erro ou que não vai abrir nada.
       preview.document.write(documentLoadingPageHtml(billingDocument.label));
       preview.document.close();
     }
@@ -1017,7 +1015,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
       }
       const mediaUrl = getMediaUrl(prepared.mediaUrl);
       if (!mediaUrl) throw new Error(prepared.status === 'pending'
-        ? 'O documento está sendo preparado pelo ILUX WEB. Tente novamente em instantes.'
+        ? 'O documento está sendo preparado pelo LCDWEB. Tente novamente em instantes.'
         : 'O servidor não devolveu o arquivo solicitado.');
       if (mode === 'open') {
         if (preview) preview.location.replace(mediaUrl);
@@ -1152,13 +1150,13 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
                 <Info label="Forma de pagamento" value={selected.paymentMethod} />
                 <Info label="Situação do boleto" value={selected.boletoStatus} />
                 <Info label="Nosso número" value={selected.ourNumber} />
-                <Info label="Contrato ILUX WEB" value={selected.contractExternalId} />
+                <Info label="Contrato" value={selected.contractExternalId || selected.faturaRef} />
               </div>
               {selected.digitableLine ? (
                 <div style={s.digitableLineBox}><span>Linha digitável</span><strong>{selected.digitableLine}</strong></div>
               ) : null}
               {selected.invoiceNotes ? (
-                <div style={s.invoiceNotes}><span>Observações da NF</span><p>{selected.invoiceNotes}</p></div>
+                <div style={s.invoiceNotes}><span>Observações</span><p>{selected.invoiceNotes}</p></div>
               ) : null}
 
               <section style={s.billingDocumentsSection} aria-labelledby="billing-documents-title">
@@ -1173,7 +1171,7 @@ function FinancialTab({ financial, loading, customerId, ticketId, canSend = fals
                 </div>
 
                 {documentsError ? <div style={s.documentError}><AlertCircle size={16} /><span>{documentsError}</span></div> : null}
-                {documentsLoading && !documentsData ? <div style={s.documentsLoading}><RefreshCw size={16} className="spin" /> Consultando NF, demonstrativo e boleto no ILUX WEB...</div> : null}
+                {documentsLoading && !documentsData ? <div style={s.documentsLoading}><RefreshCw size={16} className="spin" /> Consultando documentos no LCDWEB...</div> : null}
 
                 <div style={s.documentList}>
                   {documents.map((document) => {
@@ -1716,9 +1714,10 @@ function formatBillingPeriod(value) {
 function formatRawValue(value) { if (!hasValue(value)) return 'Não informado'; return typeof value === 'object' ? JSON.stringify(value) : String(value); }
 
 const BILLING_DOCUMENTS = [
-  { type: 'invoice', label: 'Nota Fiscal' },
+  { type: 'fatura', label: 'Fatura de Locação' },
   { type: 'statement', label: 'Demonstrativo' },
   { type: 'boleto', label: 'Boleto' },
+  { type: 'invoice', label: 'Nota Fiscal' },
 ];
 
 function documentTypeLabel(type) {
@@ -1728,24 +1727,35 @@ function documentTypeLabel(type) {
 function normalizeBillingDocuments(documents, receivable) {
   const received = new Map(arrayOf(documents).map((item) => [item.type, item]));
   const fallbackAvailability = {
-    invoice: Boolean(receivable?.invoiceNumber),
-    statement: Boolean(pick(receivable || {}, 'statementExternalId', 'demonstrativeExternalId', 'demonstrativoExternalId', 'billingPeriod')),
-    boleto: Boolean(receivable?.hasBoleto),
+    fatura: Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.faturaUrl),
+    statement: Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.statementUrl || receivable?.demonstrativoUrl || pick(receivable || {}, 'statementExternalId', 'demonstrativeExternalId', 'demonstrativoExternalId', 'billingPeriod')),
+    boleto: Boolean(receivable?.hasBoleto || receivable?.boletoId || receivable?.boletoUrl),
+    invoice: Boolean(receivable?.hasNotaFiscal || receivable?.invoicePdfUrl || (receivable?.invoiceNumber && !receivable?.hasFatura)),
   };
-  return BILLING_DOCUMENTS.map((definition) => {
-    const item = received.get(definition.type);
-    return {
-      ...definition,
-      ...(item || {}),
-      available: item?.available ?? fallbackAvailability[definition.type],
-      status: item?.status || (fallbackAvailability[definition.type] ? 'available' : 'unavailable'),
-    };
-  });
+  return BILLING_DOCUMENTS
+    .filter((definition) => {
+      // Se for Nota Fiscal e não tiver vínculo com NFS-e emitida, não exibe o card desabilitado no pacote
+      if (definition.type === 'invoice') {
+        const item = received.get('invoice');
+        return Boolean(item?.available ?? fallbackAvailability.invoice);
+      }
+      return true;
+    })
+    .map((definition) => {
+      const item = received.get(definition.type);
+      return {
+        ...definition,
+        ...(item || {}),
+        available: item?.available ?? fallbackAvailability[definition.type],
+        status: item?.status || (fallbackAvailability[definition.type] ? 'available' : 'unavailable'),
+      };
+    });
 }
 
 function receivableTitle(receivable) {
   if (!receivable) return 'Título financeiro';
   if (receivable.invoiceNumber) return `NF ${receivable.invoiceNumber}`;
+  if (receivable.faturaRef) return `Fatura ${receivable.faturaRef}`;
   if (receivable.documentNumber) return `Documento ${receivable.documentNumber}`;
   if (receivable.hasBoleto && receivable.ourNumber) return `Boleto nº ${receivable.ourNumber}`;
   if (receivable.description) return receivable.description;
@@ -1794,7 +1804,7 @@ function documentLoadingPageHtml(label) {
 function billingDocumentStatus(document) {
   if (document.error) return document.error;
   if (document.available === false || document.status === 'unavailable') return 'Não vinculado a esta cobrança';
-  if (document.status === 'pending') return 'Aguardando o ILUX WEB';
+  if (document.status === 'pending') return 'Processando no LCDWEB';
   if (document.status === 'failed') return 'Falha ao gerar — tente novamente';
   if (document.status === 'ready') return 'Pronto para visualizar e enviar';
   return 'Disponível para gerar';
@@ -1810,6 +1820,7 @@ function billingDocumentStatusStyle(document) {
 }
 
 function billingDocumentIcon(type) {
+  if (type === 'fatura') return <Receipt size={17} />;
   if (type === 'boleto') return <CreditCard size={17} />;
   if (type === 'statement') return <ClipboardList size={17} />;
   return <FileText size={17} />;
@@ -1819,7 +1830,7 @@ function billingDocumentSourceLabel(source) {
   if (source === 'crm-rerender') return 'gerado pelo CRM';
   if (source === 'ilux-export-folder') return 'arquivo da pasta';
   if (source === 'plugboleto') return 'API do banco';
-  if (source === 'ilux_web') return 'ILUX WEB';
+  if (['lcdweb', 'ilux_web', 'lcd_web'].includes(source)) return 'LCDWEB';
   return null;
 }
 

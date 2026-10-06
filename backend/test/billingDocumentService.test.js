@@ -4,7 +4,7 @@ const service = require('../src/services/billingDocumentService');
 const { _private } = service;
 const prisma = require('../src/lib/prisma');
 
-test('identifica a disponibilidade dos tres documentos pelo vinculo do titulo', () => {
+test('identifica a disponibilidade dos documentos pelo vinculo do titulo', () => {
   const receivable = {
     invoiceExternalId: '15894',
     invoiceNumber: '14494',
@@ -14,6 +14,8 @@ test('identifica a disponibilidade dos tres documentos pelo vinculo do titulo', 
   assert.equal(_private.documentAvailability(receivable, 'invoice'), true);
   assert.equal(_private.documentAvailability(receivable, 'statement'), true);
   assert.equal(_private.documentAvailability(receivable, 'boleto'), true);
+  assert.equal(_private.documentAvailability(receivable, 'fatura'), false);
+  assert.equal(_private.documentAvailability({ faturaId: 'f-1', faturaRef: 'LCD-202609' }, 'fatura'), true);
 });
 
 test('nao anuncia boleto ausente como disponivel', () => {
@@ -24,6 +26,7 @@ test('sourceLabel traduz a origem do documento', () => {
   assert.equal(service.sourceLabel('crm-rerender'), 'gerado pelo CRM');
   assert.equal(service.sourceLabel('ilux-export-folder'), 'arquivo da pasta');
   assert.equal(service.sourceLabel('plugboleto'), 'API do banco');
+  assert.equal(service.sourceLabel('lcdweb'), 'LCDWEB');
   assert.equal(service.sourceLabel('outra-coisa'), null);
   assert.equal(service.sourceLabel(null), null);
 });
@@ -56,13 +59,15 @@ test('completeDocumentRequest grava a origem (source) no registro do documento',
 });
 
 test('gera chaves independentes por titulo e tipo de documento', () => {
-  assert.equal(_private.requestExternalId('18741', 'invoice'), 'official-v1:18741:invoice');
-  assert.equal(_private.requestExternalId('18741', 'statement'), 'official-v1:18741:statement');
-  assert.equal(_private.requestExternalId('18741', 'boleto'), 'official-v1:18741:boleto');
+  assert.equal(_private.requestExternalId('18741', 'fatura'), 'official-v2:18741:fatura');
+  assert.equal(_private.requestExternalId('18741', 'invoice'), 'official-v2:18741:invoice');
+  assert.equal(_private.requestExternalId('18741', 'statement'), 'official-v2:18741:statement');
+  assert.equal(_private.requestExternalId('18741', 'boleto'), 'official-v2:18741:boleto');
 });
 
 test('gera nomes legiveis e seguros para envio no WhatsApp', () => {
-  const receivable = { externalId: '18741', invoiceNumber: '14494', billingPeriod: '07/2026' };
+  const receivable = { externalId: '18741', invoiceNumber: '14494', billingPeriod: '07/2026', faturaRef: 'LCD-202609-0F' };
+  assert.equal(_private.defaultFileName('fatura', receivable, 'Cartório'), 'FATURA LCD-202609-0F - CARTORIO.pdf');
   assert.equal(_private.defaultFileName('invoice', receivable, 'Postál Digital'), 'NF 14494 - POSTAL DIGITAL.pdf');
   assert.equal(_private.defaultFileName('statement', receivable, 'Postál Digital'), 'DEMONSTRATIVO 07 2026 - POSTAL DIGITAL.pdf');
   assert.equal(_private.defaultFileName('boleto', receivable, 'Postál Digital'), 'BOLETO NF 14494 - POSTAL DIGITAL.pdf');

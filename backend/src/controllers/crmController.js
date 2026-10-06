@@ -235,6 +235,19 @@ function normalizeReceivable(record) {
     isCancelled,
     invoiceNotes: first(rawValue(payload, 'invoiceNotes', 'nf_obs')),
     statementExternalId: first(rawValue(payload, 'statementExternalId', 'seqdemonstrativo')),
+    statementUrl: first(rawValue(payload, 'statementUrl', 'demonstrativoUrl')),
+    demonstrativoUrl: first(rawValue(payload, 'demonstrativoUrl', 'statementUrl')),
+    faturaId: first(rawValue(payload, 'faturaId')),
+    faturaRef: first(rawValue(payload, 'faturaRef')),
+    faturaStatus: first(rawValue(payload, 'faturaStatus')),
+    faturaUrl: first(rawValue(payload, 'faturaUrl')),
+    hasFatura: Boolean(first(rawValue(payload, 'hasFatura'), rawValue(payload, 'faturaId'), rawValue(payload, 'faturaRef'))),
+    hasNotaFiscal: Boolean(first(rawValue(payload, 'hasNotaFiscal'), rawValue(payload, 'invoicePdfUrl'), rawValue(payload, 'invoiceNumber'))),
+    invoicePdfUrl: first(rawValue(payload, 'invoicePdfUrl')),
+    invoiceXmlUrl: first(rawValue(payload, 'invoiceXmlUrl')),
+    invoiceId: first(rawValue(payload, 'invoiceId')),
+    invoiceType: first(rawValue(payload, 'invoiceType')),
+    invoiceStatus: first(rawValue(payload, 'invoiceStatus')),
     billingType: first(rawValue(payload, 'billingType', 'faturamento_tipo')),
     billingPeriod: first(rawValue(payload, 'billingPeriod', 'faturamento_periodo')),
     contractExternalId: first(rawValue(payload, 'contractExternalId', 'seqixlcontratos', 'seqcontrato')),
@@ -248,7 +261,7 @@ function normalizeReceivable(record) {
     digitableLine: first(rawValue(payload, 'digitableLine', 'titulolinhadigitavel', 'linha_digitavel')),
     barcode: first(rawValue(payload, 'barcode', 'titulocodigobarras')),
     hasBoleto: Boolean(
-      first(rawValue(payload, 'boletoId', 'id_boleto'), rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo'))
+      first(rawValue(payload, 'boletoId', 'id_boleto'), rawValue(payload, 'boletoPdfProtocol', 'pdf_protocolo'), rawValue(payload, 'boletoUrl'))
       || String(first(rawValue(payload, 'paymentMethod', 'nmformapagto')) || '').toUpperCase().includes('BOLETO')
     ),
     statusLabel: first(rawValue(payload, 'statusLabel', 'ds_receita_status')),
@@ -1603,7 +1616,7 @@ async function resolveCustomerReceivable(req) {
     iluxFinancial = await listReceivablesFromIluxWeb(customer.externalId, { limit: 250 });
   } catch (error) {
     error.statusCode = error.statusCode || 502;
-    error.message = `NÃ£o foi possÃ­vel consultar o financeiro do ILUX WEB: ${error.message}`;
+    error.message = `Não foi possível consultar o financeiro do LCDWEB: ${error.message}`;
     throw error;
   }
   const receivableId = String(req.params.receivableId);
@@ -1622,7 +1635,7 @@ async function resolveCustomerReceivable(req) {
     throw error;
   }
   if (receivable.isCancelled) {
-    const error = new Error('Este titulo foi cancelado ou removido no ILUX WEB e nao pode ser aberto ou reenviado.');
+    const error = new Error('Este titulo foi cancelado ou removido no LCDWEB e nao pode ser aberto ou reenviado.');
     error.statusCode = 410;
     throw error;
   }
@@ -1652,16 +1665,11 @@ async function getReceivableDocuments(req, res) {
       }),
     ]);
 
-    // Pré-aquecimento: assim que o gestor abre o título (antes mesmo de
-    // clicar em "abrir"/"reenviar"), já manda o agente do iLux começar a
-    // gerar a NF/Demonstrativo em segundo plano. Sem isso, o clique era o
-    // próprio gatilho e o cliente esperava o ciclo completo do agente
-    // (fila de long-poll + geração no ERP), o que podia levar quase 1 min.
-    // Não bloqueia a resposta, não re-tenta documentos que já falharam ou
-    // já estão em andamento (só os ainda nunca solicitados).
-    const documentsToPrewarm = documents.filter((doc) => doc.status === 'available' && ['invoice', 'statement'].includes(doc.type));
+    // Pré-aquecimento no LCDWEB: busca em segundo plano os documentos disponíveis
+    // para que no clique de visualizar/baixar/reenviar o PDF já esteja em cache local.
+    const documentsToPrewarm = documents.filter((doc) => doc.status === 'available' && ['fatura', 'statement', 'boleto', 'invoice'].includes(doc.type));
     if (documentsToPrewarm.length) {
-      Promise.all(documentsToPrewarm.map((doc) => billingDocuments.queueDocumentRequest({
+      Promise.all(documentsToPrewarm.map((doc) => billingDocuments.getOrRequestDocument({
         tenantId: context.tenantId,
         receivable: context.receivable,
         customerName,
@@ -1675,6 +1683,21 @@ async function getReceivableDocuments(req, res) {
         invoiceNumber: context.receivable.invoiceNumber,
         invoiceExternalId: context.receivable.invoiceExternalId,
         statementExternalId: context.receivable.statementExternalId,
+        faturaId: context.receivable.faturaId,
+        faturaRef: context.receivable.faturaRef,
+        faturaStatus: context.receivable.faturaStatus,
+        faturaUrl: context.receivable.faturaUrl,
+        hasFatura: context.receivable.hasFatura,
+        hasNotaFiscal: context.receivable.hasNotaFiscal,
+        statementUrl: context.receivable.statementUrl,
+        demonstrativoUrl: context.receivable.demonstrativoUrl,
+        invoicePdfUrl: context.receivable.invoicePdfUrl,
+        boletoId: context.receivable.boletoId,
+        boletoUrl: context.receivable.boletoUrl,
+        hasBoleto: context.receivable.hasBoleto,
+        ourNumber: context.receivable.ourNumber,
+        digitableLine: context.receivable.digitableLine,
+        barcode: context.receivable.barcode,
         issuedAt: context.receivable.issuedAt,
         billingPeriod: context.receivable.billingPeriod,
         billingType: context.receivable.billingType,

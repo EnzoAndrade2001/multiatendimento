@@ -8,16 +8,17 @@ const plugBoletoService = require('./plugBoletoService');
 const billingStatementService = require('./billingStatementService');
 const { mediaPath } = require('../utils/uploads');
 
-const DOCUMENT_TYPES = Object.freeze(['invoice', 'statement', 'boleto']);
+const DOCUMENT_TYPES = Object.freeze(['fatura', 'statement', 'boleto', 'invoice']);
 const DOCUMENT_LABELS = Object.freeze({
-  invoice: 'Nota Fiscal',
+  fatura: 'Fatura de Locação',
   statement: 'Demonstrativo',
   boleto: 'Boleto',
+  invoice: 'Nota Fiscal',
 });
 const REQUEST_ENTITY = 'billingDocumentRequest';
 const REQUEST_TIMEOUT_MS = 90_000;
 const MAX_PDF_SIZE = 20 * 1024 * 1024;
-const DOCUMENT_REQUEST_VERSION = 'official-v1';
+const DOCUMENT_REQUEST_VERSION = 'official-v2';
 
 let io = null;
 
@@ -42,8 +43,6 @@ function safePart(value, fallback) {
 }
 
 function requestExternalId(receivableExternalId, documentType) {
-  // Version the cache so PDFs rendered by the former synthetic layouts are
-  // never reused after switching to official iLux exports.
   return `${DOCUMENT_REQUEST_VERSION}:${receivableExternalId}:${documentType}`;
 }
 
@@ -56,20 +55,26 @@ function assertDocumentType(documentType) {
 }
 
 function documentAvailability(receivable, type) {
-  if (type === 'invoice') return Boolean(receivable.invoiceExternalId || receivable.invoiceNumber);
-  if (type === 'statement') return Boolean(receivable.statementExternalId || receivable.invoiceExternalId);
-  return Boolean(receivable.hasBoleto);
+  if (type === 'fatura') return Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.faturaUrl);
+  if (type === 'statement') return Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.statementUrl || receivable?.demonstrativoUrl || receivable?.statementExternalId);
+  if (type === 'boleto') return Boolean(receivable?.hasBoleto || receivable?.boletoId || receivable?.boletoUrl);
+  if (type === 'invoice') return Boolean(receivable?.hasNotaFiscal || receivable?.invoicePdfUrl || (receivable?.invoiceNumber && !receivable?.hasFatura));
+  return false;
 }
 
 function defaultFileName(type, receivable, customerName) {
   const customer = safePart(customerName, 'CLIENTE');
-  const invoice = safePart(receivable.invoiceNumber || receivable.documentNumber || receivable.externalId, 'SEM NUMERO');
-  if (type === 'invoice') return `NF ${invoice} - ${customer}.pdf`;
+  const invoice = safePart(receivable?.invoiceNumber || receivable?.documentNumber || receivable?.externalId, 'SEM NUMERO');
+  if (type === 'fatura') {
+    const ref = safePart(receivable?.faturaRef, invoice);
+    return `FATURA ${ref} - ${customer}.pdf`;
+  }
   if (type === 'statement') {
-    const period = safePart(receivable.billingPeriod, invoice);
+    const period = safePart(receivable?.billingPeriod, invoice);
     return `DEMONSTRATIVO ${period} - ${customer}.pdf`;
   }
-  const boletoNumber = safePart(receivable.ourNumber || invoice, 'SEM NUMERO');
+  if (type === 'invoice') return `NF ${invoice} - ${customer}.pdf`;
+  const boletoNumber = safePart(receivable?.ourNumber || invoice, 'SEM NUMERO');
   return `BOLETO ${boletoNumber} - ${customer}.pdf`;
 }
 
@@ -88,29 +93,109 @@ function publicFileExists(mediaUrl) {
   return Boolean(filename && fs.existsSync(path.join(mediaPath, filename)));
 }
 
+function resolveLcdWebDocumentPath(type, receivable) {
+  const faturaId = receivable?.faturaId;
+  const boletoId = receivable?.boletoId;
+  if (type === 'fatura') {
+    if (faturaId) return `/api/faturas/${encodeURIComponent(faturaId)}/fatura-locacao.pdf`;
+    if (receivable?.faturaUrl) {
+      try {
+        const u = new URL(receivable.faturaUrl);
+        return u.pathname;
+      } catch {
+        return receivable.faturaUrl;
+      }
+    }
+  }
+  if (type === 'statement') {
+    if (faturaId) return `/api/faturas/${encodeURIComponent(faturaId)}/demonstrativo.pdf`;
+    if (receivable?.demonstrativoUrl || receivable?.statementUrl) {
+      const url = receivable.demonstrativoUrl || receivable.statementUrl;
+      try {
+        const u = new URL(url);
+        return u.pathname;
+      } catch {
+        return url;
+      }
+    }
+  }
+  if (type === 'boleto') {
+    if (boletoId) return `/api/boletos/${encodeURIComponent(boletoId)}/pdf`;
+    if (receivable?.boletoUrl) {
+      try {
+        const u = new URL(receivable.boletoUrl);
+        return u.pathname;
+      } catch {
+        return receivable.boletoUrl;
+      }
+    }
+  }
+  if (type === 'invoice') {
+    if (receivable?.invoicePdfUrl) {
+      try {
+        const u = new URL(receivable.invoicePdfUrl);
+        return u.pathname;
+      } catch {
+        return receivable.invoicePdfUrl;
+      }
+    }
+  }
+  return null;
+}
+
+async function fetchPdfFromLcdWeb(documentPath) {
+  const baseUrl = String(process.env.ILUX_WEB_URL || 'http://lcd_digital_backend:3001').trim().replace(/\/+$/, '');
+  const token = String(process.env.ILUX_WEB_SYNC_TOKEN || '').trim();
+  const url = documentPath.startsWith('http://') || documentPath.startsWith('https://')
+    ? documentPath
+    : `${baseUrl}${documentPath.startsWith('/') ? '' : '/'}${documentPath}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/pdf',
+      'X-Lcd-Agente-Token': token,
+      'X-Ilux-Agente-Token': token,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`LCDWEB respondeu HTTP ${response.status}: ${errorText.slice(0, 300) || response.statusText}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (!buffer.subarray(0, 4).equals(Buffer.from('%PDF'))) {
+    throw new Error('LCDWEB não devolveu um arquivo PDF válido.');
+  }
+  return buffer;
+}
+
 function documentState(type, receivable, request, customerName) {
   const available = documentAvailability(receivable, type);
   const payload = request?.payload || {};
   const ready = payload.status === 'success' && publicFileExists(payload.mediaUrl);
-  const directIluxUrl = type === 'boleto' ? cleanText(receivable.boletoUrl) : null;
-  const directReady = Boolean(available && directIluxUrl);
   let status = available ? 'available' : 'unavailable';
-  if (['pending', 'processing'].includes(payload.status)) status = payload.status;
-  if (payload.status === 'failed') status = 'failed';
-  if (ready || directReady) status = 'ready';
+  if (ready) status = 'ready';
+  else if (payload.status === 'failed') status = 'failed';
+  else if (['pending', 'processing'].includes(payload.status)) status = payload.status;
+
   return {
     type,
-    label: DOCUMENT_LABELS[type],
-    externalId: type === 'invoice'
-      ? receivable.invoiceExternalId
-      : type === 'statement'
-        ? receivable.statementExternalId
-        : receivable.boletoId,
+    label: DOCUMENT_LABELS[type] || type,
+    externalId: type === 'fatura'
+      ? (receivable?.faturaId || receivable?.faturaRef)
+      : type === 'invoice'
+        ? (receivable?.invoiceExternalId || receivable?.invoiceId)
+        : type === 'statement'
+          ? (receivable?.statementExternalId || receivable?.faturaId)
+          : (receivable?.boletoId || receivable?.ourNumber),
     available,
     status,
-    mediaUrl: ready ? payload.mediaUrl : (directReady ? directIluxUrl : null),
+    mediaUrl: ready ? payload.mediaUrl : null,
     fileName: ready ? payload.fileName : defaultFileName(type, receivable, customerName),
-    source: ready ? (payload.source || null) : (directReady ? 'ilux_web' : null),
+    source: ready ? (payload.source || 'lcdweb') : (available ? 'lcdweb' : null),
     error: status === 'failed' ? cleanText(payload.error) : null,
   };
 }
@@ -120,6 +205,8 @@ const SOURCE_LABELS = Object.freeze({
   'crm-rerender': 'gerado pelo CRM',
   'ilux-export-folder': 'arquivo da pasta',
   plugboleto: 'API do banco',
+  lcdweb: 'LCDWEB',
+  ilux_web: 'LCDWEB',
 });
 function sourceLabel(source) {
   return SOURCE_LABELS[source] || null;
@@ -263,38 +350,124 @@ async function tryStatementRerender(request, params) {
 }
 
 async function getOrRequestDocument(params) {
-  if (params.documentType === 'boleto' && cleanText(params.receivable?.boletoUrl)) {
+  assertDocumentType(params.documentType);
+  const { tenantId, receivable, customerName, documentType } = params;
+
+  if (!documentAvailability(receivable, documentType)) {
+    const error = new Error(`${DOCUMENT_LABELS[documentType]} não está disponível para este título no LCDWEB.`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const externalId = requestExternalId(receivable.externalId, documentType);
+  const existing = await prisma.externalSyncRecord.findFirst({
+    where: { tenantId, source: 'crm', entity: REQUEST_ENTITY, externalId },
+    select: { id: true, payload: true },
+  });
+
+  if (existing?.payload?.status === 'success' && publicFileExists(existing.payload.mediaUrl)) {
     return {
-      type: 'boleto',
+      type: documentType,
       status: 'ready',
-      mediaUrl: params.receivable.boletoUrl,
-      fileName: defaultFileName('boleto', params.receivable, params.customerName),
-      mimeType: 'application/pdf',
-      source: 'ilux_web',
-      sourceLabel: 'ILUX WEB',
+      mediaUrl: existing.payload.mediaUrl,
+      fileName: existing.payload.fileName || defaultFileName(documentType, receivable, customerName),
+      mimeType: existing.payload.mimeType || 'application/pdf',
+      source: existing.payload.source || 'lcdweb',
+      sourceLabel: sourceLabel(existing.payload.source || 'lcdweb'),
     };
   }
-  const request = await queueDocumentRequest(params);
-  const alreadyDone = request.payload?.status === 'success' && publicFileExists(request.payload.mediaUrl);
-  if (!alreadyDone) {
-    await tryPlugBoletoDirect(request, params);
-    await tryStatementRerender(request, params);
+
+  // Tenta obter direto do LCDWEB (fonte oficial da verdade)
+  const documentPath = resolveLcdWebDocumentPath(documentType, receivable);
+  if (documentPath) {
+    const displayName = defaultFileName(documentType, receivable, customerName);
+    const filename = storedFileName(displayName);
+    const filePath = path.join(mediaPath, filename);
+    try {
+      const pdfBuffer = await fetchPdfFromLcdWeb(documentPath);
+      await fs.promises.writeFile(filePath, pdfBuffer);
+
+      const payload = {
+        status: 'success',
+        completedAt: new Date().toISOString(),
+        mediaUrl: `/uploads/media/${filename}`,
+        fileName: displayName,
+        mimeType: 'application/pdf',
+        source: 'lcdweb',
+        receivableExternalId: String(receivable.externalId),
+        documentType,
+      };
+
+      await prisma.externalSyncRecord.upsert({
+        where: {
+          tenantId_source_entity_externalId: { tenantId, source: 'crm', entity: REQUEST_ENTITY, externalId },
+        },
+        update: { payload },
+        create: {
+          tenantId,
+          source: 'crm',
+          entity: REQUEST_ENTITY,
+          externalId,
+          payload,
+        },
+      });
+
+      return {
+        type: documentType,
+        status: 'ready',
+        mediaUrl: `/uploads/media/${filename}`,
+        fileName: displayName,
+        mimeType: 'application/pdf',
+        source: 'lcdweb',
+        sourceLabel: 'LCDWEB',
+      };
+    } catch (err) {
+      console.warn(`[billing-documents] Falha ao obter ${documentType} do LCDWEB (${documentPath}):`, err.message);
+      if (documentType === 'boleto') {
+        const request = await queueDocumentRequest(params);
+        const plugBoletoOk = await tryPlugBoletoDirect(request, params);
+        if (plugBoletoOk) {
+          const updated = await prisma.externalSyncRecord.findUnique({ where: { id: request.id }, select: { payload: true } });
+          if (updated?.payload?.status === 'success' && publicFileExists(updated.payload.mediaUrl)) {
+            return {
+              type: 'boleto',
+              status: 'ready',
+              mediaUrl: updated.payload.mediaUrl,
+              fileName: updated.payload.fileName || displayName,
+              mimeType: 'application/pdf',
+              source: 'plugboleto',
+              sourceLabel: sourceLabel('plugboleto'),
+            };
+          }
+        }
+      }
+      throw err;
+    }
   }
-  const fresh = alreadyDone
-    ? request
-    : await prisma.externalSyncRecord.findUnique({ where: { id: request.id }, select: { payload: true } });
-  const payload = fresh?.payload?.status === 'success' && publicFileExists(fresh.payload.mediaUrl)
-    ? fresh.payload
-    : await waitForDocument(request.id);
-  return {
-    type: params.documentType,
-    status: 'ready',
-    mediaUrl: payload.mediaUrl,
-    fileName: payload.fileName || defaultFileName(params.documentType, params.receivable, params.customerName),
-    mimeType: payload.mimeType || 'application/pdf',
-    source: payload.source || null,
-    sourceLabel: sourceLabel(payload.source),
-  };
+
+  // Fallback caso não haja documentPath mapeado (ex.: boleto avulso via PlugBoleto)
+  if (documentType === 'boleto') {
+    const request = await queueDocumentRequest(params);
+    const plugBoletoOk = await tryPlugBoletoDirect(request, params);
+    if (plugBoletoOk) {
+      const updated = await prisma.externalSyncRecord.findUnique({ where: { id: request.id }, select: { payload: true } });
+      if (updated?.payload?.status === 'success' && publicFileExists(updated.payload.mediaUrl)) {
+        return {
+          type: 'boleto',
+          status: 'ready',
+          mediaUrl: updated.payload.mediaUrl,
+          fileName: updated.payload.fileName || defaultFileName('boleto', receivable, customerName),
+          mimeType: 'application/pdf',
+          source: 'plugboleto',
+          sourceLabel: sourceLabel('plugboleto'),
+        };
+      }
+    }
+  }
+
+  const error = new Error(`Documento ${DOCUMENT_LABELS[documentType]} não encontrado no LCDWEB.`);
+  error.statusCode = 404;
+  throw error;
 }
 
 function validatePdfResult(result) {
@@ -440,7 +613,8 @@ async function resolveDelivery({ tenantId, customerId, ticketId }) {
 }
 
 function billingCaption(receivable, customerName) {
-  return `Documentos da cobranca - NF ${receivable.invoiceNumber || receivable.externalId} - ${customerName}`;
+  const ref = receivable?.faturaRef || receivable?.invoiceNumber || receivable?.ourNumber || receivable?.externalId || '';
+  return `Documentos da cobranca${ref ? ` - Ref ${ref}` : ''} - ${customerName}`;
 }
 
 async function sendDocuments({ tenantId, userId, customer, receivable, documentTypes, ticketId }) {
@@ -487,8 +661,18 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
 
   try {
     for (const document of documents) {
-      const filePath = path.join(mediaPath, path.basename(document.mediaUrl));
-      const base64 = (await fs.promises.readFile(filePath)).toString('base64');
+      const filename = path.basename(document.mediaUrl || '');
+      const filePath = path.join(mediaPath, filename);
+      let base64;
+      if (fs.existsSync(filePath)) {
+        base64 = (await fs.promises.readFile(filePath)).toString('base64');
+      } else if (document.mediaUrl && (document.mediaUrl.startsWith('http://') || document.mediaUrl.startsWith('https://'))) {
+        const resp = await fetch(document.mediaUrl);
+        const ab = await resp.arrayBuffer();
+        base64 = Buffer.from(ab).toString('base64');
+      } else {
+        throw new Error(`Arquivo do documento ${document.fileName || document.type} não encontrado.`);
+      }
       const result = await evolutionService.sendMedia(
         evolutionUrl,
         evolutionKey,
@@ -497,10 +681,10 @@ async function sendDocuments({ tenantId, userId, customer, receivable, documentT
         {
           mediatype: 'document',
           media: base64,
-          mimetype: document.mimeType,
+          mimetype: document.mimeType || 'application/pdf',
           filename: document.fileName,
           caption,
-          filePath,
+          filePath: fs.existsSync(filePath) ? filePath : undefined,
         },
       );
       const message = await prisma.message.create({
