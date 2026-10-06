@@ -1730,7 +1730,7 @@ function normalizeBillingDocuments(documents, receivable) {
     fatura: Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.faturaUrl),
     statement: Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.statementUrl || receivable?.demonstrativoUrl || pick(receivable || {}, 'statementExternalId', 'demonstrativeExternalId', 'demonstrativoExternalId', 'billingPeriod')),
     boleto: Boolean(receivable?.hasBoleto || receivable?.boletoId || receivable?.boletoUrl),
-    invoice: Boolean(receivable?.hasNotaFiscal || receivable?.invoicePdfUrl || (receivable?.invoiceNumber && !receivable?.hasFatura)),
+    invoice: Boolean(receivable?.invoicePdfUrl || (receivable?.invoiceNumber && (!receivable?.hasFatura || receivable?.hasNotaFiscal))),
   };
   return BILLING_DOCUMENTS
     .filter((definition) => {

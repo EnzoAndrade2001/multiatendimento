@@ -58,7 +58,7 @@ function documentAvailability(receivable, type) {
   if (type === 'fatura') return Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.faturaUrl);
   if (type === 'statement') return Boolean(receivable?.hasFatura || receivable?.faturaId || receivable?.statementUrl || receivable?.demonstrativoUrl || receivable?.statementExternalId);
   if (type === 'boleto') return Boolean(receivable?.hasBoleto || receivable?.boletoId || receivable?.boletoUrl);
-  if (type === 'invoice') return Boolean(receivable?.hasNotaFiscal || receivable?.invoicePdfUrl || (receivable?.invoiceNumber && !receivable?.hasFatura));
+  if (type === 'invoice') return Boolean(receivable?.invoicePdfUrl || (receivable?.invoiceNumber && (!receivable?.hasFatura || receivable?.hasNotaFiscal)));
   return false;
 }
 
