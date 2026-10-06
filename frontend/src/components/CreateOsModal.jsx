@@ -97,6 +97,13 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   }
 
   const selectedEquipment = equipments.find((equipment) => equipment.id === formData.equipmentId);
+  const selectedDefectType = defectTypes.find((type) => type.code === formData.cdDefeito);
+  const isTonerOrInk = Boolean(
+    formData.cdDefeito === 'ET'
+    || selectedDefectType?.code === 'ET'
+    || selectedDefectType?.name?.toUpperCase().includes('TONER')
+    || selectedDefectType?.name?.toUpperCase().includes('TINTA')
+  );
 
   // Ao escolher o equipamento, avisa se ele já tem O.S. em aberto (mesma
   // checagem do cockpit Saúde do Parque). Não bloqueia — informa.
@@ -228,10 +235,28 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   }
 
   async function handleSave() {
-    if (!formData.equipmentId) return toast.error('Selecione um equipamento.');
-    if (!formData.cdOstp) return toast.error('Selecione o tipo de O.S.');
-    if (!formData.cdDefeito) return toast.error('Selecione o tipo de defeito.');
-    if (!formData.defect) return toast.error('Informe o defeito reportado.');
+    if (!formData.equipmentId) {
+      setError('Selecione um equipamento.');
+      return toast.error('Selecione um equipamento.');
+    }
+    if (!formData.cdOstp) {
+      setError('Selecione o tipo de O.S.');
+      return toast.error('Selecione o tipo de O.S.');
+    }
+    if (!formData.cdDefeito) {
+      setError('É obrigatório informar o tipo de defeito para abrir a O.S.');
+      return toast.error('Selecione o tipo de defeito.');
+    }
+    if (isTonerOrInk && produtos.length === 0) {
+      setError('Para o tipo de defeito REPOSIÇÃO DE TONER/TINTA, é obrigatório adicionar pelo menos um item à O.S.');
+      toast.error('Adicione pelo menos um toner ou peça antes de abrir a O.S.');
+      setProductPickerOpen(true);
+      return;
+    }
+    if (!formData.defect) {
+      setError('Informe o defeito reportado.');
+      return toast.error('Informe o defeito reportado.');
+    }
     setSaving(true);
     setError('');
     try {
@@ -413,11 +438,27 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               ))}
             </select>
 
-            <label style={s.label}>TIPO DE DEFEITO</label>
+            <label style={s.label}>
+              TIPO DE DEFEITO <span style={{ color: 'var(--danger, #E31E24)', fontWeight: 800 }}>* (OBRIGATÓRIO)</span>
+            </label>
             <select
-              style={s.input}
+              style={{
+                ...s.input,
+                border: error && !formData.cdDefeito ? '1.5px solid var(--danger, #E31E24)' : s.input.border,
+              }}
               value={formData.cdDefeito}
-              onChange={e => updateFormData({...formData, cdDefeito: e.target.value})}
+              onChange={e => {
+                const val = e.target.value;
+                updateFormData({ ...formData, cdDefeito: val });
+                const typeObj = defectTypes.find(t => t.code === val);
+                const isToner = val === 'ET'
+                  || typeObj?.code === 'ET'
+                  || typeObj?.name?.toUpperCase().includes('TONER')
+                  || typeObj?.name?.toUpperCase().includes('TINTA');
+                if (isToner && produtos.length === 0) {
+                  setProductPickerOpen(true);
+                }
+              }}
             >
               <option value="">Selecione o tipo de defeito...</option>
               {defectTypes.map(type => (
@@ -439,10 +480,25 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
               ))}
             </select>
 
-            <div style={{ marginBottom: 'var(--space-4)', padding: '14px', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+            <div style={{
+              marginBottom: 'var(--space-4)',
+              padding: '14px',
+              background: 'var(--bg-base)',
+              border: isTonerOrInk && produtos.length === 0 ? '1.5px solid var(--danger, #E31E24)' : '1px solid var(--border-color)',
+              borderRadius: '10px',
+              boxShadow: isTonerOrInk && produtos.length === 0 ? '0 0 0 1px rgba(227, 30, 36, 0.15)' : 'none',
+              transition: 'border-color 0.2s ease',
+            }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                 <label style={{ ...s.label, marginBottom: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Package size={14} /> PEÇAS / TONERS UTILIZADOS (OPCIONAL)
+                  <Package size={14} /> PEÇAS / TONERS UTILIZADOS{' '}
+                  {isTonerOrInk ? (
+                    <span style={{ color: 'var(--danger, #E31E24)', fontWeight: 800, fontSize: '0.75rem', background: 'rgba(227, 30, 36, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                      * OBRIGATÓRIO PARA REPOSIÇÃO
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 500, fontSize: '0.75rem' }}>(OPCIONAL)</span>
+                  )}
                 </label>
                 {produtos.length > 0 && (
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)', fontWeight: 800 }}>
@@ -450,6 +506,25 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                   </span>
                 )}
               </div>
+
+              {isTonerOrInk && produtos.length === 0 && (
+                <div style={{
+                  marginBottom: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: 'rgba(227, 30, 36, 0.08)',
+                  border: '1px solid rgba(227, 30, 36, 0.3)',
+                  color: 'var(--danger, #E31E24)',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}>
+                  <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+                  <span>Para <strong>REPOSIÇÃO DE TONER/TINTA</strong>, é obrigatório adicionar pelo menos 1 item antes de abrir a O.S.</span>
+                </div>
+              )}
 
               {/* Botão de destaque para abrir o catálogo amplo com pesquisa e filtros */}
               <button
@@ -666,8 +741,16 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
                   ))}
                 </div>
               ) : (
-                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textAlign: 'center', padding: '6px 0' }}>
-                  Nenhum toner ou peça adicionado a esta O.S.
+                <div style={{
+                  color: isTonerOrInk ? 'var(--danger, #E31E24)' : 'var(--text-muted)',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: isTonerOrInk ? 600 : 400,
+                  textAlign: 'center',
+                  padding: '6px 0',
+                }}>
+                  {isTonerOrInk
+                    ? 'Nenhum toner adicionado ainda. Localize no catálogo ou adicione acima.'
+                    : 'Nenhum toner ou peça adicionado a esta O.S.'}
                 </div>
               )}
             </div>

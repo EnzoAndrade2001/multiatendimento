@@ -427,6 +427,15 @@ async function createOS(req, res) {
     }
     if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
     if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do ILUX WEB.' });
+    const isTonerOrInk = Boolean(
+      defectType.code === 'ET'
+      || String(cdDefeito).trim().toUpperCase() === 'ET'
+      || defectType.name?.toUpperCase().includes('TONER')
+      || defectType.name?.toUpperCase().includes('TINTA')
+    );
+    if (isTonerOrInk && (!Array.isArray(produtos) || produtos.length === 0)) {
+      return res.status(400).json({ error: 'Para o tipo de defeito REPOSIÇÃO DE TONER/TINTA, é obrigatório adicionar pelo menos um item.' });
+    }
     if (!isIluxWebEquipment(equipment)) {
       return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o ILUX WEB.' });
     }
