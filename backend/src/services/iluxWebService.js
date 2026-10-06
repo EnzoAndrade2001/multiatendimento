@@ -200,6 +200,35 @@ async function getCustomerProductsHistoryFromIluxWeb(customerExternalId, mes) {
   };
 }
 
+async function listCustomerEquipmentsFromIluxWeb(customerExternalId) {
+  if (!isIluxWebConfigured() || !customerExternalId) return [];
+  const basePath = process.env.ILUX_WEB_ORDERS_PATH || DEFAULT_ORDERS_PATH;
+  const path = `${basePath.replace(/\/+$/, '')}/${encodeURIComponent(String(customerExternalId))}/equipamentos`;
+  try {
+    const data = await requestJson(path, { method: 'GET' });
+    return Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+  } catch (error) {
+    console.warn(`[listCustomerEquipmentsFromIluxWeb] Falha ao buscar equipamentos do cliente ${customerExternalId}:`, error?.message || error);
+    try {
+      const contractsRes = await listContractsFromIluxWeb(customerExternalId);
+      const equips = [];
+      const seen = new Set();
+      for (const contract of contractsRes.items || []) {
+        for (const eq of contract.equipments || []) {
+          const key = eq.serialNumber || eq.externalId || eq.id;
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            equips.push(eq);
+          }
+        }
+      }
+      return equips;
+    } catch {
+      return [];
+    }
+  }
+}
+
 module.exports = {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
@@ -208,6 +237,7 @@ module.exports = {
   getSummaryFromIluxWeb,
   isIluxWebConfigured,
   listContractsFromIluxWeb,
+  listCustomerEquipmentsFromIluxWeb,
   listDefectTypesFromIluxWeb,
   listProductsFromIluxWeb,
   listReceivablesFromIluxWeb,

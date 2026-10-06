@@ -257,7 +257,7 @@ async function getEquipments(req, res) {
       ? await prisma.crmEquipment.findMany({
           where: {
             tenantId,
-            externalSource: 'firebird',
+            externalSource: { in: ['firebird', 'LCDDIGITALWEB', 'ilux_web', 'lcddigitalweb'] },
             externalId: { in: externalIds },
           },
           select: {
