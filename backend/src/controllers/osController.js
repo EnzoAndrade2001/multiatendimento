@@ -969,6 +969,14 @@ async function generatePdf(req, res) {
     const currentCanonicalId = String(iluxWebOrder?.id || iluxWebOrder?.canonicalId || '').trim();
     const currentNumber = String(iluxWebOrder?.numero || iluxWebOrder?.legacyNumber || '').trim();
 
+    const targetEquipmentId = humanPdfCode(
+      iluxWebOrder?.equipmentCodigoLegado,
+      osPrintData?.serviceOrder?.cdequipamento,
+      osPrintData?.equipment?.cdequipamento,
+      crmEquipment?.assetTag,
+      crmEquipment?.raw?.codigoLegado,
+    );
+
     previousOrders = [...uniqueOrders.values()]
       .filter((item) => {
         const id = String(item.externalId || '').trim();
@@ -978,6 +986,10 @@ async function generatePdf(req, res) {
         if (currentCanonicalId && (id === currentCanonicalId || canon === currentCanonicalId)) return false;
         if (currentNumber && (id === currentNumber || canon === currentNumber)) return false;
         return true;
+      })
+      .filter((item) => {
+        if (!targetEquipmentId || targetEquipmentId === 'PENDENTE') return true;
+        return String(item.equipmentExternalId) === String(targetEquipmentId);
       })
       .sort((left, right) => {
         const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
@@ -1401,6 +1413,9 @@ async function generatePdf(req, res) {
     });
 
     if (typeof res.capturePdf !== 'function') {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Content-Disposition', `inline; filename="OS_${os.externalId || os.id.substring(os.id.length - 6)}.html"`);
       return res.send(officialHtml);
