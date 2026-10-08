@@ -1710,6 +1710,9 @@ async function generatePdf(req, res) {
     });
 
     if (typeof res.capturePdf !== 'function') {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Content-Disposition', `inline; filename="OS_${pdfOrderNumber}.html"`);
       return res.send(officialHtml);
