@@ -1270,8 +1270,21 @@ async function generatePdf(req, res) {
       const identity = item.sourceId || item.externalId;
       if (identity && !uniqueOrders.has(identity)) uniqueOrders.set(identity, item);
     }
+
+    const targetEquipmentId = humanPdfCode(
+      iluxWebOrder?.equipmentCodigoLegado,
+      osPrintData?.serviceOrder?.cdequipamento,
+      osPrintData?.equipment?.cdequipamento,
+      crmEquipment?.assetTag,
+      crmEquipment?.raw?.codigoLegado,
+    );
+
     previousOrders = [...uniqueOrders.values()]
       .filter((item) => item.externalId && item.externalId !== numericPdfCode(os.externalId, iluxWebOrder?.numero, iluxWebOrder?.legacyNumber))
+      .filter((item) => {
+        if (!targetEquipmentId || targetEquipmentId === 'PENDENTE') return true;
+        return String(item.equipmentExternalId) === String(targetEquipmentId);
+      })
       .sort((left, right) => {
         const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
         if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
