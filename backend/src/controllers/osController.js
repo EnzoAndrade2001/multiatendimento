@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const { isServiceOrderClosed, normalizeServiceOrderStatus } = require('../utils/serviceOrderStatus');
+const { reconcileServiceOrderStatuses } = require('../services/serviceOrderStatusReconciliationService');
 const pdfmake = require('pdfmake');
 const path = require('path');
 const fs = require('fs');
@@ -11,17 +12,13 @@ const { parseFirebirdDate } = require('../utils/firebirdDate');
 const {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
+  getCustomerProductsHistoryFromIluxWeb,
+  getServiceOrderFromIluxWeb,
   isIluxWebConfigured,
-  listContractsFromIluxWeb,
   listDefectTypesFromIluxWeb,
+  listProductsFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
-const {
-  LCD_OFFICIAL_SOURCES,
-  isLcdOfficialEquipmentSource,
-  isLcdOfficialServiceOrderSource,
-} = require('../utils/externalSource');
-const { readEquipmentLocation } = require('../utils/equipmentLocation');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -33,18 +30,21 @@ const OS_DRAFT_TIMEOUT_MS = Math.max(
 );
 
 const ILUX_WEB_EQUIPMENT_SOURCES = new Set([
-  'LCDDIGITALWEB',
-  'lcd_digital_web',
-  'lcd-digital-web',
+  'firebird',
   'ilux_web',
   'ilux-web',
   'iluxweb',
+  'lcddigitalweb',
 ]);
 
-const CRM_EXTERNAL_SOURCES = LCD_OFFICIAL_SOURCES;
-
-const LCD_EQUIPMENT_SOURCES = [...ILUX_WEB_EQUIPMENT_SOURCES];
-const LCD_SERVICE_ORDER_SOURCES = LCD_OFFICIAL_SOURCES;
+const CRM_EXTERNAL_SOURCES = [
+  'firebird',
+  'LCDDIGITALWEB',
+  'ilux_web',
+  'ilux-web',
+  'iluxweb',
+  'lcddigitalweb',
+];
 
 function cleanLegacyDefect(value) {
   const text = String(value || '').trim();
@@ -52,21 +52,8 @@ function cleanLegacyDefect(value) {
 }
 
 function isIluxWebEquipment(equipment) {
-  return Boolean(equipment?.externalId && isLcdOfficialEquipmentSource(equipment.externalSource));
-}
-
-function equipmentWhereForContact(tenantId, contactId, crmCustomerId = null) {
-  return {
-    tenantId,
-    isActive: true,
-    externalSource: { in: LCD_EQUIPMENT_SOURCES },
-    OR: crmCustomerId
-      ? [
-        { contactId },
-        { contact: { is: { crmCustomerId } } },
-      ]
-      : [{ contactId }],
-  };
+  const source = String(equipment?.externalSource || '').trim().toLowerCase();
+  return Boolean(equipment?.externalId && ILUX_WEB_EQUIPMENT_SOURCES.has(source));
 }
 
 function sleep(ms) {
@@ -106,38 +93,6 @@ function firstPdfValue(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
 }
 
-function numericPdfCode(...values) {
-  for (const value of values) {
-    const normalized = String(value ?? '').trim();
-    if (/^\d+$/.test(normalized) && Number(normalized) > 0) return normalized;
-  }
-  return '';
-}
-
-function humanPdfCode(...values) {
-  const numeric = numericPdfCode(...values);
-  return numeric || 'PENDENTE';
-}
-
-function isSameOfficialOrder(item, order) {
-  const expected = new Set([order?.id, order?.externalId].filter(Boolean).map(String));
-  const candidates = [item?.id, item?.externalId, item?.numero, item?.seqos, item?.legacyNumber]
-    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
-    .map(String);
-  return candidates.some((candidate) => expected.has(candidate));
-}
-
-function findOfficialOrderForPdf(items, id) {
-  const requested = String(id || '').trim();
-  if (!requested) return null;
-  return (Array.isArray(items) ? items : []).find((item) => {
-    const candidates = [item?.id, item?.canonicalId, item?.externalId, item?.numero, item?.seqos, item?.legacyNumber]
-      .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
-      .map((value) => String(value).trim());
-    return candidates.some((candidate) => candidate === requested);
-  }) || null;
-}
-
 function pdfDate(value, fallback = new Date()) {
   if (!value) return fallback;
   return parseFirebirdDate(value) || fallback;
@@ -147,11 +102,10 @@ function pdfOrderStatus(value) {
   return normalizeServiceOrderStatus(value);
 }
 
-async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
+async function resolveServiceOrderForPdf(tenantId, id) {
   const persisted = await prisma.serviceOrder.findFirst({
     where: {
       tenantId,
-      externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
       OR: [{ id }, { externalId: String(id) }],
     },
     include: {
@@ -163,139 +117,6 @@ async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
   });
   if (persisted) return { order: persisted, historicalRecord: null };
 
-  // O historico exibido no CRM vem do LCDDIGITALWEB. Uma O.S. antiga pode
-  // existir apenas no retorno oficial (sem uma copia em ServiceOrder), entao
-  // resolvemos uma representacao somente em memoria para gerar o PDF. Isso
-  // evita reintroduzir Firebird ou criar uma linha operacional falsa.
-  if (!customerId || !isIluxWebConfigured()) return null;
-
-  {
-  const customer = await prisma.crmCustomer.findFirst({
-    where: {
-      tenantId,
-      id: String(customerId),
-      externalSource: { in: CRM_EXTERNAL_SOURCES },
-    },
-  });
-  if (!customer?.externalId) return null;
-
-  let officialOrder = null;
-  try {
-    const result = await listServiceOrdersFromIluxWeb(customer.externalId, { limit: 250 });
-    officialOrder = findOfficialOrderForPdf(result?.items, id);
-  } catch (error) {
-    console.warn(`[resolveServiceOrderForPdf] O.S. oficial indisponivel para ${customer.externalId}:`, error.message);
-    return null;
-  }
-  if (!officialOrder) return null;
-
-  const equipmentExternalId = firstPdfValue(
-    officialOrder.equipmentExternalId,
-    officialOrder.equipmentCodigoLegado,
-    officialOrder.cdequipamento,
-    officialOrder.equipment?.externalId,
-    officialOrder.equipamento?.externalId,
-  );
-  const [contact, localEquipment, tenant] = await Promise.all([
-    prisma.contact.findFirst({
-      where: { tenantId, crmCustomerId: customer.id },
-      include: { crmCustomer: true },
-      orderBy: { createdAt: 'desc' },
-    }),
-    equipmentExternalId
-      ? prisma.equipment.findFirst({
-        where: {
-          tenantId,
-          externalSource: { in: LCD_EQUIPMENT_SOURCES },
-          externalId: String(equipmentExternalId),
-        },
-        orderBy: { updatedAt: 'desc' },
-      })
-      : null,
-    prisma.tenant.findUnique({ where: { id: tenantId }, include: { settings: true } }),
-  ]);
-  if (!tenant) return null;
-
-  const contactSnapshot = contact || {
-    id: `lcd-web-client-${customer.id}`,
-    tenantId,
-    externalSource: 'LCDDIGITALWEB',
-    externalId: customer.externalId,
-    crmCustomerId: customer.id,
-    crmCustomer: customer,
-    name: customer.name,
-    fantasyName: customer.fantasyName,
-    phone: customer.phone || '',
-    whatsapp: customer.phone || null,
-    cpfCnpj: customer.cpfCnpj,
-    email: customer.email,
-    address: customer.address,
-    city: customer.city,
-    state: customer.state,
-    zipCode: customer.zipCode,
-  };
-  const equipmentSnapshot = localEquipment || {
-    id: `lcd-web-equipment-${equipmentExternalId || id}`,
-    tenantId,
-    contactId: contactSnapshot.id,
-    externalSource: 'LCDDIGITALWEB',
-    externalId: equipmentExternalId ? String(equipmentExternalId) : null,
-    model: firstPdfValue(officialOrder.equipmentModel, officialOrder.equipment?.model, 'Equipamento'),
-    manufacturer: firstPdfValue(officialOrder.manufacturer, officialOrder.equipment?.manufacturer, null),
-    serialNumber: firstPdfValue(officialOrder.serialNumber, officialOrder.equipment?.serialNumber, null),
-    sector: firstPdfValue(officialOrder.equipmentDepartment, officialOrder.equipmentLocation, null),
-    address: firstPdfValue(officialOrder.equipmentAddress, officialOrder.enderecoAtendimento, null),
-    isActive: true,
-  };
-  const createdAt = pdfDate(
-    firstPdfValue(officialOrder.openedAt, officialOrder.dataAbertura, officialOrder.createdAt),
-    new Date(),
-  );
-  const closedAt = officialOrder.closedAt ? pdfDate(officialOrder.closedAt, null) : null;
-  const officialId = String(firstPdfValue(
-    officialOrder.id,
-    officialOrder.canonicalId,
-    officialOrder.externalId,
-    officialOrder.seqos,
-    officialOrder.numero,
-    officialOrder.legacyNumber,
-  ));
-
-  return {
-    historicalRecord: null,
-    order: {
-      id: `lcd-web-history-${officialId}`,
-      tenantId,
-      contactId: contactSnapshot.id,
-      equipmentId: equipmentSnapshot.id,
-      externalSource: 'LCDDIGITALWEB',
-      externalId: officialId,
-      externalUpdatedAt: officialOrder.updatedAt ? pdfDate(officialOrder.updatedAt, createdAt) : null,
-      requestKey: null,
-      ticketId: null,
-      cdOstp: firstPdfValue(officialOrder.cdOstp, officialOrder.type, officialOrder.tipoAtendimento),
-      cdDefeito: firstPdfValue(officialOrder.cdDefeito, officialOrder.defectTypeCode),
-      nmsuportet: firstPdfValue(officialOrder.technician, officialOrder.nmsuportet),
-      defect: firstPdfValue(officialOrder.defect, officialOrder.description, ''),
-      status: pdfOrderStatus(firstPdfValue(officialOrder.status, officialOrder.statusLabel)),
-      sourceStatusCode: firstPdfValue(officialOrder.statusCode, officialOrder.status),
-      technicalNotes: firstPdfValue(officialOrder.closing, officialOrder.solucaoTecnica, null),
-      meters: null,
-      userId: null,
-      createdAt,
-      updatedAt: officialOrder.updatedAt ? pdfDate(officialOrder.updatedAt, createdAt) : createdAt,
-      resolvedAt: officialOrder.attendedAt ? pdfDate(officialOrder.attendedAt, null) : null,
-      closedAt,
-      contact: contactSnapshot,
-      equipment: equipmentSnapshot,
-      tenant,
-      user: null,
-    },
-  };
-  }
-
-  // Com o LCDDIGITALWEB configurado, uma O.S. Firebird não é uma O.S. do
-  // CRM e não pode ser reimpressa nem reintroduzida pela rota de PDF.
   // O CRM 360 mantem o historico completo em ExternalSyncRecord. Registros
   // antigos podem nao existir mais na tabela operacional (por exemplo, apos
   // uma desvinculacao/recriacao de equipamento), mas continuam validos no
@@ -305,7 +126,7 @@ async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
     where: {
       tenantId_source_entity_externalId: {
         tenantId,
-        source: 'ilux_web',
+        source: 'firebird',
         entity: 'serviceOrders',
         externalId: String(id),
       },
@@ -322,12 +143,12 @@ async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
   const [customer, crmEquipment, tenant] = await Promise.all([
     clientExternalId
       ? prisma.crmCustomer.findFirst({
-        where: { tenantId, externalSource: 'ilux_web', externalId: clientExternalId },
+        where: { tenantId, externalSource: 'firebird', externalId: clientExternalId },
       })
       : null,
     equipmentExternalId
       ? prisma.crmEquipment.findFirst({
-        where: { tenantId, externalSource: 'ilux_web', externalId: equipmentExternalId },
+        where: { tenantId, externalSource: 'firebird', externalId: equipmentExternalId },
       })
       : null,
     prisma.tenant.findUnique({
@@ -347,7 +168,7 @@ async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
   const contact = {
     id: customer?.id || `firebird-client-${clientExternalId || id}`,
     tenantId,
-    externalSource: 'ilux_web',
+    externalSource: 'firebird',
     externalId: clientExternalId || null,
     crmCustomerId: customer?.id || null,
     crmCustomer: customer || null,
@@ -366,7 +187,7 @@ async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
     id: crmEquipment?.id || `firebird-equipment-${equipmentExternalId || id}`,
     tenantId,
     contactId: contact.id,
-    externalSource: 'ilux_web',
+    externalSource: 'firebird',
     externalId: equipmentExternalId || null,
     model: firstPdfValue(crmEquipment?.model, payload.equipmentModel, raw.modeloe, `Equipamento ${equipmentExternalId || id}`),
     manufacturer: firstPdfValue(crmEquipment?.manufacturer, payload.manufacturer, raw.fabricante, null),
@@ -383,7 +204,7 @@ async function resolveServiceOrderForPdf(tenantId, id, customerId = null) {
       tenantId,
       contactId: contact.id,
       equipmentId: equipment.id,
-      externalSource: 'ilux_web',
+      externalSource: 'firebird',
       externalId: String(id),
       externalUpdatedAt: historicalRecord.syncedAt,
       requestKey: null,
@@ -413,10 +234,7 @@ async function getEquipments(req, res) {
   const { tenantId } = req.user;
 
   try {
-    const contact = await prisma.contact.findFirst({
-      where: { id: contactId, tenantId },
-      select: { id: true, crmCustomerId: true },
-    });
+    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
     if (!contact) return res.json([]);
 
     // Sincroniza os equipamentos do CRM para o contato
@@ -425,7 +243,9 @@ async function getEquipments(req, res) {
 
     const equipments = await prisma.equipment.findMany({
       where: {
-        ...equipmentWhereForContact(tenantId, contactId, contact.crmCustomerId),
+        tenantId,
+        isActive: true,
+        contactId
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -433,16 +253,11 @@ async function getEquipments(req, res) {
     const externalIds = equipments
       .map((equipment) => equipment.externalId)
       .filter(Boolean);
-
-    // Os equipamentos migrados do LCDDIGITALWEB usam externalSource
-    // "LCDDIGITALWEB" (e os antigos usam "firebird"). O filtro anterior
-    // considerava somente firebird, então descartava justamente as máquinas
-    // que tinham endereço no vínculo do contrato.
     const crmEquipments = externalIds.length > 0
       ? await prisma.crmEquipment.findMany({
           where: {
             tenantId,
-            externalSource: { in: LCD_EQUIPMENT_SOURCES },
+            externalSource: { in: ['firebird', 'LCDDIGITALWEB', 'ilux_web', 'lcddigitalweb'] },
             externalId: { in: externalIds },
           },
           select: {
@@ -458,56 +273,17 @@ async function getEquipments(req, res) {
       : [];
     const crmByExternalId = new Map(crmEquipments.map((equipment) => [equipment.externalId, equipment]));
 
-    // O endereço operacional é mantido no vínculo equipamento-contrato do
-    // iLux Web. Busca-o sob demanda para que a abertura da O.S. mostre a
-    // filial correta mesmo quando o cache antigo do CRM não tinha endereço.
-    const contractEquipmentByExternalId = new Map();
-    let crmCustomer = null;
-    if (contact.crmCustomerId) {
-      crmCustomer = await prisma.crmCustomer.findFirst({
-        where: { tenantId, id: contact.crmCustomerId },
-        select: { externalId: true },
-      });
-    }
-    if (crmCustomer?.externalId && isIluxWebConfigured()) {
-      try {
-        const contracts = await listContractsFromIluxWeb(crmCustomer.externalId, { limit: 250 });
-        for (const contract of contracts.items || []) {
-          for (const item of contract.equipments || []) {
-            const id = String(item.externalId || item.id || '').trim();
-            if (id && !contractEquipmentByExternalId.has(id)) contractEquipmentByExternalId.set(id, item);
-          }
-        }
-      } catch (error) {
-        // A falha transitória do iLux não impede abrir a O.S.; o cache local
-        // continua disponível como fallback.
-        console.warn('[getEquipments] endereço do vínculo indisponível:', error?.message || error);
-      }
-    }
-
     res.json(equipments.map((equipment) => {
       const crmEquipment = crmByExternalId.get(equipment.externalId);
-      const contractEquipment = contractEquipmentByExternalId.get(String(equipment.externalId || '').trim());
       const raw = crmEquipment?.raw && typeof crmEquipment.raw === 'object' ? crmEquipment.raw : {};
-      const contractLocation = readEquipmentLocation(contractEquipment || {});
-      const crmLocation = readEquipmentLocation({ ...(crmEquipment || {}), raw });
-      const localLocation = readEquipmentLocation(equipment);
-      const address = contractLocation.address || crmLocation.address || localLocation.address || null;
       return {
         ...equipment,
-        address,
-        city: contractLocation.city || crmLocation.city || localLocation.city || null,
-        state: contractLocation.state || crmLocation.state || localLocation.state || null,
-        complement: contractLocation.complement || crmLocation.complement || localLocation.complement || null,
-        neighborhood: contractLocation.neighborhood || crmLocation.neighborhood || localLocation.neighborhood || null,
-        department: contractEquipment?.department
-          || contractEquipment?.sector
-          || raw.departamento
-          || raw.DEPARTAMENTO
-          || crmEquipment?.sector
-          || equipment.sector
-          || null,
-        installLocation: contractLocation.installLocation || crmLocation.installLocation || localLocation.installLocation || null,
+        address: crmEquipment?.address || equipment.address || null,
+        city: crmEquipment?.city || raw.cidade || raw.CIDADE || null,
+        state: crmEquipment?.state || raw.uf || raw.UF || null,
+        complement: raw.complemento || raw.COMPLEMENTO || null,
+        department: raw.departamento || raw.DEPARTAMENTO || crmEquipment?.sector || equipment.sector || null,
+        installLocation: crmEquipment?.installLocation || raw.localinstal || raw.LOCALINSTAL || null,
       };
     }));
   } catch (err) {
@@ -558,64 +334,11 @@ async function deleteEquipment(req, res) {
 async function getOpenOrdersForEquipment(req, res) {
   const { tenantId } = req.user;
   const { equipmentId } = req.params;
-  const equipment = await prisma.equipment.findFirst({
-    where: {
-      id: equipmentId,
-      tenantId,
-      isActive: true,
-      externalSource: { in: LCD_EQUIPMENT_SOURCES },
-    },
-    select: {
-      id: true,
-      externalId: true,
-      contact: { select: { crmCustomer: { select: { externalId: true } } } },
-    },
-  });
+  const equipment = await prisma.equipment.findFirst({ where: { id: equipmentId, tenantId }, select: { id: true } });
   if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
-  if (isIluxWebConfigured() && equipment.contact?.crmCustomer?.externalId) {
-    try {
-      const result = await listServiceOrdersFromIluxWeb(equipment.contact.crmCustomer.externalId, { limit: 250 });
-      const officialOrders = (result.items || [])
-        .filter((item) => {
-          const itemEquipmentId = String(
-            item?.equipmentExternalId
-            || item?.equipmentCodigoLegado
-            || item?.cdequipamento
-            || item?.equipment?.externalId
-            || item?.equipamento?.externalId
-            || item?.equipamentoCodigo
-            || '',
-          ).trim();
-          return itemEquipmentId && itemEquipmentId === String(equipment.externalId).trim();
-        })
-        .filter((item) => !isServiceOrderClosed({
-          status: item?.status || item?.statusLabel || item?.nmstatus,
-          closedAt: item?.closedAt || item?.resolvedAt || item?.dataFechamento,
-        }))
-        .map((item) => ({
-          id: String(item?.id || item?.externalId || item?.numero || item?.numeroOs || '').trim(),
-          externalId: String(item?.externalId || item?.numero || item?.numeroOs || '').trim() || null,
-          status: normalizeServiceOrderStatus(item?.status || item?.statusLabel || item?.nmstatus),
-          cdOstp: item?.cdOstp || item?.tipoAtendimento || item?.type || null,
-          defect: item?.defect || item?.description || item?.observacao || null,
-          createdAt: item?.createdAt || item?.openedAt || item?.dataAbertura || null,
-          ticketId: null,
-        }))
-        .filter((item) => item.id);
-      return res.json(officialOrders.slice(0, 6));
-    } catch (error) {
-      console.warn(`[getOpenOrdersForEquipment] LCDDIGITALWEB indisponível para ${equipment.externalId}; usando cache oficial:`, error.message);
-    }
-  }
-
+  await reconcileServiceOrderStatuses(tenantId, { equipmentId });
   const orders = await prisma.serviceOrder.findMany({
-    where: {
-      tenantId,
-      equipmentId,
-      externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
-      closedAt: null,
-      resolvedAt: null,
-    },
+    where: { tenantId, equipmentId, closedAt: null, resolvedAt: null },
     select: { id: true, externalId: true, status: true, cdOstp: true, defect: true, createdAt: true, ticketId: true },
     orderBy: { createdAt: 'desc' },
     take: 12,
@@ -657,7 +380,7 @@ async function getOSList(req, res) {
   }
 
   const orders = await prisma.serviceOrder.findMany({
-    where: { ...where, externalSource: { in: LCD_SERVICE_ORDER_SOURCES } },
+    where,
     include: {
       contact: true,
       equipment: {
@@ -674,13 +397,10 @@ async function getOSList(req, res) {
 }
 
 async function createOS(req, res) {
-  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet } = req.body;
+  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet, produtos } = req.body;
   const { tenantId } = req.user;
 
   try {
-    if (!isIluxWebConfigured()) {
-      return res.status(503).json({ error: 'O LCDDIGITALWEB não está configurado. O CRM não usa Firebird como fallback.' });
-    }
     if (!contactId || !equipmentId || !ticketId || !requestKey || !cdOstp || !cdDefeito || !String(defect || '').trim()) {
       return res.status(400).json({ error: 'Cliente, equipamento, ticket, identificador, tipo de O.S., tipo de defeito e relato são obrigatórios.' });
     }
@@ -692,14 +412,7 @@ async function createOS(req, res) {
         where: { id: contactId, tenantId },
         include: { crmCustomer: true },
       }),
-      prisma.equipment.findFirst({
-        where: {
-          id: equipmentId,
-          tenantId,
-          isActive: true,
-          externalSource: { in: LCD_EQUIPMENT_SOURCES },
-        },
-      }),
+      prisma.equipment.findFirst({ where: { id: equipmentId, tenantId } }),
       prisma.crmOsType.findFirst({ where: { tenantId, code: String(cdOstp) } }),
       listDefectTypesFromIluxWeb(),
     ]);
@@ -714,41 +427,48 @@ async function createOS(req, res) {
     }
     if (!equipment) return res.status(404).json({ error: 'Equipamento não encontrado.' });
     if (!defectType) return res.status(400).json({ error: 'Selecione um tipo de defeito ativo do ILUX WEB.' });
+    const isTonerOrInk = Boolean(
+      defectType.code === 'ET'
+      || String(cdDefeito).trim().toUpperCase() === 'ET'
+      || defectType.name?.toUpperCase().includes('TONER')
+      || defectType.name?.toUpperCase().includes('TINTA')
+    );
+    if (isTonerOrInk && (!Array.isArray(produtos) || produtos.length === 0)) {
+      return res.status(400).json({ error: 'Para o tipo de defeito REPOSIÇÃO DE TONER/TINTA, é obrigatório adicionar pelo menos um item.' });
+    }
     if (!isIluxWebEquipment(equipment)) {
-      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o LCDDIGITALWEB.' });
+      return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o ILUX WEB.' });
     }
     // O vínculo confiável é a identidade do cliente no ILUX WEB, não Equipment.contactId:
     // Equipment é uma linha por máquina (única por externalId) e esse contactId é
     // reescrito toda vez que QUALQUER contato do mesmo cliente abre este modal
-    // (syncCrmEquipmentsToEquipment). Comparar por contactId fazia dois atendentes
-    // ou dois contatos da mesma empresa colidirem em "não pertence ao cliente".
+    const contactCustomerId = contact.crmCustomerId || null;
+    const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+
     const crmEquip = await prisma.crmEquipment.findFirst({
       where: {
         tenantId,
         externalId: equipment.externalId,
-        externalSource: { in: LCD_EQUIPMENT_SOURCES },
-        isActive: true,
+        externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
       },
       select: { customerId: true, customer: { select: { externalId: true } } },
     });
-    if (!crmEquip) {
-      return res.status(409).json({ error: 'Equipamento sem vínculo ativo no LCDDIGITALWEB.' });
+
+    let equipmentBelongsToCustomer = false;
+    if (crmEquip) {
+      equipmentBelongsToCustomer = Boolean(
+        (crmEquip.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
+        || (crmEquip.customer?.externalId && contactCustomerExternalId
+          && String(crmEquip.customer.externalId).trim() === contactCustomerExternalId),
+      );
+    } else {
+      equipmentBelongsToCustomer = equipment.contactId === contactId;
     }
-    const contactCustomerId = contact.crmCustomerId || null;
-    const contactCustomerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
-    const equipmentBelongsToCustomer = Boolean(
-      (crmEquip?.customerId && contactCustomerId && crmEquip.customerId === contactCustomerId)
-      || (crmEquip?.customer?.externalId && contactCustomerExternalId
-        && String(crmEquip.customer.externalId).trim() === contactCustomerExternalId),
-    );
+
     if (!equipmentBelongsToCustomer) {
-      return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa.' });
+      return res.status(400).json({ error: 'O equipamento não pertence ao cliente desta conversa no ILUX WEB.' });
     }
     if (!osType) return res.status(400).json({ error: 'O tipo de O.S. não existe no cadastro sincronizado do ILUX WEB.' });
-
-    if (!crmEquip) {
-      return res.status(409).json({ error: 'Equipamento sem vínculo ativo no LCDDIGITALWEB.' });
-    }
 
     if (nmsuportet) {
       const technician = await prisma.crmTechnician.findFirst({
@@ -778,7 +498,7 @@ async function createOS(req, res) {
         where: {
           tenantId,
           ticketId,
-          externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
+          externalSource: { in: ['firebird', 'ilux_web'] },
           externalId: null,
           status: { in: ['AGUARDANDO_ILUX', 'PROCESSANDO_ILUX', 'ERRO_INTEGRACAO'] },
         },
@@ -852,7 +572,7 @@ async function createOS(req, res) {
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
-          abertoPor: (req.user?.name || 'CAMILLE').trim().toUpperCase(),
+          abertoPor: req.user.name || req.user.email || null,
           solicitante: contact.name || null,
           // Para o documento, prevalece o telefone oficial do cliente ILUX
           // sincronizado no CRM; o telefone do contato WhatsApp pode ser
@@ -861,6 +581,7 @@ async function createOS(req, res) {
           tipoAtendimento: String(cdOstp) === '01' ? 'CONTRATOS' : 'CORRETIVA',
           descricaoProblema: String(defect).trim(),
           dataAbertura: os.createdAt?.toISOString?.() || undefined,
+          produtos: Array.isArray(produtos) ? produtos : undefined,
         });
         const externalId = String(
           respostaIlux.seqos
@@ -882,19 +603,6 @@ async function createOS(req, res) {
           },
           include: { contact: true, equipment: true },
         });
-        // A confirmação direta pelo LCDDigitalWeb não passa pelo callback do
-        // agente Firebird, onde esta cópia já era disparada. Carregamos o
-        // serviço somente aqui para evitar o ciclo osController -> serviço ->
-        // generatePdfBuffer (exportado por este controller).
-        setImmediate(() => {
-          const { sendServiceOrderManagerCopy } = require('../services/serviceOrderManagerCopyService');
-          sendServiceOrderManagerCopy(tenantId, confirmada.id).catch((managerCopyError) => {
-            console.error(
-              `[createOS] O.S. ${externalId} confirmada, mas a cópia para o gestor não foi enviada:`,
-              managerCopyError.message,
-            );
-          });
-        });
         return res.status(201).json({ ...confirmada, confirmed: true, source: 'ilux_web' });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -904,7 +612,7 @@ async function createOS(req, res) {
           include: { contact: true, equipment: true },
         });
         console.error(`[createOS] falha ao abrir O.S. ${os.id} no ILUX_WEB:`, detail);
-        return res.status(502).json({
+        return res.status(400).json({
           error: `Não foi possível abrir a O.S. no ILUX_WEB: ${detail}`,
           serviceOrderId: erroIntegracao.id,
         });
@@ -955,11 +663,7 @@ async function createOS(req, res) {
 
 async function getOSStatus(req, res) {
   const order = await prisma.serviceOrder.findFirst({
-    where: {
-      id: req.params.id,
-      tenantId: req.user.tenantId,
-      externalSource: { in: LCD_SERVICE_ORDER_SOURCES },
-    },
+    where: { id: req.params.id, tenantId: req.user.tenantId },
     select: { id: true, externalId: true, status: true, ticketId: true, contactId: true, equipmentId: true, updatedAt: true },
   });
   if (!order) return res.status(404).json({ error: 'O.S. não encontrada.' });
@@ -1009,15 +713,6 @@ async function updateOS(req, res) {
     return res.status(400).json({ error: 'Relatório Técnico é obrigatório para finalizar ou arquivar a O.S.' });
   }
 
-  const currentOrder = await prisma.serviceOrder.findFirst({
-    where: { id, tenantId },
-    select: { id: true, externalSource: true },
-  });
-  if (!currentOrder) return res.status(404).json({ error: 'O.S. não encontrada.' });
-  if (isLcdOfficialServiceOrderSource(currentOrder.externalSource)) {
-    return res.status(409).json({ error: 'O.S. oficial do LCDDIGITALWEB deve ser alterada no sistema de origem.' });
-  }
-
   const data = {
     status,
     technicalNotes,
@@ -1039,7 +734,7 @@ async function updateOS(req, res) {
 
 async function generatePdf(req, res) {
   const { id } = req.params;
-  const resolvedOrder = await resolveServiceOrderForPdf(req.user.tenantId, id, req.query?.customerId);
+  const resolvedOrder = await resolveServiceOrderForPdf(req.user.tenantId, id);
   const os = resolvedOrder?.order || null;
 
   if (!os) return res.status(404).json({ error: 'O.S. não encontrada' });
@@ -1132,7 +827,7 @@ async function generatePdf(req, res) {
       crmEquipment = await prisma.crmEquipment.findFirst({
         where: {
           tenantId: req.user.tenantId,
-          externalSource: { in: LCD_EQUIPMENT_SOURCES },
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
           externalId: os.equipment.externalId
         }
       });
@@ -1149,18 +844,31 @@ async function generatePdf(req, res) {
   let iluxWebCompany = null;
   try {
     if (isIluxWebConfigured()) {
+      const targetExternalId = String(os.externalId || '').trim();
+      if (targetExternalId) {
+        iluxWebOrder = await getServiceOrderFromIluxWeb(targetExternalId);
+      }
+
       const iluxCustomerExternalId = String(
-        crmCustomer?.externalId
-        || os.contact.crmCustomer?.externalId
+        iluxWebOrder?.clientCodigoLegado
+        || iluxWebOrder?.clientExternalId
+        || crmCustomer?.externalId
+        || os.contact?.crmCustomer?.externalId
         || ''
       ).trim();
+
       if (iluxCustomerExternalId) {
         const result = await listServiceOrdersFromIluxWeb(iluxCustomerExternalId, { limit: 250 });
         iluxWebOrders = Array.isArray(result?.items) ? result.items : [];
-        // O iLux Web mantém o UUID em externalId e o número humano em
-        // numero/legacyNumber. Comparar somente externalId fazia a O.S. do
-        // CRM não ser encontrada e o PDF cair nos UUIDs do espelho local.
-        iluxWebOrder = iluxWebOrders.find((item) => isSameOfficialOrder(item, os)) || null;
+        if (!iluxWebOrder && targetExternalId) {
+          iluxWebOrder = iluxWebOrders.find((item) => {
+            const matchNum = String(item?.numero || '').trim() === targetExternalId;
+            const matchLegacyNum = String(item?.legacyNumber || '').trim() === targetExternalId;
+            const matchExt = String(item?.externalId || '').trim() === targetExternalId;
+            const matchId = String(item?.id || '').trim() === targetExternalId;
+            return matchNum || matchLegacyNum || matchExt || matchId;
+          }) || null;
+        }
       }
       iluxWebCompany = await getCompanyProfileFromIluxWeb();
     }
@@ -1186,12 +894,12 @@ async function generatePdf(req, res) {
         history: [],
         attendances: [],
       };
-    } else if (false) {
+    } else if (os.externalId) {
       const printRecord = await prisma.externalSyncRecord.findUnique({
         where: {
           tenantId_source_entity_externalId: {
             tenantId: req.user.tenantId,
-            source: 'ilux_web',
+            source: 'firebird',
             entity: 'osPrintData',
             externalId: String(os.externalId),
           },
@@ -1208,26 +916,14 @@ async function generatePdf(req, res) {
         : '';
       const status = item?.statusLabel || item?.status || raw.nmstatus || raw.status || '';
       const isClosed = /CONCL|FECH|FINALIZ/i.test(String(status));
-      const number = numericPdfCode(
-        item?.number,
-        item?.legacyNumber,
-        item?.numero,
-        item?.seqos,
-        raw.seqos,
-        item?.externalId,
-      );
-      const equipmentCode = numericPdfCode(
-        item?.equipmentCodigoLegado,
-        item?.equipmentCode,
-        raw.cdequipamento,
-      );
+      const orderNum = item?.numero || item?.legacyNumber || raw.seqos || item?.externalId || '';
       return {
-        externalId: number,
-        sourceId: String(item?.externalId || raw.seqos || ''),
+        externalId: String(orderNum),
+        canonicalId: String(item?.id || item?.canonicalId || raw.id || ''),
         createdAt: openedAt,
         time: raw.hrinclusao || item?.time || openedAtTime,
         osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
-        equipmentExternalId: equipmentCode || firstPdfValue(item?.equipmentModel, item?.model, item?.serialNumber, 'PENDENTE'),
+        equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
         attendant: raw.nmsuportea || item?.attendant || '',
         status,
         defect: cleanLegacyDefect(item?.defect || item?.description || raw.obsdefeitocli || ''),
@@ -1252,11 +948,11 @@ async function generatePdf(req, res) {
       || os.contact.externalId
       || ''
     );
-    if (false && previousOrders.length === 0 && clientExternalId) {
+    if (previousOrders.length === 0 && clientExternalId) {
       const syncedHistory = await prisma.externalSyncRecord.findMany({
         where: {
           tenantId: req.user.tenantId,
-          source: 'ilux_web',
+          source: 'firebird',
           entity: 'serviceOrders',
           payload: { path: ['clientExternalId'], equals: clientExternalId },
         },
@@ -1267,23 +963,21 @@ async function generatePdf(req, res) {
 
     const uniqueOrders = new Map();
     for (const item of previousOrders) {
-      const identity = item.sourceId || item.externalId;
-      if (identity && !uniqueOrders.has(identity)) uniqueOrders.set(identity, item);
+      if (item.externalId && !uniqueOrders.has(item.externalId)) uniqueOrders.set(item.externalId, item);
     }
-
-    const targetEquipmentId = humanPdfCode(
-      iluxWebOrder?.equipmentCodigoLegado,
-      osPrintData?.serviceOrder?.cdequipamento,
-      osPrintData?.equipment?.cdequipamento,
-      crmEquipment?.assetTag,
-      crmEquipment?.raw?.codigoLegado,
-    );
+    const currentOrderId = String(os.externalId || '').trim();
+    const currentCanonicalId = String(iluxWebOrder?.id || iluxWebOrder?.canonicalId || '').trim();
+    const currentNumber = String(iluxWebOrder?.numero || iluxWebOrder?.legacyNumber || '').trim();
 
     previousOrders = [...uniqueOrders.values()]
-      .filter((item) => item.externalId && item.externalId !== numericPdfCode(os.externalId, iluxWebOrder?.numero, iluxWebOrder?.legacyNumber))
       .filter((item) => {
-        if (!targetEquipmentId || targetEquipmentId === 'PENDENTE') return true;
-        return String(item.equipmentExternalId) === String(targetEquipmentId);
+        const id = String(item.externalId || '').trim();
+        const canon = String(item.canonicalId || '').trim();
+        if (!id) return false;
+        if (currentOrderId && (id === currentOrderId || canon === currentOrderId)) return false;
+        if (currentCanonicalId && (id === currentCanonicalId || canon === currentCanonicalId)) return false;
+        if (currentNumber && (id === currentNumber || canon === currentNumber)) return false;
+        return true;
       })
       .sort((left, right) => {
         const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
@@ -1398,13 +1092,13 @@ async function generatePdf(req, res) {
     company.cityLine = [company.city, company.state && `(${company.state})`].filter(Boolean).join(' ');
 
     // Identificação do atendente com fallback para o usuário atual que está gerando o documento
-    let attendantName = firstValue(iluxWebOrder?.attendant, firebirdOrder.nmsuportea, os.user?.name, 'N/A');
+    let attendantName = firstValue(iluxWebOrder?.attendant, firebirdOrder.nmsuportea, os.user ? (os.user.firebirdSupportName || os.user.name) : null, 'N/A');
     if ((attendantName === 'N/A' || (!os.user && !iluxWebOrder?.attendant)) && req.user?.userId) {
       const activeUser = await prisma.user.findUnique({
         where: { id: req.user.userId }
       });
       if (activeUser) {
-        attendantName = activeUser.name;
+        attendantName = activeUser.firebirdSupportName || activeUser.name;
       }
     }
 
@@ -1534,12 +1228,14 @@ async function generatePdf(req, res) {
     })();
     const visitStart = firstValue(timeText(firstPrintAttendance.hratendimento || firstPrintAttendance.datahora), iluxOpenedTime, '');
     const visitEnd = firstValue(timeText(lastPrintAttendance.hratendimentofin || lastPrintAttendance.hratendimento1), iluxOpenedTime, '');
-    const clientExternalId = humanPdfCode(
+    const clientExternalId = firstValue(
       iluxOrderData.clientCodigoLegado,
       currentPrintOrder.cdcliente,
       firebirdClient.cdcliente,
-      crmCustomer?.codigoLegado,
       crmCustomer?.externalId,
+      os.contact.crmCustomer?.externalId,
+      os.contact.externalId,
+      'N/A',
     );
     const clientName = firstValue(iluxOrderData.clientName, currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
     const clientAddress = firstValue(iluxOrderData.clientAddress, joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
@@ -1555,17 +1251,7 @@ async function generatePdf(req, res) {
       ? String(currentPrintOrder.celular)
       : '';
     const clientPhone = [primaryClientPhone, clientCellPhone].filter(Boolean).join(' ');
-    const equipmentExternalId = humanPdfCode(
-      iluxOrderData.equipmentCodigoLegado,
-      currentPrintOrder.cdequipamento,
-      firebirdEquipment.cdequipamento,
-      crmEquipment?.assetTag,
-      crmEquipment?.raw?.codigoLegado,
-    );
-    const pdfOrderNumber = firstValue(
-      numericPdfCode(iluxOrderData.numero, iluxOrderData.legacyNumber, os.externalId, os.legacyNumber),
-      'PENDENTE',
-    );
+    const equipmentExternalId = firstValue(iluxOrderData.equipmentExternalId, currentPrintOrder.cdequipamento, firebirdEquipment.cdequipamento, os.equipment.externalId, 'N/A');
     const equipmentModel = firstValue(iluxOrderData.equipmentModel, firebirdEquipment.modelo, os.equipment.model, 'N/A');
     const equipmentSerial = firstValue(iluxOrderData.serialNumber, firebirdEquipment.serie, os.equipment.serialNumber, 'N/A');
     const equipmentAsset = firstValue(iluxOrderData.equipmentAsset, firebirdEquipment.patrimonio, iluxWebOrder ? '-' : 'N/A');
@@ -1578,13 +1264,17 @@ async function generatePdf(req, res) {
       || crmEquipment?.raw?.DEPARTAMENTO
       || os.equipment.sector
       || 'N/A';
-    const installLocation = currentPrintOrder.localinstal
-      || firebirdEquipment.localinstal
-      || iluxOrderData.equipmentLocation
-      || crmEquipment?.installLocation
-      || crmEquipment?.raw?.localinstal
-      || crmEquipment?.raw?.LOCALINSTAL
-      || (iluxWebOrder ? '-' : (os.equipment.sector || 'N/A'));
+    const rawLocation = firstValue(
+      currentPrintOrder.localinstal,
+      firebirdEquipment.localinstal,
+      iluxOrderData.equipmentLocation,
+      crmEquipment?.installLocation,
+      crmEquipment?.raw?.localinstal,
+      crmEquipment?.raw?.LOCALINSTAL,
+      '-'
+    );
+    const isAddressDuplicate = rawLocation && (rawLocation === clientAddress || /CEP\s*\d/i.test(rawLocation) || /RUA\s+/i.test(rawLocation));
+    const installLocation = (isAddressDuplicate ? '-' : (rawLocation || '-'));
     const currentOsDate = firstValue(iluxOpenedDate, currentPrintOrder.dtinclusao ? formatHistoryDate(currentPrintOrder.dtinclusao) : '', dataOS);
     const currentOsTime = firstValue(iluxOpenedTime, timeText(currentPrintOrder.hrinclusao), horaOS);
     const currentTechnician = firstValue(iluxOrderData.technician, currentPrintOrder.nmsuportet, currentPrintOrder.nmsuportel, os.nmsuportet, '');
@@ -1633,7 +1323,7 @@ async function generatePdf(req, res) {
       accentColor,
       accentTextColor,
       barcodeEnabled: settings?.osBarcodeEnabled !== false,
-      number: pdfOrderNumber,
+      number: os.externalId || os.id.slice(-6).toUpperCase(),
       date: currentOsDate,
       time: currentOsTime,
       openedBy: String(attendantName).toUpperCase(),
@@ -1707,14 +1397,12 @@ async function generatePdf(req, res) {
         closedBy: item.closedBy,
         technician: item.technician,
       })),
+      produtos: iluxOrderData.produtos || [],
     });
 
     if (typeof res.capturePdf !== 'function') {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.setHeader('Content-Disposition', `inline; filename="OS_${pdfOrderNumber}.html"`);
+      res.setHeader('Content-Disposition', `inline; filename="OS_${os.externalId || os.id.substring(os.id.length - 6)}.html"`);
       return res.send(officialHtml);
     }
 
@@ -1759,7 +1447,7 @@ async function generatePdf(req, res) {
             { text: 'ORDEM DE SERVIÇO', fontSize: 8, alignment: 'center', margin: [0, 27, 0, 0] },
             {
               stack: [
-                { text: `Número: ${pdfOrderNumber}   Data: ${currentOsDate}`, bold: true, fontSize: 6.5 },
+                { text: `Número: ${os.externalId || os.id.slice(-6).toUpperCase()}   Data: ${currentOsDate}`, bold: true, fontSize: 6.5 },
                 { text: `Hora: ${currentOsTime}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico abertura: ${attendantName.toUpperCase()}`, bold: true, fontSize: 6.5 },
                 { text: `Técnico atendimento: ${String(currentTechnician).toUpperCase()}`, bold: true, fontSize: 6.5 },
@@ -1991,7 +1679,7 @@ async function generatePdf(req, res) {
                         widths: ['*', '*'],
                         body: [
                           [{ text: 'Número:', style: 'miniLabel' }, { text: `Data: ${dataOS}`, style: 'miniLabel' }],
-                          [{ text: pdfOrderNumber, style: 'miniValue' }, { text: `Hora: ${horaOS}`, style: 'miniLabel' }],
+                          [{ text: os.externalId || os.id.substring(os.id.length - 6).toUpperCase(), style: 'miniValue' }, { text: `Hora: ${horaOS}`, style: 'miniLabel' }],
                           [{ text: `Atendente: ${attendantName.toUpperCase()}`, style: 'miniLabel', colSpan: 2 }, {}],
                           [{ text: `Técnico: ${(os.nmsuportet || 'N/A').toUpperCase()}`, style: 'miniLabel', colSpan: 2 }, {}],
                           [{ text: `Tipo O.S.: ${displayOsType}`, style: 'miniLabel', colSpan: 2 }, {}]
@@ -2030,12 +1718,12 @@ async function generatePdf(req, res) {
             widths: ['*', '*'],
             body: [
               [
-                { text: [{ text: 'Cliente: ', style: 'label' }, { text: `${clientExternalId} - ${clientName}`, style: 'value' }], colSpan: 2, border: [true, false, true, true] },
+                { text: [{ text: 'Cliente: ', style: 'label' }, { text: clientData.externalId ? `${clientData.externalId} - ${clientData.name}` : (clientData.name || 'N/A'), style: 'value' }], colSpan: 2, border: [true, false, true, true] },
                 {}
               ],
               [
                 { text: [{ text: 'Endereço: ', style: 'label' }, { text: crmCustomer?.address || clientData.address || 'N/A', style: 'value' }], border: [true, false, true, true] },
-                { text: [{ text: 'Equipamento: ', style: 'label' }, { text: `${equipmentExternalId} - ${equipmentModel}`, style: 'value' }] }
+                { text: [{ text: 'Equipamento: ', style: 'label' }, { text: os.equipment.externalId ? `${os.equipment.externalId} - ${os.equipment.model || 'N/A'}` : 'N/A', style: 'value' }] }
               ],
               [
                 { text: [{ text: 'Bairro: ', style: 'label' }, { text: crmCustomer?.neighborhood || 'N/A', style: 'value' }], border: [true, false, true, true] },
@@ -2047,7 +1735,7 @@ async function generatePdf(req, res) {
               ],
               [
                 { text: [{ text: 'CNPJ/CPF: ', style: 'label' }, { text: crmCustomer?.cpfCnpj || clientData.cpfCnpj || 'N/A', style: 'value' }], border: [true, false, true, true] },
-                { text: [{ text: 'Tipo de Contrato: ', style: 'label' }, { text: humanPdfCode(crmEquipment?.contractExternalId), style: 'value' }] }
+                { text: [{ text: 'Tipo de Contrato: ', style: 'label' }, { text: crmEquipment?.contractExternalId || 'N/A', style: 'value' }] }
               ],
               [
                 { text: [{ text: 'Contato: ', style: 'label' }, { text: crmCustomer?.contactName || solicitante || 'N/A', style: 'value' }], border: [true, false, true, true] },
@@ -2279,7 +1967,7 @@ async function generatePdf(req, res) {
     const doc = pdfmake.createPdf({ ...docDefinition, footer: () => ({ text: '' }), content: fullIluxContent });
     const stream = await doc.getStream();
     const filename = osPdfFilename(
-      pdfOrderNumber,
+      os.externalId || os.id.substring(os.id.length - 6),
       clientData?.name || os.contact?.name,
     );
 
@@ -2339,10 +2027,7 @@ async function draftOS(req, res) {
     const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
     if (!settings || !aiService.hasConfiguredProvider(settings)) return res.status(400).json({ error: 'Provedor de IA não configurado' });
 
-    const contact = await prisma.contact.findFirst({
-      where: { id: contactId, tenantId },
-      select: { id: true, crmCustomerId: true },
-    });
+    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
     if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
 
     // O modal jÃ¡ carrega /api/os/equipments antes de pedir o rascunho, e essa
@@ -2350,14 +2035,22 @@ async function draftOS(req, res) {
     // de upserts para clientes com muitos equipamentos. A chamada direta da
     // rota continua funcionando quando ainda nÃ£o existe equipamento local.
     let equipments = await prisma.equipment.findMany({
-      where: equipmentWhereForContact(tenantId, contactId, contact.crmCustomerId),
+      where: { 
+        tenantId, 
+        isActive: true,
+        contactId
+      } 
     });
 
     if (equipments.length === 0) {
       const { syncCrmEquipmentsToEquipment } = require('../services/crmSyncService');
       await syncCrmEquipmentsToEquipment(tenantId, contactId);
       equipments = await prisma.equipment.findMany({
-        where: equipmentWhereForContact(tenantId, contactId, contact.crmCustomerId),
+        where: {
+          tenantId,
+          isActive: true,
+          contactId,
+        },
       });
     }
 
@@ -2401,4 +2094,61 @@ async function draftOS(req, res) {
   }
 }
 
-module.exports = { getEquipments, addEquipment, updateEquipment, deleteEquipment, getOSList, getOpenOrdersForEquipment, createOS, getOSStatus, updateOS, generatePdf, generatePdfBuffer, resolveServiceOrderForPdf, findOfficialOrderForPdf, draftOS, getOSTypes, getOSTechnicians, getOSDefectTypes };
+async function getProducts(req, res) {
+  try {
+    const { q, tipo } = req.query;
+    const products = await listProductsFromIluxWeb({ q, tipo });
+    res.json({ items: products });
+  } catch (error) {
+    console.error('[getProducts] erro ao listar produtos do ILUX WEB:', error);
+    res.status(500).json({ error: 'Erro ao listar produtos do ILUX WEB.' });
+  }
+}
+
+async function getCustomerProductsHistory(req, res) {
+  const { contactId } = req.params;
+  const { mes } = req.query;
+  const { tenantId } = req.user;
+
+  try {
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, tenantId },
+      include: { crmCustomer: true },
+    });
+    if (!contact) {
+      return res.status(404).json({ error: 'Contato não encontrado.' });
+    }
+
+    const customerExternalId = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
+    if (!customerExternalId) {
+      return res.json({ cliente: null, mes: mes || null, ordens: [], totalProdutos: [] });
+    }
+
+    const history = await getCustomerProductsHistoryFromIluxWeb(customerExternalId, mes);
+    res.json(history);
+  } catch (error) {
+    console.error('[getCustomerProductsHistory] erro ao buscar consumo de suprimentos:', error);
+    res.status(500).json({ error: 'Erro ao buscar histórico de consumo de suprimentos.' });
+  }
+}
+
+module.exports = {
+  addEquipment,
+  createOS,
+  deleteEquipment,
+  draftOS,
+  generatePdf,
+  generatePdfBuffer,
+  getCustomerProductsHistory,
+  getEquipments,
+  getOpenOrdersForEquipment,
+  getOSDefectTypes,
+  getOSList,
+  getOSStatus,
+  getOSTechnicians,
+  getOSTypes,
+  getProducts,
+  resolveServiceOrderForPdf,
+  updateEquipment,
+  updateOS,
+};
