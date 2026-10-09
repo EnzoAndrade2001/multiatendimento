@@ -177,7 +177,8 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         defect: formData.defect,
         cdOstp: formData.cdOstp,
         cdDefeito: formData.cdDefeito,
-        nmsuportet: formData.nmsuportet
+        nmsuportet: formData.nmsuportet,
+        equipmentAddress: equipmentAddress(selectedEquipment) || selectedEquipment?.address || '',
       });
       completeOrder(res.data);
     } catch (e) {
