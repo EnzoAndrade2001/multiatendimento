@@ -19,6 +19,7 @@ const {
   listProductsFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
+const { readEquipmentLocation, resolveOsDocumentAddress } = require('../utils/equipmentLocation');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
   5_000,
@@ -397,7 +398,7 @@ async function getOSList(req, res) {
 }
 
 async function createOS(req, res) {
-  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet, produtos } = req.body;
+  const { contactId, equipmentId, ticketId, requestKey, defect, cdOstp, cdDefeito, nmsuportet, produtos, equipmentAddress: reqEquipmentAddress } = req.body;
   const { tenantId } = req.user;
 
   try {
@@ -561,6 +562,23 @@ async function createOS(req, res) {
         // a identidade oficial é sempre o identificador do cliente sincronizado.
         const clienteIdentificador = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
         const equipamentoIdentificador = String(equipment.externalId || '').trim();
+
+        const crmEquipRecord = await prisma.crmEquipment.findFirst({
+          where: {
+            tenantId,
+            externalId: equipment.externalId,
+            externalSource: { in: CRM_EXTERNAL_SOURCES },
+            isActive: true,
+          },
+          select: { address: true, city: true, state: true, installLocation: true, raw: true },
+        });
+        const equipLoc = readEquipmentLocation({
+          ...(crmEquipRecord || {}),
+          address: reqEquipmentAddress || equipment.address || crmEquipRecord?.address,
+          raw: crmEquipRecord?.raw,
+        });
+        const enderecoAtendimentoEquip = reqEquipmentAddress || equipLoc.address || equipment.address || crmEquipRecord?.address || null;
+
         const respostaIlux = await createServiceOrderInIluxWeb({
           origem: 'CRM',
           ordemServicoId: os.id,
@@ -569,6 +587,8 @@ async function createOS(req, res) {
           // Compatibilidade com o contrato antigo, quando os IDs eram numéricos.
           clienteCodigoLegado: clienteIdentificador,
           equipamentoCodigoLegado: equipamentoIdentificador,
+          enderecoAtendimento: enderecoAtendimentoEquip || undefined,
+          equipmentAddress: enderecoAtendimentoEquip || undefined,
           cdOstp: String(cdOstp),
           cdDefeito: defectType.code,
           nmsuportet: nmsuportet || null,
@@ -1250,11 +1270,21 @@ async function generatePdf(req, res) {
       'N/A',
     );
     const clientName = firstValue(iluxOrderData.clientName, currentPrintOrder.nmcliente, firebirdClient.nmcliente, crmCustomer?.name, clientData.name, 'N/A');
-    const clientAddress = firstValue(iluxOrderData.clientAddress, joinAddress(currentPrintOrder), joinAddress(firebirdClient), crmCustomer?.address, clientData.address, 'N/A');
-    const clientNeighborhood = firstValue(iluxOrderData.clientNeighborhood, currentPrintOrder.bairro, firebirdClient.bairro, crmCustomer?.neighborhood, 'N/A');
-    const clientZipCode = firstValue(iluxOrderData.clientZipCode, currentPrintOrder.cep, firebirdClient.cep, crmCustomer?.zipCode, clientData.zipCode, 'N/A');
-    const clientCity = firstValue(iluxOrderData.clientCity, currentPrintOrder.cidade, firebirdClient.cidade, crmCustomer?.city, clientData.city, 'N/A');
-    const clientState = firstValue(iluxOrderData.clientState, currentPrintOrder.uf, firebirdClient.uf, crmCustomer?.state, clientData.state, 'N/A');
+    const resolvedDocAddress = resolveOsDocumentAddress({
+      iluxOrderData,
+      crmEquipment,
+      localEquipment: os.equipment,
+      firebirdOrder: currentPrintOrder,
+      firebirdEquipment,
+      firebirdClient,
+      crmCustomer,
+      clientData,
+    });
+    const clientAddress = resolvedDocAddress.address || 'N/A';
+    const clientNeighborhood = resolvedDocAddress.neighborhood || 'N/A';
+    const clientZipCode = resolvedDocAddress.zipCode || 'N/A';
+    const clientCity = resolvedDocAddress.city || 'N/A';
+    const clientState = resolvedDocAddress.state || 'N/A';
     const clientDocument = firstValue(iluxOrderData.clientDocument, firebirdClient.cnpj, firebirdClient.cpf, crmCustomer?.cpfCnpj, clientData.cpfCnpj, 'N/A');
     const clientStateRegistration = firstValue(iluxOrderData.clientStateRegistration, firebirdClient.inscest, firebirdClient.inscmun, 'N/A');
     const clientContact = firstValue(iluxOrderData.clientContact, currentPrintOrder.contato, firebirdClient.contato, crmCustomer?.contactName, solicitante, 'N/A');
@@ -1990,6 +2020,9 @@ async function generatePdf(req, res) {
       return res.capturePdf(stream, filename);
     }
     
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     

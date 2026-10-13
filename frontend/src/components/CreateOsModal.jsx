@@ -269,6 +269,7 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         cdOstp: formData.cdOstp,
         cdDefeito: formData.cdDefeito,
         nmsuportet: formData.nmsuportet,
+        equipmentAddress: equipmentAddress(selectedEquipment) || selectedEquipment?.address || '',
         produtos: produtos.map((p) => ({
           produtoId: p.produtoId,
           nome: p.nome,
