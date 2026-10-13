@@ -561,7 +561,7 @@ async function createOS(req, res) {
         // O contato pode ter externalId igual ao JID do WhatsApp. Para o ILUX WEB,
         // a identidade oficial é sempre o identificador do cliente sincronizado.
         const clienteIdentificador = String(contact.crmCustomer?.externalId || contact.externalId || '').trim();
-        const equipamentoIdentificador = String(equipment.externalId || '').trim();
+        const equipamentoIdentificador = String(equipment.externalId || equipment.serialNumber || '').trim();
 
         const crmEquipRecord = await prisma.crmEquipment.findFirst({
           where: {
@@ -584,6 +584,8 @@ async function createOS(req, res) {
           ordemServicoId: os.id,
           clienteIdentificador,
           equipamentoIdentificador,
+          equipamentoNumeroSerie: equipment.serialNumber || equipment.externalId || undefined,
+          numeroSerie: equipment.serialNumber || equipment.externalId || undefined,
           // Compatibilidade com o contrato antigo, quando os IDs eram numéricos.
           clienteCodigoLegado: clienteIdentificador,
           equipamentoCodigoLegado: equipamentoIdentificador,
