@@ -9,6 +9,7 @@ const { draftServiceOrder } = aiService;
 const { renderOfficialOsTemplate } = require('../templates/officialOsTemplate');
 const { getLatestCompanyProfile } = require('../services/companyProfileService');
 const { parseFirebirdDate } = require('../utils/firebirdDate');
+const { historyEquipmentCode, selectPreviousServiceOrders } = require('../utils/serviceOrderHistory');
 const {
   createServiceOrderInIluxWeb,
   getCompanyProfileFromIluxWeb,
@@ -945,7 +946,7 @@ async function generatePdf(req, res) {
         createdAt: openedAt,
         time: raw.hrinclusao || item?.time || openedAtTime,
         osType: raw.nmostp || item?.osType || item?.type || item?.tipoAtendimento || '',
-        equipmentExternalId: String(item?.equipmentExternalId || item?.equipmentCode || raw.cdequipamento || ''),
+        equipmentExternalId: historyEquipmentCode(item),
         attendant: raw.nmsuportea || item?.attendant || '',
         status,
         defect: cleanLegacyDefect(item?.defect || item?.description || raw.obsdefeitocli || ''),
@@ -983,42 +984,12 @@ async function generatePdf(req, res) {
       previousOrders = syncedHistory.map((item) => normalizeHistoryItem(item.payload));
     }
 
-    const uniqueOrders = new Map();
-    for (const item of previousOrders) {
-      if (item.externalId && !uniqueOrders.has(item.externalId)) uniqueOrders.set(item.externalId, item);
-    }
     const currentOrderId = String(os.externalId || '').trim();
     const currentCanonicalId = String(iluxWebOrder?.id || iluxWebOrder?.canonicalId || '').trim();
     const currentNumber = String(iluxWebOrder?.numero || iluxWebOrder?.legacyNumber || '').trim();
-
-    const targetEquipmentId = humanPdfCode(
-      iluxWebOrder?.equipmentCodigoLegado,
-      osPrintData?.serviceOrder?.cdequipamento,
-      osPrintData?.equipment?.cdequipamento,
-      crmEquipment?.assetTag,
-      crmEquipment?.raw?.codigoLegado,
-    );
-
-    previousOrders = [...uniqueOrders.values()]
-      .filter((item) => {
-        const id = String(item.externalId || '').trim();
-        const canon = String(item.canonicalId || '').trim();
-        if (!id) return false;
-        if (currentOrderId && (id === currentOrderId || canon === currentOrderId)) return false;
-        if (currentCanonicalId && (id === currentCanonicalId || canon === currentCanonicalId)) return false;
-        if (currentNumber && (id === currentNumber || canon === currentNumber)) return false;
-        return true;
-      })
-      .filter((item) => {
-        if (!targetEquipmentId || targetEquipmentId === 'PENDENTE') return true;
-        return String(item.equipmentExternalId) === String(targetEquipmentId);
-      })
-      .sort((left, right) => {
-        const numericDifference = Number(right.externalId || 0) - Number(left.externalId || 0);
-        if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
-        return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
-      })
-      .slice(0, 5);
+    previousOrders = selectPreviousServiceOrders(previousOrders, {
+      currentOrderIds: [currentOrderId, currentCanonicalId, currentNumber],
+    });
   } catch (err) {
     console.error('[generatePdf] erro ao carregar histórico do ILUX WEB:', err);
     previousOrders = [];
