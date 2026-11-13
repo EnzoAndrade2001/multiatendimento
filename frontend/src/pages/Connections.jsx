@@ -303,6 +303,13 @@ export default function Connections() {
                           </button>
                         </div>
                       ) : null}
+                      {connectionView.key === 'unstable' && !isOfficial ? (
+                        <div style={s.disconnectedActions}>
+                          <button type="button" style={s.qrBtn} onClick={() => { setSelectedInst(inst); setModal('qrcode'); loadQr(inst.id); }}>
+                            <QrCode size={16} /> Gerar QR Code
+                          </button>
+                        </div>
+                      ) : null}
                     </>
                   ) : isOfficial ? (
                     <div style={s.officialBox}>Credenciais oficiais registradas. Atualize para consultar o estado na Evolution.</div>

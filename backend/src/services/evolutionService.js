@@ -418,7 +418,6 @@ async function deleteInstance(url, key, instanceName) {
       return data;
     } catch (err) {
       lastErr = err;
-      if (err.response?.status === 404) return { ok: true, alreadyDeleted: true };
     }
   }
 
@@ -579,12 +578,13 @@ async function fetchProfilePicture(url, key, instanceName, phone) {
   return null;
 }
 
-async function fetchInstanceInfo(url, key, instanceName) {
+async function fetchInstanceInfo(url, key, instanceName, options = {}) {
   const client = getClient(url, key);
   try {
-    const { data } = await client.get(`/instance/fetchInstances?instanceName=${instanceName}`);
-    return Array.isArray(data) ? data[0] : data;
-  } catch {
+    const { data } = await client.get(`/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`);
+    return (Array.isArray(data) ? data[0] : data) || null;
+  } catch (err) {
+    if (options.strict && err.response?.status !== 404) throw err;
     return null;
   }
 }

@@ -20,23 +20,36 @@ async function getSettings(tenantId, waInstance) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// A Evolution (2.4.0-rc2) precisa de um respiro entre apagar e recriar uma
-// instancia com o MESMO nome -- sem isso o create sai 404 e o "Recriar sessao"
-// deixava a conexao sem instancia nenhuma. Recria com espera + tentativas e
-// confirma que ela existe antes de seguir.
+// A Evolution emite remove.instance e responde ao DELETE antes de terminar a
+// limpeza assíncrona. Espera a instância realmente sumir do fetchInstances antes
+// de recriar; encontrar a instância antiga não conta como reparo concluído.
 async function recreateEvolutionInstance(evolutionUrl, evolutionKey, instanceName, diagnostics) {
-  await sleep(2500);
+  const waitForInstance = async (shouldExist, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const info = await evolution.fetchInstanceInfo(evolutionUrl, evolutionKey, instanceName, { strict: true });
+      if (Boolean(info) === shouldExist) return info;
+      await sleep(1000);
+    }
+    return undefined;
+  };
+
+  const removed = await waitForInstance(false, 30000);
+  if (removed === undefined) {
+    diagnostics.push('deleteInstance: a Evolution não confirmou a remoção da instância em 30 segundos.');
+    return false;
+  }
+
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
       await evolution.createInstance(evolutionUrl, evolutionKey, instanceName);
     } catch (err) {
-      if (evolution.isInstanceAlreadyInUse(err)) return true;
       diagnostics.push(`createInstance#${attempt}: ${err.response?.data?.message || err.message}`);
       console.warn(`[instanceController] createInstance ${instanceName} tentativa ${attempt} falhou:`, err.response?.data || err.message);
     }
-    const info = await evolution.fetchInstanceInfo(evolutionUrl, evolutionKey, instanceName);
+    const info = await waitForInstance(true, 10000);
     if (info) return true;
-    if (attempt < 4) await sleep(2000);
+    if (attempt < 4) await sleep(1000);
   }
   return false;
 }
