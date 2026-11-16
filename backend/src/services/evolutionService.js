@@ -348,7 +348,7 @@ async function setWebhook(url, key, instanceName, webhookUrl) {
       enabled: true,
       webhook_by_events: false,
       webhook_base64: false,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_DELETE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_SET'],
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_DELETE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_SET', 'MESSAGES_EDITED'],
     },
   });
   return data;
@@ -628,6 +628,30 @@ async function revokeMessage(url, key, instanceName, remoteJid, messageId) {
   }
 }
 
+async function updateMessage(url, key, instanceName, remoteJid, messageId, newText) {
+  const client = getClient(url, key);
+  const jid = remoteJid.includes('@') ? remoteJid : `${remoteJid}@s.whatsapp.net`;
+  const cleanNumber = remoteJid.replace(/@.*$/, '');
+
+  const payload = {
+    number: cleanNumber,
+    text: newText,
+    key: {
+      remoteJid: jid,
+      fromMe: true,
+      id: messageId
+    }
+  };
+
+  try {
+    const { data } = await client.post(`/chat/updateMessage/${instanceName}`, payload);
+    return data;
+  } catch (err) {
+    console.error('[evolutionService] updateMessage falhou:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
 // Assim como findContacts, a Evolution mudou o verbo desse endpoint entre
 // versões (GET puro x POST com filtro `where`) -- tenta POST primeiro
 // (confirmado como o que essa versão em produção aceita; GET dá 404 nela).
@@ -716,7 +740,7 @@ function resolveEvolutionConfig(tenantSettings, waInstance) {
 
 module.exports = {
   sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
-  getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage,
+  getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage, updateMessage,
   normalizePhoneNumber, samePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findContacts, findMessages, findConversationJidsByMessageIds,
   getEvolutionErrorDetail,

@@ -1455,10 +1455,91 @@ async function deleteMessage(req, res) {
       data: { isDeleted: true, body: 'Mensagem apagada' }
     });
 
+    if (io) {
+      io.to(message.ticket.tenantId).emit('message_updated', { message: updated, ticketId });
+    }
+
     res.json(updated);
   } catch (err) {
     console.error('[deleteMessage] erro crítico:', err.message);
     res.status(500).json({ error: 'Erro ao processar exclusão de mensagem' });
+  }
+}
+
+async function editMessage(req, res) {
+  const { id: ticketId, messageId } = req.params;
+  const { body } = req.body;
+
+  if (!body || typeof body !== 'string' || !body.trim()) {
+    return res.status(400).json({ error: 'O texto da mensagem é obrigatório.' });
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { ticket: { include: { contact: true, instance: true } } }
+  });
+
+  if (!message || message.ticketId !== ticketId || message.ticket.tenantId !== req.user.tenantId) {
+    return res.status(404).json({ error: 'Mensagem não encontrada ou acesso negado' });
+  }
+
+  if (!message.fromMe) {
+    return res.status(403).json({ error: 'Você só pode editar mensagens enviadas por você.' });
+  }
+
+  if (message.isDeleted) {
+    return res.status(400).json({ error: 'Não é possível editar uma mensagem que foi apagada.' });
+  }
+
+  // O WhatsApp só permite edição dentro da janela de 15 minutos
+  const messageAgeMs = Date.now() - new Date(message.createdAt).getTime();
+  const fifteenMinutesMs = 15 * 60 * 1000;
+  if (messageAgeMs > fifteenMinutesMs) {
+    return res.status(400).json({ error: 'O WhatsApp só permite editar mensagens enviadas nos últimos 15 minutos.' });
+  }
+
+  const trimmedBody = body.trim();
+
+  try {
+    const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: req.user.tenantId } });
+
+    const evoConfig = evolutionService.resolveEvolutionConfig(settings, message.ticket.instance);
+    if (evoConfig.evolutionUrl && evoConfig.evolutionKey && message.externalId && message.ticket.instance?.instanceName) {
+      try {
+        await evolutionService.updateMessage(
+          evoConfig.evolutionUrl,
+          evoConfig.evolutionKey,
+          message.ticket.instance.instanceName,
+          message.ticket.contact.phone,
+          message.externalId,
+          trimmedBody
+        );
+      } catch (evoErr) {
+        console.warn('[editMessage] Falha na Evolution API ao editar mensagem no WhatsApp:', evoErr.response?.data || evoErr.message);
+        const errorDetail = evoErr.response?.data?.message || evoErr.response?.data?.error || evoErr.message;
+        if (typeof errorDetail === 'string' && errorDetail.toLowerCase().includes('15 minute')) {
+          return res.status(400).json({ error: 'O WhatsApp só permite editar mensagens enviadas nos últimos 15 minutos.' });
+        }
+        return res.status(400).json({ error: `Falha ao atualizar mensagem no WhatsApp: ${errorDetail}` });
+      }
+    }
+
+    const updated = await prisma.message.update({
+      where: { id: message.id },
+      data: {
+        body: trimmedBody,
+        isEdited: true
+      }
+    });
+
+    if (io) {
+      io.to(message.ticket.tenantId).emit('message_updated', { message: updated, ticketId });
+    }
+
+    return res.json(updated);
+  } catch (err) {
+    console.error('[editMessage] erro crítico:', err.message);
+    return res.status(500).json({ error: 'Erro ao processar edição da mensagem' });
   }
 }
 
@@ -1746,4 +1827,4 @@ async function createNote(req, res) {
   }
 }
 
-module.exports = { list, detail, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, deleteMessage, reopen, summarize, linkContact, forwardMessage, createNote, setIo };
+module.exports = { list, detail, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, deleteMessage, editMessage, reopen, summarize, linkContact, forwardMessage, createNote, setIo };

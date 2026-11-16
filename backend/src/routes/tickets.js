@@ -4,7 +4,7 @@ const requirePermission = require('../middlewares/requirePermission');
 const requireEntitlement = require('../middlewares/requireEntitlement');
 const requireTicketAccess = require('../middlewares/requireTicketAccess');
 const upload = require('../middlewares/upload');
-const { list, detail, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, reopen, summarize, deleteMessage, linkContact, forwardMessage, createNote } = require('../controllers/ticketController');
+const { list, detail, getMessages, getOutboundOptions, assign, resolve, update, sendMessage, sendMediaMessage, reopen, summarize, deleteMessage, editMessage, linkContact, forwardMessage, createNote } = require('../controllers/ticketController');
 const { updatePreferences } = require('../controllers/ticketPreferencesController');
 const auditEvent = require('../middlewares/auditEvent');
 router.use(authenticate, requirePermission('inbox.view'), requireEntitlement('inbox'));
@@ -19,6 +19,7 @@ router.patch('/:id/assign', requireTicketAccess, requirePermission('inbox.assign
 router.patch('/:id/resolve', requireTicketAccess, requirePermission('inbox.resolve'), auditEvent('TICKET_RESOLVE', 'ticket'), resolve);
 router.patch('/:id/link-contact', requireTicketAccess, auditEvent('TICKET_LINK_CONTACT', 'ticket'), linkContact);
 router.post('/:id/messages', requireTicketAccess, auditEvent('TICKET_MESSAGE_SEND', 'ticket'), sendMessage);
+router.patch('/:id/messages/:messageId', requireTicketAccess, auditEvent('TICKET_MESSAGE_EDIT', 'ticket'), editMessage);
 router.post('/:id/media', requireTicketAccess, upload.single('file'), auditEvent('TICKET_MEDIA_SEND', 'ticket'), sendMediaMessage);
 router.post('/:id/summarize', requireTicketAccess, auditEvent('TICKET_SUMMARIZE', 'ticket'), summarize);
 router.post('/reopen', requirePermission('inbox.reopen'), auditEvent('TICKET_REOPEN', 'ticket'), reopen);

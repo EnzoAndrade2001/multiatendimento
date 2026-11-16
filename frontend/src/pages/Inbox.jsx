@@ -18,6 +18,7 @@ import api, {
   scheduleMessage,
   sendAudioMessage,
   deleteMessage,
+  editMessage,
   getSettings,
   forwardMessage,
   createTicketNote,
@@ -35,7 +36,7 @@ import TicketPresence from '../components/TicketPresence';
 import ScheduledMessagesPanel from '../components/ScheduledMessagesPanel';
 import AttendanceAvailability from '../components/AttendanceAvailability';
 import { CrmCustomerProfileModal } from './CRM';
-import { ChatHeader, ContactPanel, ForwardModal, MessageComposer, MessageList, TicketSidebar, TransferModal } from './inbox/components';
+import { ChatHeader, ContactPanel, EditMessageModal, ForwardModal, MessageComposer, MessageList, TicketSidebar, TransferModal } from './inbox/components';
 import { Empty } from './inbox/helpers.jsx';
 import { useInboxMessages, useInboxRealtime, useInboxTickets } from './inbox/hooks';
 import { usePermissions } from '../auth/PermissionContext';
@@ -122,6 +123,7 @@ export default function Inbox() {
   const [updateTrigger, setUpdateTrigger] = useState(0); // Forca atualizacao de componentes filhos
   const [replyingTo, setReplyingTo] = useState(null);
   const [forwardingMessage, setForwardingMessage] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
   const [isNote, setIsNote] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [showReopenInstanceModal, setShowReopenInstanceModal] = useState(false);
@@ -490,6 +492,18 @@ export default function Inbox() {
         }
       }
     );
+  }
+
+  async function handleSaveEditedMessage(msgId, newText) {
+    try {
+      const { data: updatedMessage } = await editMessage(selectedId, msgId, newText);
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, ...updatedMessage, isEdited: true } : m));
+      toast.success('Mensagem editada com sucesso.');
+    } catch (e) {
+      const errMsg = e.response?.data?.error || e.message;
+      toast.error('Erro ao editar mensagem: ' + errMsg);
+      throw e;
+    }
   }
 
   async function handleCopyMessage(message) {
@@ -1065,6 +1079,7 @@ export default function Inbox() {
                 onHistorySearch={setHistorySearch}
                 scrollRef={scrollRef}
                 selectedTicket={selectedTicket}
+                setEditingMessage={setEditingMessage}
                 setForwardingMessage={setForwardingMessage}
                 setReplyingTo={setReplyingTo}
                 styles={s}
@@ -1270,6 +1285,15 @@ export default function Inbox() {
               toast.error('Erro ao encaminhar mensagem');
             }
           }}
+        />
+      )}
+
+      {editingMessage && (
+        <EditMessageModal
+          message={editingMessage}
+          onClose={() => setEditingMessage(null)}
+          onSave={handleSaveEditedMessage}
+          styles={s}
         />
       )}
 

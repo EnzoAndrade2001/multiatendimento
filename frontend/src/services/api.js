@@ -210,6 +210,7 @@ export const getMessages = (ticketId, params = {}) => api.get(`/tickets/${ticket
 export const getTicketOutboundOptions = (ticketId, instanceId) => api.get(`/tickets/${ticketId}/outbound-options`, { params: { instanceId } });
 export const sendMessage = (ticketId, body, quotedMsgId = null, options = {}) => api.post(`/tickets/${ticketId}/messages`, { body, quotedMsgId, ...options });
 export const deleteMessage = (ticketId, messageId) => api.delete(`/tickets/${ticketId}/messages/${messageId}`);
+export const editMessage = (ticketId, messageId, body) => api.patch(`/tickets/${ticketId}/messages/${messageId}`, { body });
 export const assignTicket = (ticketId, agentId, teamId) => api.patch(`/tickets/${ticketId}/assign`, { agentId, teamId });
 export const resolveTicket = (ticketId) => api.patch(`/tickets/${ticketId}/resolve`);
 export const createTicket = (contactId, instanceId) => api.post('/tickets', { contactId, instanceId });

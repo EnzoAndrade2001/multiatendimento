@@ -1020,6 +1020,39 @@ async function handleWebhook(req, res) {
       if (handledAck) return;
     }
 
+    // Trata mensagens editadas no WhatsApp (externamente ou via webhook)
+    const isEditEvent = ev === 'messages.edited'
+      || (ev === 'messages.update' && Boolean(data?.message || data?.update?.message || data?.text || data?.update?.text));
+
+    if (isEditEvent) {
+      const editKey = data?.key || data?.message?.key || data?.update?.key;
+      const rawContent = data?.message || data?.update?.message;
+      const mContent = rawContent ? getMessageContent(rawContent) : null;
+      const editedBody = mContent?.conversation
+        || mContent?.extendedTextMessage?.text
+        || mContent?.imageMessage?.caption
+        || mContent?.videoMessage?.caption
+        || mContent?.documentMessage?.caption
+        || data?.text
+        || data?.update?.text;
+
+      if (editKey?.id && editedBody && typeof editedBody === 'string') {
+        const msgToUpdate = await prisma.message.findFirst({
+          where: { externalId: editKey.id },
+          include: { ticket: true }
+        });
+
+        if (msgToUpdate) {
+          const updated = await prisma.message.update({
+            where: { id: msgToUpdate.id },
+            data: { body: editedBody.trim(), isEdited: true }
+          });
+          if (io) io.to(msgToUpdate.ticket.tenantId).emit('message_updated', { message: updated, ticketId: msgToUpdate.ticketId });
+          return;
+        }
+      }
+    }
+
     // Trata exclusão de mensagens
     if (ev === 'messages.delete' || ev === 'messages.update') {
       const key = data?.key || data?.message?.key || data;
@@ -1034,7 +1067,7 @@ async function handleWebhook(req, res) {
             where: { id: msgToUpdate.id },
             data: { isDeleted: true }
           });
-          if (io) io.to(msgToUpdate.ticket.tenantId).emit('message_updated', { message: updated });
+          if (io) io.to(msgToUpdate.ticket.tenantId).emit('message_updated', { message: updated, ticketId: msgToUpdate.ticketId });
         }
       }
       return;

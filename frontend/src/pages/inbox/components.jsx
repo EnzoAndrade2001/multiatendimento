@@ -1345,6 +1345,115 @@ export function ForwardModal({ onClose, onForward, styles }) {
   );
 }
 
+export function EditMessageModal({ message, onClose, onSave, styles }) {
+  const [text, setText] = useState(message?.body || '');
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      const len = textareaRef.current.value.length;
+      textareaRef.current.setSelectionRange(len, len);
+    }
+  }, []);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  const handleSubmit = async () => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      toast.error('A mensagem não pode ficar vazia.');
+      return;
+    }
+    if (trimmed === message?.body) {
+      onClose();
+      return;
+    }
+    try {
+      setSaving(true);
+      await onSave(message.id, trimmed);
+      onClose();
+    } catch {
+      // erro tratado no caller com toast
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={{ ...styles.modal, maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>Editar mensagem</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+        </div>
+        <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--ink-faint)' }}>
+            O WhatsApp permite editar mensagens em até 15 minutos após o envio.
+          </p>
+          <textarea
+            ref={textareaRef}
+            rows={4}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={saving}
+            placeholder="Digite o novo texto da mensagem..."
+            style={{
+              ...styles.modalInput,
+              resize: 'vertical',
+              minHeight: '90px',
+              fontFamily: 'inherit',
+              lineHeight: 1.4,
+              boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              style={{
+                padding: '0.55rem 1rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-color)',
+                background: 'transparent',
+                color: 'var(--text-main)',
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={saving || !text.trim()}
+              style={{
+                ...styles.saveBtn,
+                padding: '0.55rem 1.25rem',
+                opacity: saving || !text.trim() ? 0.6 : 1,
+                cursor: saving || !text.trim() ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {saving ? 'Salvando...' : 'Salvar alterações'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Item de lista memoizado: evita recriar/recomparar todas as linhas do inbox
 // quando so o item selecionado muda (troca de ticket) ou o texto do composer
 // atualiza o componente pai. Só a linha afetada volta a renderizar.
@@ -1997,6 +2106,7 @@ export const MessageList = React.memo(function MessageList({
   onHistorySearch,
   scrollRef,
   selectedTicket,
+  setEditingMessage,
   setForwardingMessage,
   setReplyingTo,
   styles,
@@ -2358,6 +2468,11 @@ export const MessageList = React.memo(function MessageList({
                           </div>
                         )}
                         <div style={styles.messageHeaderSide}>
+                          {message.isEdited && (
+                            <span style={{ fontSize: '0.68rem', color: 'var(--ink-faint)', fontStyle: 'italic', marginRight: 4 }}>
+                              editada
+                            </span>
+                          )}
                           <div style={styles.messageHeaderTime}>{messageTime}</div>
                           {!message.isDeleted && (
                             <div className="inbox-msg-menu" style={styles.messageMenuRoot} data-message-menu-root="true">
@@ -2466,6 +2581,18 @@ export const MessageList = React.memo(function MessageList({
           <button type="button" style={styles.messageMenuItem} onClick={() => { handleCopyMessage(openMenuMessage); setOpenMenu(null); }}>
             Copiar texto
           </button>
+          {openMenuMessage.fromMe && !openMenuMessage.isDeleted && !openMenuMessage.mediaUrl && (
+            <button
+              type="button"
+              style={styles.messageMenuItem}
+              onClick={() => {
+                if (setEditingMessage) setEditingMessage(openMenuMessage);
+                setOpenMenu(null);
+              }}
+            >
+              Editar
+            </button>
+          )}
           {openMenuMessage.mediaUrl && (
             <button type="button" style={styles.messageMenuItem} onClick={() => { triggerMediaDownload(getMediaUrl(openMenuMessage.mediaUrl)); setOpenMenu(null); }}>
               Baixar

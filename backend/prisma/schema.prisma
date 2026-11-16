@@ -797,6 +797,7 @@ model Message {
   quotedMsgBody  String?
   fileName       String?
   isDeleted      Boolean        @default(false)
+  isEdited       Boolean        @default(false)
   createdAt      DateTime       @default(now())
   agent          User?          @relation(fields: [agentId], references: [id])
   ticket         Ticket         @relation(fields: [ticketId], references: [id])
