@@ -2,6 +2,111 @@ const prisma = require('../lib/prisma');
 const { mapEquipmentType } = require('../utils/equipmentMapper');
 const { listCustomerEquipmentsFromIluxWeb } = require('./iluxWebService');
 
+/**
+ * Sincroniza os equipamentos do cliente com o LCDWEB e concilia o banco de dados do CRM.
+ * Equipamentos de contratos cancelados ou que não constam mais na frota ativa do LCDWEB
+ * são automaticamente marcados como isActive: false.
+ */
+async function syncCustomerEquipmentsFromIluxWeb(tenantId, customerId, customerExternalId) {
+  if (!customerId) return [];
+  const identifier = String(customerExternalId || customerId).trim();
+  if (!identifier) return [];
+
+  const iluxEquipments = await listCustomerEquipmentsFromIluxWeb(identifier);
+  if (!Array.isArray(iluxEquipments)) return [];
+
+  const activeExternalIds = new Set();
+  const activeSerials = new Set();
+
+  for (const eq of iluxEquipments) {
+    const externalId = String(eq.externalId || eq.id || eq.serialNumber || '').trim();
+    if (!externalId) continue;
+
+    activeExternalIds.add(externalId);
+    if (eq.id) activeExternalIds.add(String(eq.id).trim());
+    if (eq.codigoLegado) activeExternalIds.add(String(eq.codigoLegado).trim());
+    if (eq.serialNumber) {
+      activeSerials.add(String(eq.serialNumber).trim().toUpperCase());
+    }
+
+    const equipmentType = mapEquipmentType(eq.type, eq.model);
+    const address = eq.address || eq.installLocation || null;
+    const sector = eq.sector || eq.department || 'Geral';
+
+    await prisma.crmEquipment.upsert({
+      where: {
+        tenantId_externalSource_externalId: {
+          tenantId,
+          externalSource: 'LCDDIGITALWEB',
+          externalId,
+        },
+      },
+      update: {
+        customerId,
+        model: eq.model || 'Equipamento',
+        manufacturer: eq.manufacturer || null,
+        type: equipmentType,
+        serialNumber: eq.serialNumber || null,
+        assetTag: eq.assetTag || null,
+        sector,
+        installLocation: address,
+        address,
+        city: eq.city || null,
+        state: eq.state || null,
+        contractExternalId: eq.contractNumber || eq.contractExternalId || null,
+        isActive: eq.isActive !== false,
+      },
+      create: {
+        tenantId,
+        customerId,
+        externalSource: 'LCDDIGITALWEB',
+        externalId,
+        model: eq.model || 'Equipamento',
+        manufacturer: eq.manufacturer || null,
+        type: equipmentType,
+        serialNumber: eq.serialNumber || null,
+        assetTag: eq.assetTag || null,
+        sector,
+        installLocation: address,
+        address,
+        city: eq.city || null,
+        state: eq.state || null,
+        contractExternalId: eq.contractNumber || eq.contractExternalId || null,
+        isActive: eq.isActive !== false,
+      },
+    });
+  }
+
+  // RECONCILIAÇÃO: Se o LCDWEB respondeu com a lista oficial de equipamentos ativos,
+  // qualquer CrmEquipment deste cliente que NÃO esteja na resposta do LCDWEB (ou seja,
+  // pertence a contrato cancelado, máquina recolhida ou código legado órfão)
+  // DEVE ser marcado como isActive: false.
+  const allCustomerEquips = await prisma.crmEquipment.findMany({
+    where: {
+      tenantId,
+      customerId,
+    },
+  });
+
+  for (const oldEquip of allCustomerEquips) {
+    const oldExtId = String(oldEquip.externalId || '').trim();
+    const oldSerial = String(oldEquip.serialNumber || '').trim().toUpperCase();
+
+    // Está na lista de equipamentos confirmados ativos pelo LCDWEB?
+    const isReturnedActive = activeExternalIds.has(oldExtId)
+      || (oldSerial && activeSerials.has(oldSerial) && activeExternalIds.has(oldExtId));
+
+    if (!isReturnedActive && oldEquip.isActive) {
+      await prisma.crmEquipment.update({
+        where: { id: oldEquip.id },
+        data: { isActive: false },
+      });
+    }
+  }
+
+  return iluxEquipments;
+}
+
 async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
   try {
     const contact = await prisma.contact.findUnique({
@@ -16,7 +121,6 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
 
     console.log(`[crmSyncService] Sincronizando equipamentos para contato ${contactId} (cliente ${contact.crmCustomerId})`);
 
-    // 1. Sincroniza em tempo real com o ILUX WEB caso o cliente esteja vinculado
     const customerIdentifier = String(
       contact.crmCustomer?.externalId
       || contact.crmCustomer?.id
@@ -26,108 +130,14 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
 
     if (customerIdentifier) {
       try {
-        const iluxEquipments = await listCustomerEquipmentsFromIluxWeb(customerIdentifier);
-        if (Array.isArray(iluxEquipments) && iluxEquipments.length > 0) {
-          for (const eq of iluxEquipments) {
-            const externalId = String(eq.externalId || eq.id || eq.serialNumber || '').trim();
-            if (!externalId) continue;
-
-            const equipmentType = mapEquipmentType(eq.type, eq.model);
-            const address = eq.address || eq.installLocation || null;
-            const sector = eq.sector || eq.department || 'Geral';
-
-            // Atualiza/Cria em CrmEquipment associado ao crmCustomerId
-            await prisma.crmEquipment.upsert({
-              where: {
-                tenantId_externalSource_externalId: {
-                  tenantId,
-                  externalSource: 'LCDDIGITALWEB',
-                  externalId,
-                },
-              },
-              update: {
-                customerId: contact.crmCustomerId,
-                model: eq.model || 'Equipamento',
-                manufacturer: eq.manufacturer || null,
-                type: equipmentType,
-                serialNumber: eq.serialNumber || null,
-                assetTag: eq.assetTag || null,
-                sector,
-                installLocation: address,
-                address,
-                city: eq.city || null,
-                state: eq.state || null,
-                contractExternalId: eq.contractNumber || eq.contractExternalId || null,
-                isActive: eq.isActive !== false,
-              },
-              create: {
-                tenantId,
-                customerId: contact.crmCustomerId,
-                externalSource: 'LCDDIGITALWEB',
-                externalId,
-                model: eq.model || 'Equipamento',
-                manufacturer: eq.manufacturer || null,
-                type: equipmentType,
-                serialNumber: eq.serialNumber || null,
-                assetTag: eq.assetTag || null,
-                sector,
-                installLocation: address,
-                address,
-                city: eq.city || null,
-                state: eq.state || null,
-                contractExternalId: eq.contractNumber || eq.contractExternalId || null,
-                isActive: eq.isActive !== false,
-              },
-            });
-
-            // Vincula no Equipment local apontando para este contato WhatsApp
-            const existingEquip = await prisma.equipment.findFirst({
-              where: {
-                tenantId,
-                externalId,
-              },
-            });
-
-            if (existingEquip) {
-              await prisma.equipment.update({
-                where: { id: existingEquip.id },
-                data: {
-                  contactId: contact.id,
-                  model: eq.model || existingEquip.model,
-                  manufacturer: eq.manufacturer || existingEquip.manufacturer,
-                  type: equipmentType,
-                  serialNumber: eq.serialNumber || existingEquip.serialNumber,
-                  sector,
-                  address,
-                  isActive: eq.isActive !== false,
-                },
-              });
-            } else {
-              await prisma.equipment.create({
-                data: {
-                  tenantId,
-                  contactId: contact.id,
-                  externalSource: 'LCDDIGITALWEB',
-                  externalId,
-                  model: eq.model || 'Equipamento',
-                  manufacturer: eq.manufacturer || null,
-                  type: equipmentType,
-                  serialNumber: eq.serialNumber || null,
-                  sector,
-                  address,
-                  isActive: eq.isActive !== false,
-                },
-              });
-            }
-          }
-        }
+        await syncCustomerEquipmentsFromIluxWeb(tenantId, contact.crmCustomerId, customerIdentifier);
       } catch (iluxSyncError) {
         console.warn(`[crmSyncService] Erro ao buscar equipamentos do ILUX WEB para ${customerIdentifier}:`, iluxSyncError?.message || iluxSyncError);
       }
     }
 
-    // 2. Garante que qualquer outro CrmEquipment já em cache para o cliente seja refletido no contato
-    const crmEquipments = await prisma.crmEquipment.findMany({
+    // Reflete no Equipment do contato APENAS os equipamentos que estão ativos em CrmEquipment
+    const activeCrmEquipments = await prisma.crmEquipment.findMany({
       where: {
         tenantId,
         customerId: contact.crmCustomerId,
@@ -135,10 +145,18 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
       },
     });
 
-    for (const crmEquip of crmEquipments) {
-      const externalSource = crmEquip.externalSource || 'firebird';
+    const activeExternalIds = new Set();
+    const activeSerials = new Set();
+
+    for (const crmEquip of activeCrmEquipments) {
+      const externalSource = crmEquip.externalSource || 'LCDDIGITALWEB';
       const externalId = crmEquip.externalId;
       if (!externalId) continue;
+
+      activeExternalIds.add(externalId);
+      if (crmEquip.serialNumber) {
+        activeSerials.add(crmEquip.serialNumber.trim().toUpperCase());
+      }
 
       const existing = await prisma.equipment.findFirst({
         where: { tenantId, externalId },
@@ -155,7 +173,7 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
             serialNumber: crmEquip.serialNumber || existing.serialNumber,
             sector: crmEquip.sector || crmEquip.installLocation || 'Geral',
             address: crmEquip.address || existing.address,
-            isActive: crmEquip.isActive,
+            isActive: true,
           },
         });
       } else {
@@ -171,8 +189,25 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
             serialNumber: crmEquip.serialNumber,
             sector: crmEquip.sector || crmEquip.installLocation || 'Geral',
             address: crmEquip.address,
-            isActive: crmEquip.isActive,
+            isActive: true,
           },
+        });
+      }
+    }
+
+    // Inativa qualquer Equipment deste contato que não esteja na lista de equipamentos ativos
+    const allContactEquips = await prisma.equipment.findMany({
+      where: { tenantId, contactId: contact.id, isActive: true },
+    });
+
+    for (const cEq of allContactEquips) {
+      const isStillActive = activeExternalIds.has(cEq.externalId)
+        || (cEq.serialNumber && activeSerials.has(cEq.serialNumber.trim().toUpperCase()) && activeExternalIds.has(cEq.externalId));
+
+      if (!isStillActive) {
+        await prisma.equipment.update({
+          where: { id: cEq.id },
+          data: { isActive: false },
         });
       }
     }
@@ -184,5 +219,6 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
 }
 
 module.exports = {
+  syncCustomerEquipmentsFromIluxWeb,
   syncCrmEquipmentsToEquipment,
 };

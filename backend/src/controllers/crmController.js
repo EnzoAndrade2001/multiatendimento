@@ -1139,8 +1139,20 @@ async function listCustomers(req, res) {
 
 async function getCustomer(req, res) {
   const tenantId = req.user.tenantId;
-  const customer = await findTenantCustomer(tenantId, req.params.id);
+  let customer = await findTenantCustomer(tenantId, req.params.id);
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado' });
+
+  // Sincroniza equipamentos com LCDWEB para garantir que contratos cancelados/máquinas recolhidas sejam inativadas
+  try {
+    const { syncCustomerEquipmentsFromIluxWeb } = require('../services/crmSyncService');
+    const customerIdentifier = customer.externalId || customer.id;
+    if (customerIdentifier) {
+      await syncCustomerEquipmentsFromIluxWeb(tenantId, customer.id, customerIdentifier);
+      customer = await findTenantCustomer(tenantId, req.params.id);
+    }
+  } catch (syncErr) {
+    console.warn(`[getCustomer] Erro ao sincronizar equipamentos do cliente ${customer.id}:`, syncErr.message);
+  }
 
   res.json({
     ...customer,
@@ -1197,8 +1209,19 @@ async function getCustomerServiceOrders(req, res) {
 
 async function getCustomer360(req, res) {
   const tenantId = req.user.tenantId;
-  const customer = await findTenantCustomer(tenantId, req.params.id);
+  let customer = await findTenantCustomer(tenantId, req.params.id);
   if (!customer) return res.status(404).json({ error: 'Cliente CRM nao encontrado' });
+
+  try {
+    const { syncCustomerEquipmentsFromIluxWeb } = require('../services/crmSyncService');
+    const customerIdentifier = customer.externalId || customer.id;
+    if (customerIdentifier) {
+      await syncCustomerEquipmentsFromIluxWeb(tenantId, customer.id, customerIdentifier);
+      customer = await findTenantCustomer(tenantId, req.params.id);
+    }
+  } catch (syncErr) {
+    console.warn(`[getCustomer360] Erro ao sincronizar equipamentos do cliente ${customer.id}:`, syncErr.message);
+  }
 
   const contactIds = customer.whatsappContacts.map((contact) => contact.id);
   const equipmentExternalIds = customer.equipments.map((equipment) => text(equipment.externalId)).filter(Boolean);
