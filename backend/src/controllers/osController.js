@@ -438,6 +438,30 @@ async function createOS(req, res) {
     if (isTonerOrInk && (!Array.isArray(produtos) || produtos.length === 0)) {
       return res.status(400).json({ error: 'Para o tipo de defeito REPOSIÇÃO DE TONER/TINTA, é obrigatório adicionar pelo menos um item.' });
     }
+    if (!isIluxWebEquipment(equipment) && equipment.serialNumber && contact.crmCustomerId) {
+      // Cadastros manuais anteriores à sincronização podem representar a mesma
+      // máquina. Resolva somente dentro do cliente vinculado à conversa.
+      const matches = await prisma.crmEquipment.findMany({
+        where: {
+          tenantId,
+          customerId: contact.crmCustomerId,
+          isActive: true,
+          serialNumber: equipment.serialNumber,
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
+        },
+      });
+      const numericMatches = matches.filter((item) => /^\d+$/.test(String(item.externalId || '')));
+      const candidates = numericMatches.length ? numericMatches : matches;
+      const identities = [...new Set(candidates.map((item) => item.externalId).filter(Boolean))];
+      if (identities.length === 1) {
+        const linked = candidates.find((item) => item.externalId === identities[0]);
+        const updated = await prisma.equipment.update({
+          where: { id: equipment.id },
+          data: { externalId: linked.externalId, externalSource: linked.externalSource },
+        });
+        Object.assign(equipment, updated);
+      }
+    }
     if (!isIluxWebEquipment(equipment)) {
       return res.status(400).json({ error: 'Selecione um equipamento sincronizado com o ILUX WEB.' });
     }
@@ -451,7 +475,7 @@ async function createOS(req, res) {
       where: {
         tenantId,
         externalId: equipment.externalId,
-        externalSource: { in: [...ILUX_WEB_EQUIPMENT_SOURCES] },
+        externalSource: { in: CRM_EXTERNAL_SOURCES },
       },
       select: { customerId: true, customer: { select: { externalId: true } } },
     });
