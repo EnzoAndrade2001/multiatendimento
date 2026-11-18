@@ -424,6 +424,24 @@ async function createOS(req, res) {
       return res.status(400).json({ error: 'O ticket não pertence ao cliente informado.' });
     }
     if (!contact) return res.status(404).json({ error: 'Cliente não encontrado.' });
+    if (!contact.crmCustomerId && equipment?.serialNumber && equipment.contactId === contact.id) {
+      const matches = await prisma.crmEquipment.findMany({
+        where: {
+          tenantId, serialNumber: equipment.serialNumber, isActive: true,
+          externalSource: { in: CRM_EXTERNAL_SOURCES },
+        },
+        include: { customer: true },
+      });
+      const customerIds = [...new Set(matches.map((item) => item.customerId).filter(Boolean))];
+      if (customerIds.length === 1) {
+        const customer = matches.find((item) => item.customerId === customerIds[0]).customer;
+        if (customer?.externalId) {
+          await prisma.contact.update({ where: { id: contact.id }, data: { crmCustomerId: customer.id } });
+          contact.crmCustomerId = customer.id;
+          contact.crmCustomer = customer;
+        }
+      }
+    }
     if (!contact.externalId && !contact.crmCustomer?.externalId) {
       return res.status(400).json({ error: 'Vincule a conversa a um cliente do ILUX WEB antes de abrir a O.S.' });
     }
