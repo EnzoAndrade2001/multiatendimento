@@ -45,11 +45,27 @@ Rollback immediately after this deployment:
 sudo docker service rollback marketing-ai_evolution-api
 ```
 
-The EasyPanel service's original source definition was not edited in its LMDB
-database. A future redeploy through EasyPanel can restore the upstream image and
-remove the DNS override. Keep the patched image/configuration when redeploying;
-do not pull/redeploy the original rc2 tag expecting it to include this fix.
-The image currently exists only on this VPS and must be rebuilt or transferred
-before moving the service to another node. Recovery warnings are available in
-the Evolution service logs; customer-wide outage notification is a separate
-remaining improvement.
+Follow-up on 2026-11-19: EasyPanel source is now an inline Dockerfile pinned to
+the original upstream manifest digest, embedding the helper and guarded patch.
+`persist-easypanel.cjs` performs a transactional update of only source/build and
+zeroDowntime, retaining the original serialized service record in
+`/etc/easypanel/data/backups/evolution-source-before-408-20261119.json`.
+The exact saved Dockerfile was independently rebuilt successfully as
+`lcd/evolution:408-persistent-20261119`. New panel deploys rebuild this patch;
+do not manually replace the source with the original rc2 tag.
+
+DNS is also persistent in the ens3 NetworkManager profile (ignore automatic DNS,
+1.1.1.1 and 9.9.9.9) and `/etc/resolv.conf`, which is a regular static file on
+this host. This affects host DNS and DNS inherited by new containers. Original
+profile values and resolv.conf are backed up in the incident backup directory.
+No Docker daemon/network restart was required.
+
+The main application repository `connectbrazilads/multiatendimento`, commit
+`6fd9e21`, adds the shared outage incident to the existing support overview and
+notification monitor. It requires two active client companies, paired phone
+numbers, explicit close/connecting states lasting at least two minutes, and
+connection transitions in a ten-minute window. It uses the configured severity,
+confirmation rounds, recipients, sender fallback, deduplication and recovery
+notifications. If all configured senders are offline, delivery waits for a
+sender to recover; the panel still records the incident. No alternate external
+notification channel is introduced.
