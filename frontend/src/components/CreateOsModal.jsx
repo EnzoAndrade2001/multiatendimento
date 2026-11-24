@@ -1,9 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import api, { BACKEND_URL, getEquipments, getOpenOrdersForEquipment } from '../services/api';
-import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, FileText, LoaderCircle, MapPin, Minus, Package, Plus, Printer, Search, Trash2, Wand2 } from 'lucide-react';
+import api, { BACKEND_URL, getContactFinancialAlert, getEquipments, getOpenOrdersForEquipment, sendContactOverdueBoleto } from '../services/api';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FileText, LoaderCircle, MapPin, Minus, Package, Plus, Printer, Search, Send, Trash2, Wand2 } from 'lucide-react';
 import EquipmentPickerModal, { equipmentAddress, equipmentOperationalLocation } from './EquipmentPickerModal';
 import ProductPickerModal from './ProductPickerModal';
 import { toast } from '../utils/toast';
+
+function formatCurrencyBrl(value) {
+  return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function formatYmdToBr(ymd) {
+  if (!ymd) return '-';
+  const match = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(ymd);
+}
 
 export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const modalContext = useRef({ ticketId: ticket.id, contactId: ticket.contact?.id });
@@ -30,6 +40,10 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
   const [produtoSearch, setProdutoSearch] = useState('');
   const [produtoQtd, setProdutoQtd] = useState(1);
   const [showProdDropdown, setShowProdDropdown] = useState(false);
+  const [financialAlert, setFinancialAlert] = useState(null);
+  const [showOverdueDetails, setShowOverdueDetails] = useState(false);
+  const [sendingBoletoId, setSendingBoletoId] = useState('');
+  const [sentBoletoIds, setSentBoletoIds] = useState({});
   const formEditedRef = useRef(false);
 
   function updateFormData(updater) {
@@ -170,12 +184,13 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
         return;
       }
       
-      const [resEquips, resTypes, resTechs, resDefectTypes, resProducts] = await Promise.all([
+      const [resEquips, resTypes, resTechs, resDefectTypes, resProducts, resFinancial] = await Promise.all([
         getEquipments(contactId),
         api.get('/os/types'),
         api.get('/os/technicians'),
         api.get('/os/defect-types'),
         api.get('/os/products').catch(() => ({ data: { items: [] } })),
+        getContactFinancialAlert(contactId).catch(() => ({ data: null })),
       ]);
 
       setEquipments(resEquips.data);
@@ -187,6 +202,12 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
           ? resProducts.data.items
           : (Array.isArray(resProducts.data) ? resProducts.data : [])
       );
+      if (resFinancial?.data?.hasOverdue) {
+        setFinancialAlert(resFinancial.data);
+        setShowOverdueDetails((resFinancial.data.items?.length || 0) <= 3);
+      } else {
+        setFinancialAlert(null);
+      }
       
       const foundType = resTypes.data.find(t => t.code === '01')
         || resTypes.data.find(t => t.name.toUpperCase().includes('CONTRAT'))
@@ -311,6 +332,25 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     }
   }
 
+  async function handleSendOverdueBoleto(item) {
+    const contactId = ticket.contact?.id;
+    if (!contactId || !item?.id || sendingBoletoId) return;
+    setSendingBoletoId(item.id);
+    try {
+      await sendContactOverdueBoleto(contactId, {
+        receivableId: item.id,
+        ticketId: ticket.id,
+      });
+      setSentBoletoIds((prev) => ({ ...prev, [item.id]: true }));
+      toast.success(`2ª via (${formatYmdToBr(item.dueAt)}) enviada no WhatsApp!`);
+    } catch (e) {
+      const msg = e.response?.data?.error || e.message || 'Não foi possível enviar a 2ª via no WhatsApp.';
+      toast.error(msg);
+    } finally {
+      setSendingBoletoId('');
+    }
+  }
+
   const s = {
     overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
     modal: { background: 'var(--bg-panel)', width: '740px', maxWidth: '95vw', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column' },
@@ -322,6 +362,15 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
     saveBtn: { flex: 1, background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' },
     cancelBtn: { flex: 1, background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: 'var(--space-3)', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' },
     openWarn: { padding: '10px 12px', marginBottom: 'var(--space-4)', borderRadius: '10px', background: 'var(--warning-light, rgba(245,158,11,0.08))', border: '1px solid var(--warning-border, rgba(245,158,11,0.3))', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
+    financialAlert: { padding: '12px 14px', marginBottom: 'var(--space-4)', borderRadius: '12px', background: 'rgba(227, 30, 36, 0.09)', border: '1.5px solid rgba(227, 30, 36, 0.45)', color: 'var(--text-main)', fontSize: 'var(--text-sm)' },
+    financialAlertHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' },
+    financialAlertTitle: { display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, color: '#ef4444' },
+    financialAlertSub: { color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginTop: '3px' },
+    financialAlertActions: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
+    financialToggleBtn: { display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '6px 10px', borderRadius: '8px', border: '1px solid rgba(227, 30, 36, 0.35)', background: 'transparent', color: 'var(--text-main)', fontSize: 'var(--text-xs)', fontWeight: 700, cursor: 'pointer' },
+    financialSendBtn: { display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 11px', borderRadius: '8px', border: 'none', background: '#16a34a', color: '#fff', fontSize: 'var(--text-xs)', fontWeight: 700, cursor: 'pointer', flexShrink: 0 },
+    financialSentBtn: { display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '6px 11px', borderRadius: '8px', border: '1px solid rgba(22, 163, 74, 0.4)', background: 'rgba(22, 163, 74, 0.14)', color: '#22c55e', fontSize: 'var(--text-xs)', fontWeight: 700, cursor: 'default', flexShrink: 0 },
+    financialRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '7px 0', fontSize: 'var(--text-xs)', borderTop: '1px solid rgba(227, 30, 36, 0.18)' },
     draftNotice: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', marginBottom: 'var(--space-4)', borderRadius: '8px', background: 'var(--accent-light)', border: '1px solid var(--accent-border)', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' },
     openWarnRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '5px 0', fontSize: 'var(--text-xs)', borderTop: '1px solid var(--border-color)' },
     openWarnLink: { display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 700, flexShrink: 0 }
@@ -361,6 +410,99 @@ export default function CreateOsModal({ ticket, onClose, onCreated }) {
           </div>
         ) : (
           <div>
+            {financialAlert?.hasOverdue ? (
+              <div style={s.financialAlert} role="alert">
+                <div style={s.financialAlertHeader}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={s.financialAlertTitle}>
+                      <AlertTriangle size={17} style={{ flexShrink: 0 }} />
+                      <span>
+                        Atenção: cliente possui {financialAlert.overdueCount}{' '}
+                        {financialAlert.overdueCount === 1 ? 'boleto vencido' : 'boletos vencidos'}
+                      </span>
+                    </div>
+                    <div style={s.financialAlertSub}>
+                      Total vencido: <strong style={{ color: 'var(--text-main)' }}>{formatCurrencyBrl(financialAlert.overdueAmount)}</strong>
+                      {financialAlert.maxDaysOverdue > 0 ? (
+                        <> · Mais antigo há <strong style={{ color: '#ef4444' }}>{financialAlert.maxDaysOverdue} {financialAlert.maxDaysOverdue === 1 ? 'dia' : 'dias'}</strong></>
+                      ) : null}
+                      {' '}· Aviso informativo (abertura de O.S. liberada).
+                    </div>
+                  </div>
+                  <div style={s.financialAlertActions}>
+                    {financialAlert.items?.length === 1 ? (() => {
+                      const singleItem = financialAlert.items[0];
+                      const isSending = sendingBoletoId === singleItem.id;
+                      const isSent = Boolean(sentBoletoIds[singleItem.id]);
+                      return (
+                        <button
+                          type="button"
+                          style={isSent ? s.financialSentBtn : s.financialSendBtn}
+                          disabled={Boolean(sendingBoletoId) || isSent}
+                          onClick={() => handleSendOverdueBoleto(singleItem)}
+                        >
+                          {isSending ? (
+                            <><LoaderCircle size={13} style={{ animation: 'ui-spin 1s linear infinite' }} /> Enviando...</>
+                          ) : isSent ? (
+                            <><CheckCircle2 size={13} /> 2ª via enviada</>
+                          ) : (
+                            <><Send size={13} /> Enviar 2ª via no WhatsApp</>
+                          )}
+                        </button>
+                      );
+                    })() : null}
+                    <button
+                      type="button"
+                      style={s.financialToggleBtn}
+                      onClick={() => setShowOverdueDetails((prev) => !prev)}
+                    >
+                      {showOverdueDetails ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      {showOverdueDetails ? 'Ocultar títulos' : `Ver ${financialAlert.overdueCount === 1 ? 'detalhes' : 'boletos'}`}
+                    </button>
+                  </div>
+                </div>
+
+                {showOverdueDetails && financialAlert.items?.length > 0 ? (
+                  <div style={{ marginTop: '10px' }}>
+                    {financialAlert.items.map((item) => {
+                      const isSending = sendingBoletoId === item.id;
+                      const isSent = Boolean(sentBoletoIds[item.id]);
+                      return (
+                        <div key={item.id} style={s.financialRow}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontWeight: 700, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.description}
+                            </div>
+                            <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Venc.: <strong>{formatYmdToBr(item.dueAt)}</strong>
+                              {' '}({item.daysOverdue} {item.daysOverdue === 1 ? 'dia' : 'dias'} em atraso)
+                              {' · '}
+                              <strong style={{ color: '#ef4444' }}>{formatCurrencyBrl(item.openValue)}</strong>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            style={isSent ? s.financialSentBtn : s.financialSendBtn}
+                            disabled={Boolean(sendingBoletoId) || isSent}
+                            onClick={() => handleSendOverdueBoleto(item)}
+                            title="Enviar 2ª via deste boleto na conversa do WhatsApp"
+                          >
+                            {isSending ? (
+                              <><LoaderCircle size={12} style={{ animation: 'ui-spin 1s linear infinite' }} /> Enviando...</>
+                            ) : isSent ? (
+                              <><CheckCircle2 size={12} /> Enviado</>
+                            ) : (
+                              <><Send size={12} /> Enviar 2ª via</>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {drafting ? (
               <div style={s.draftNotice} role="status">
                 <Wand2 size={14} style={{ animation: 'ui-spin 1.5s linear infinite', flexShrink: 0 }} />

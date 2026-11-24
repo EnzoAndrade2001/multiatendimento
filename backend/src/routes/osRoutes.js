@@ -19,6 +19,8 @@ const {
   getOSDefectTypes,
   getProducts,
   getCustomerProductsHistory,
+  getContactFinancialAlert,
+  sendContactOverdueBoleto,
 } = require('../controllers/osController');
 const { sendManagerCopy } = require('../controllers/serviceOrderManagerController');
 const auditEvent = require('../middlewares/auditEvent');
@@ -31,6 +33,8 @@ router.get('/technicians', getOSTechnicians);
 router.get('/defect-types', getOSDefectTypes);
 router.get('/products', getProducts);
 router.get('/contacts/:contactId/products-history', getCustomerProductsHistory);
+router.get('/contacts/:contactId/financial-alert', getContactFinancialAlert);
+router.post('/contacts/:contactId/financial-alert/send-boleto', requirePermission('inbox.create_os'), auditEvent('FINANCIAL_BOLETO_RESEND_FROM_OS', 'billing_document', { resourceId: (req) => req.params.contactId }), sendContactOverdueBoleto);
 
 // Equipments (can be managed here or under contacts)
 router.get('/contacts/:contactId/equipments', getEquipments);

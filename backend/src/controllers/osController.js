@@ -18,8 +18,11 @@ const {
   isIluxWebConfigured,
   listDefectTypesFromIluxWeb,
   listProductsFromIluxWeb,
+  listReceivablesFromIluxWeb,
   listServiceOrdersFromIluxWeb,
 } = require('../services/iluxWebService');
+const billingDocuments = require('../services/billingDocumentService');
+const { normalizeReceivable } = require('./crmController');
 const { readEquipmentLocation, resolveOsDocumentAddress } = require('../utils/equipmentLocation');
 
 const OS_CONFIRMATION_TIMEOUT_MS = Math.max(
@@ -2195,6 +2198,193 @@ async function getCustomerProductsHistory(req, res) {
   }
 }
 
+function getBrazilCalendarTodayYmd() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function diffCalendarDaysYmd(fromYmd, toYmd) {
+  if (!fromYmd || !toYmd) return 0;
+  const from = Date.parse(`${fromYmd}T00:00:00Z`);
+  const to = Date.parse(`${toYmd}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0;
+  return Math.max(0, Math.round((to - from) / 86400000));
+}
+
+async function resolveContactCustomerForFinancial(tenantId, contactId) {
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, tenantId },
+    select: {
+      id: true,
+      externalId: true,
+      crmCustomerId: true,
+      crmCustomer: {
+        select: { id: true, externalId: true, name: true, fantasyName: true, cpfCnpj: true },
+      },
+    },
+  });
+  if (!contact) return { contact: null, customer: null };
+  if (contact.crmCustomer?.externalId) {
+    return { contact, customer: contact.crmCustomer };
+  }
+  const fallbackExternalId = String(contact.externalId || '').trim();
+  if (!fallbackExternalId) return { contact, customer: contact.crmCustomer || null };
+  const customer = await prisma.crmCustomer.findFirst({
+    where: { tenantId, externalId: fallbackExternalId },
+    select: { id: true, externalId: true, name: true, fantasyName: true, cpfCnpj: true },
+  });
+  return { contact, customer };
+}
+
+async function getContactFinancialAlert(req, res) {
+  try {
+    const tenantId = req.user.tenantId;
+    const { contactId } = req.params;
+    const { contact, customer } = await resolveContactCustomerForFinancial(tenantId, contactId);
+    if (!contact || !customer?.externalId) {
+      return res.json({
+        hasOverdue: false,
+        overdueCount: 0,
+        overdueAmount: 0,
+        maxDaysOverdue: 0,
+        items: [],
+      });
+    }
+
+    let iluxFinancial;
+    try {
+      iluxFinancial = await listReceivablesFromIluxWeb(customer.externalId, { limit: 250 });
+    } catch (error) {
+      console.warn(`[OS Financial Alert] falha ao consultar LCDWEB para cliente ${customer.externalId}:`, error.message);
+      return res.json({
+        hasOverdue: false,
+        unavailable: true,
+        overdueCount: 0,
+        overdueAmount: 0,
+        maxDaysOverdue: 0,
+        items: [],
+      });
+    }
+
+    const todayYmd = getBrazilCalendarTodayYmd();
+    const overdueItems = (iluxFinancial.items || [])
+      .map(normalizeReceivable)
+      .filter((item) => !item.isCancelled && item.status === 'overdue' && item.openValue > 0)
+      .map((item) => ({
+        id: String(item.externalId || item.id || item.statementExternalId || ''),
+        externalId: item.externalId,
+        dueAt: item.dueAt,
+        daysOverdue: diffCalendarDaysYmd(item.dueAt, todayYmd),
+        value: item.value,
+        openValue: item.openValue,
+        description: item.description || (item.faturaRef ? `Fatura ${item.faturaRef}` : item.invoiceNumber ? `NF ${item.invoiceNumber}` : 'Boleto'),
+        faturaRef: item.faturaRef || null,
+        invoiceNumber: item.invoiceNumber || null,
+        ourNumber: item.ourNumber || null,
+        digitableLine: item.digitableLine || null,
+        hasBoleto: Boolean(item.hasBoleto),
+        hasFatura: Boolean(item.hasFatura),
+        paymentMethod: item.paymentMethod || null,
+      }))
+      .sort((a, b) => String(a.dueAt || '').localeCompare(String(b.dueAt || '')));
+
+    const overdueAmount = Number(overdueItems.reduce((sum, item) => sum + Number(item.openValue || 0), 0).toFixed(2));
+    const maxDaysOverdue = overdueItems.reduce((max, item) => Math.max(max, item.daysOverdue || 0), 0);
+
+    return res.json({
+      hasOverdue: overdueItems.length > 0,
+      customerId: customer.id,
+      customerExternalId: customer.externalId,
+      customerName: customer.fantasyName || customer.name,
+      overdueCount: overdueItems.length,
+      overdueAmount,
+      maxDaysOverdue,
+      items: overdueItems,
+    });
+  } catch (error) {
+    console.error('[getContactFinancialAlert] erro:', error);
+    return res.json({
+      hasOverdue: false,
+      unavailable: true,
+      overdueCount: 0,
+      overdueAmount: 0,
+      maxDaysOverdue: 0,
+      items: [],
+    });
+  }
+}
+
+async function sendContactOverdueBoleto(req, res) {
+  try {
+    const tenantId = req.user.tenantId;
+    const { contactId } = req.params;
+    const requestedReceivableId = String(req.body?.receivableId || '').trim();
+    const ticketId = req.body?.ticketId || null;
+
+    const { contact, customer } = await resolveContactCustomerForFinancial(tenantId, contactId);
+    if (!contact || !customer?.externalId) {
+      return res.status(404).json({ error: 'Cliente financeiro não vinculado a este contato.' });
+    }
+
+    const iluxFinancial = await listReceivablesFromIluxWeb(customer.externalId, { limit: 250 });
+    const normalizedItems = (iluxFinancial.items || []).map(normalizeReceivable);
+
+    let receivable = null;
+    if (requestedReceivableId) {
+      receivable = normalizedItems.find((item) => String(
+        item.externalId || item.id || item.statementExternalId || '',
+      ) === requestedReceivableId);
+    } else {
+      receivable = normalizedItems
+        .filter((item) => !item.isCancelled && item.status === 'overdue' && item.openValue > 0)
+        .sort((a, b) => String(a.dueAt || '').localeCompare(String(b.dueAt || '')))[0] || null;
+    }
+
+    if (!receivable) {
+      return res.status(404).json({ error: 'Boleto vencido não encontrado no LCDWEB.' });
+    }
+    if (receivable.isCancelled) {
+      return res.status(410).json({ error: 'Este título foi cancelado no LCDWEB.' });
+    }
+    if (receivable.status === 'paid') {
+      return res.status(409).json({ error: 'Este título já consta como pago no LCDWEB.' });
+    }
+
+    const documentTypes = receivable.hasBoleto
+      ? ['boleto']
+      : receivable.hasFatura
+        ? ['fatura']
+        : ['boleto'];
+
+    const result = await billingDocuments.sendDocuments({
+      tenantId,
+      userId: req.user.userId || req.user.id || null,
+      customer,
+      receivable,
+      documentTypes,
+      ticketId,
+    });
+
+    return res.json({
+      ok: true,
+      receivableId: String(receivable.externalId || receivable.id || ''),
+      dueAt: receivable.dueAt,
+      openValue: receivable.openValue,
+      sent: result.sent,
+    });
+  } catch (error) {
+    const status = error.statusCode || error.response?.status || 500;
+    if (status >= 500) console.error('[sendContactOverdueBoleto] erro:', error);
+    return res.status(status).json({ error: error.message || 'Não foi possível enviar a 2ª via no WhatsApp.' });
+  }
+}
+
 module.exports = {
   addEquipment,
   createOS,
@@ -2202,6 +2392,7 @@ module.exports = {
   draftOS,
   generatePdf,
   generatePdfBuffer,
+  getContactFinancialAlert,
   getCustomerProductsHistory,
   getEquipments,
   getOpenOrdersForEquipment,
@@ -2212,6 +2403,7 @@ module.exports = {
   getOSTypes,
   getProducts,
   resolveServiceOrderForPdf,
+  sendContactOverdueBoleto,
   updateEquipment,
   updateOS,
 };

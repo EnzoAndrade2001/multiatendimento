@@ -457,9 +457,10 @@ async function syncAllTenantsCatalogFromLcdWeb() {
   if (catalogSyncRunning) return;
   catalogSyncRunning = true;
   try {
-    const tenants = await prisma.tenant.findMany({ select: { id: true } });
-    for (const t of tenants) {
-      await syncCatalogFromLcdWeb(t.id);
+    const targetTenantId = String(process.env.ILUX_WEB_TENANT_ID || process.env.LCD_TENANT_ID || 'cmonvybip0000gmivu3q6sqly').trim();
+    const tenant = await prisma.tenant.findUnique({ where: { id: targetTenantId }, select: { id: true } });
+    if (tenant) {
+      await syncCatalogFromLcdWeb(tenant.id);
     }
   } catch (err) {
     console.error('[crmSyncService] Erro na sincronização periódica do catálogo LCDWEB:', err?.message || err);

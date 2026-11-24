@@ -362,6 +362,8 @@ export const auditTicket = (ticketId) => api.post(`/revenue/audit/${ticketId}`);
 
 // OS & Equipments
 export const getEquipments = (contactId) => api.get(`/os/contacts/${contactId}/equipments`);
+export const getContactFinancialAlert = (contactId) => api.get(`/os/contacts/${contactId}/financial-alert`);
+export const sendContactOverdueBoleto = (contactId, data) => api.post(`/os/contacts/${contactId}/financial-alert/send-boleto`, data);
 export const getOpenOrdersForEquipment = (equipmentId) => api.get(`/os/equipments/${encodeURIComponent(equipmentId)}/open-orders`);
 export const updateEquipment = (id, data) => api.patch(`/os/equipments/${id}`, data);
 export const deleteEquipment = (id) => api.delete(`/os/equipments/${id}`);
