@@ -128,6 +128,20 @@ function start() {
     });
   }, 15 * 60 * 1000);
   console.log('[billing-documents] retry automático de documentos financeiros com falha iniciado (15 min)');
+
+  // Sincronização automática de Clientes, Contratos e Equipamentos diretamente do LCDWEB (10 min)
+  const { syncAllTenantsCatalogFromLcdWeb } = require('./crmSyncService');
+  setTimeout(() => {
+    syncAllTenantsCatalogFromLcdWeb().catch((err) => {
+      console.error('[lcdweb-catalog-sync] erro na sincronização inicial:', err.message);
+    });
+  }, 15 * 1000);
+  setInterval(() => {
+    syncAllTenantsCatalogFromLcdWeb().catch((err) => {
+      console.error('[lcdweb-catalog-sync] erro na sincronização periódica:', err.message);
+    });
+  }, 10 * 60 * 1000);
+  console.log('[lcdweb-catalog-sync] sincronização automática de clientes/contratos do LCDWEB iniciada (10 min)');
 }
 
 module.exports = { start };

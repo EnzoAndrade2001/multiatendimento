@@ -1,6 +1,6 @@
 const prisma = require('../lib/prisma');
 const { mapEquipmentType } = require('../utils/equipmentMapper');
-const { listCustomerEquipmentsFromIluxWeb } = require('./iluxWebService');
+const { listCustomerEquipmentsFromIluxWeb, fetchCatalogFromIluxWeb } = require('./iluxWebService');
 
 /**
  * Sincroniza os equipamentos do cliente com o LCDWEB e concilia o banco de dados do CRM.
@@ -218,7 +218,259 @@ async function syncCrmEquipmentsToEquipment(tenantId, contactId) {
   }
 }
 
+function onlyDigits(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+/**
+ * Sincroniza o catálogo completo de clientes, contratos e equipamentos ativos
+ * diretamente do LCDWEB (fonte oficial), criando clientes novos sem código legado
+ * e atualizando contratos/equipamentos sem duplicar registros do Firebird.
+ */
+async function syncCatalogFromLcdWeb(tenantId) {
+  if (!tenantId) return { ok: false, reason: 'tenantId ausente' };
+
+  const catalog = await fetchCatalogFromIluxWeb();
+  const items = Array.isArray(catalog?.items) ? catalog.items : [];
+  if (items.length === 0) {
+    return { ok: true, customersCreated: 0, customersUpdated: 0, contractsSynced: 0, equipmentsSynced: 0 };
+  }
+
+  const existingCustomers = await prisma.crmCustomer.findMany({
+    where: { tenantId },
+    select: { id: true, externalSource: true, externalId: true, cpfCnpj: true },
+  });
+
+  const byExternalId = new Map();
+  const byCpfCnpj = new Map();
+  for (const c of existingCustomers) {
+    const ext = String(c.externalId || '').trim();
+    if (ext) byExternalId.set(ext, c);
+    const doc = onlyDigits(c.cpfCnpj);
+    if (doc && doc.length >= 11 && !byCpfCnpj.has(doc)) {
+      byCpfCnpj.set(doc, c);
+    }
+  }
+
+  let customersCreated = 0;
+  let customersUpdated = 0;
+  let contractsSynced = 0;
+  let equipmentsSynced = 0;
+  const now = new Date();
+
+  for (const item of items) {
+    const docDigits = onlyDigits(item.cpfCnpj);
+    const legacyExt = item.codigoLegado != null ? String(item.codigoLegado).trim() : '';
+    const lcdExt = String(item.id || '').trim();
+    if (!lcdExt) continue;
+
+    let customer =
+      (legacyExt && byExternalId.get(legacyExt)) ||
+      byExternalId.get(lcdExt) ||
+      (docDigits.length >= 11 && byCpfCnpj.get(docDigits)) ||
+      null;
+
+    const customerData = {
+      name: item.name || 'Cliente',
+      fantasyName: item.fantasyName || null,
+      cpfCnpj: item.cpfCnpj || null,
+      email: item.email || null,
+      phone: item.phone || null,
+      address: item.address || null,
+      neighborhood: item.neighborhood || null,
+      city: item.city || null,
+      state: item.state || null,
+      zipCode: item.zipCode || null,
+      contactName: item.contactName || null,
+      externalUpdatedAt: item.updatedAt ? new Date(item.updatedAt) : now,
+    };
+
+    if (customer) {
+      await prisma.crmCustomer.update({
+        where: { id: customer.id },
+        data: customerData,
+      });
+      customersUpdated++;
+    } else {
+      customer = await prisma.crmCustomer.create({
+        data: {
+          tenantId,
+          externalSource: 'LCDDIGITALWEB',
+          externalId: lcdExt,
+          ...customerData,
+        },
+        select: { id: true, externalSource: true, externalId: true, cpfCnpj: true },
+      });
+      byExternalId.set(lcdExt, customer);
+      if (docDigits.length >= 11) byCpfCnpj.set(docDigits, customer);
+      customersCreated++;
+    }
+
+    const customerExtId = String(customer.externalId).trim();
+    const contracts = Array.isArray(item.contracts) ? item.contracts : [];
+    const activeLcdContractIds = new Set();
+    const activeEquipmentExternalIds = new Set();
+
+    for (const ct of contracts) {
+      const ctExtId = String(ct.id || '').trim();
+      if (!ctExtId) continue;
+      if (ct.isActive) activeLcdContractIds.add(ctExtId);
+
+      await prisma.crmContract.upsert({
+        where: {
+          tenantId_externalSource_externalId: {
+            tenantId,
+            externalSource: 'LCDDIGITALWEB',
+            externalId: ctExtId,
+          },
+        },
+        update: {
+          customerExternalId: customerExtId,
+          number: ct.number || null,
+          type: ct.type || 'LOCACAO',
+          modality: ct.modality || null,
+          status: ct.status || (ct.isActive ? 'ATIVO' : 'CANCELADO'),
+          isActive: Boolean(ct.isActive),
+          startsAt: ct.startsAt ? new Date(ct.startsAt) : null,
+          endsAt: ct.endsAt ? new Date(ct.endsAt) : null,
+          monthlyValue: Number(ct.monthlyValue || 0),
+          activeEquipment: Number(ct.activeEquipment || 0),
+          externalUpdatedAt: ct.updatedAt ? new Date(ct.updatedAt) : now,
+        },
+        create: {
+          tenantId,
+          externalSource: 'LCDDIGITALWEB',
+          externalId: ctExtId,
+          customerExternalId: customerExtId,
+          number: ct.number || null,
+          type: ct.type || 'LOCACAO',
+          modality: ct.modality || null,
+          status: ct.status || (ct.isActive ? 'ATIVO' : 'CANCELADO'),
+          isActive: Boolean(ct.isActive),
+          startsAt: ct.startsAt ? new Date(ct.startsAt) : null,
+          endsAt: ct.endsAt ? new Date(ct.endsAt) : null,
+          monthlyValue: Number(ct.monthlyValue || 0),
+          activeEquipment: Number(ct.activeEquipment || 0),
+          externalUpdatedAt: ct.updatedAt ? new Date(ct.updatedAt) : now,
+        },
+      });
+      contractsSynced++;
+
+      const equips = Array.isArray(ct.equipments) ? ct.equipments : [];
+      for (const eq of equips) {
+        const eqExtId = String(eq.externalId || eq.id || eq.serialNumber || '').trim();
+        if (!eqExtId) continue;
+        activeEquipmentExternalIds.add(eqExtId);
+        if (eq.id) activeEquipmentExternalIds.add(String(eq.id).trim());
+        if (eq.codigoLegado) activeEquipmentExternalIds.add(String(eq.codigoLegado).trim());
+
+        const equipmentType = mapEquipmentType(eq.type, eq.model);
+        const eqAddress = eq.address || eq.installLocation || null;
+        const eqSector = eq.sector || 'Geral';
+
+        await prisma.crmEquipment.upsert({
+          where: {
+            tenantId_externalSource_externalId: {
+              tenantId,
+              externalSource: 'LCDDIGITALWEB',
+              externalId: eqExtId,
+            },
+          },
+          update: {
+            customerId: customer.id,
+            model: eq.model || 'Equipamento',
+            manufacturer: eq.manufacturer || null,
+            type: equipmentType,
+            serialNumber: eq.serialNumber || null,
+            assetTag: eq.assetTag || null,
+            sector: eqSector,
+            installLocation: eq.installLocation || eqAddress,
+            address: eqAddress,
+            city: eq.city || null,
+            state: eq.state || null,
+            contractExternalId: eq.contractNumber || ct.number || ctExtId,
+            isActive: true,
+            externalUpdatedAt: now,
+          },
+          create: {
+            tenantId,
+            customerId: customer.id,
+            externalSource: 'LCDDIGITALWEB',
+            externalId: eqExtId,
+            model: eq.model || 'Equipamento',
+            manufacturer: eq.manufacturer || null,
+            type: equipmentType,
+            serialNumber: eq.serialNumber || null,
+            assetTag: eq.assetTag || null,
+            sector: eqSector,
+            installLocation: eq.installLocation || eqAddress,
+            address: eqAddress,
+            city: eq.city || null,
+            state: eq.state || null,
+            contractExternalId: eq.contractNumber || ct.number || ctExtId,
+            isActive: true,
+            externalUpdatedAt: now,
+          },
+        });
+        equipmentsSynced++;
+      }
+    }
+
+    // Desativa contratos antigos do Firebird deste cliente para evitar contagem duplicada com o LCDWEB
+    if (contracts.length > 0) {
+      await prisma.crmContract.updateMany({
+        where: {
+          tenantId,
+          customerExternalId: customerExtId,
+          externalSource: { not: 'LCDDIGITALWEB' },
+          isActive: true,
+        },
+        data: { isActive: false },
+      });
+    }
+
+    // Reconcilia equipamentos inativos deste cliente
+    const customerEquips = await prisma.crmEquipment.findMany({
+      where: { tenantId, customerId: customer.id, isActive: true },
+      select: { id: true, externalId: true },
+    });
+    for (const oldEq of customerEquips) {
+      if (!activeEquipmentExternalIds.has(String(oldEq.externalId || '').trim())) {
+        await prisma.crmEquipment.update({
+          where: { id: oldEq.id },
+          data: { isActive: false },
+        });
+      }
+    }
+  }
+
+  console.log(
+    `[crmSyncService] Catálogo LCDWEB sincronizado (tenant ${tenantId}): ` +
+    `${customersCreated} clientes criados, ${customersUpdated} atualizados, ` +
+    `${contractsSynced} contratos, ${equipmentsSynced} equipamentos ativos.`
+  );
+  return { ok: true, customersCreated, customersUpdated, contractsSynced, equipmentsSynced };
+}
+
+let catalogSyncRunning = false;
+async function syncAllTenantsCatalogFromLcdWeb() {
+  if (catalogSyncRunning) return;
+  catalogSyncRunning = true;
+  try {
+    const tenants = await prisma.tenant.findMany({ select: { id: true } });
+    for (const t of tenants) {
+      await syncCatalogFromLcdWeb(t.id);
+    }
+  } catch (err) {
+    console.error('[crmSyncService] Erro na sincronização periódica do catálogo LCDWEB:', err?.message || err);
+  } finally {
+    catalogSyncRunning = false;
+  }
+}
+
 module.exports = {
   syncCustomerEquipmentsFromIluxWeb,
   syncCrmEquipmentsToEquipment,
+  syncCatalogFromLcdWeb,
+  syncAllTenantsCatalogFromLcdWeb,
 };

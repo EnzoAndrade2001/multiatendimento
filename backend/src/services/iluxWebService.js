@@ -229,8 +229,20 @@ async function listCustomerEquipmentsFromIluxWeb(customerExternalId) {
   }
 }
 
+async function fetchCatalogFromIluxWeb() {
+  if (!isIluxWebConfigured()) return { items: [], total: 0, syncedAt: null };
+  const data = await requestJson('/api/assistencia/os/integracao-crm/catalogo', { method: 'GET' });
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    total: Number(data?.total || 0),
+    syncedAt: data?.syncedAt || null,
+    source: data?.source || 'LCDDIGITALWEB',
+  };
+}
+
 module.exports = {
   createServiceOrderInIluxWeb,
+  fetchCatalogFromIluxWeb,
   getCompanyProfileFromIluxWeb,
   getCustomerProductsHistoryFromIluxWeb,
   getServiceOrderFromIluxWeb,
