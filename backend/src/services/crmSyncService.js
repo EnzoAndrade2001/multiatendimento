@@ -31,6 +31,7 @@ async function syncCustomerEquipmentsFromIluxWeb(tenantId, customerId, customerE
 
     const equipmentType = mapEquipmentType(eq.type, eq.model);
     const address = eq.address || eq.installLocation || null;
+    const installLocation = eq.installLocation || null;
     const sector = eq.sector || eq.department || 'Geral';
 
     await prisma.crmEquipment.upsert({
@@ -49,7 +50,7 @@ async function syncCustomerEquipmentsFromIluxWeb(tenantId, customerId, customerE
         serialNumber: eq.serialNumber || null,
         assetTag: eq.assetTag || null,
         sector,
-        installLocation: address,
+        installLocation,
         address,
         city: eq.city || null,
         state: eq.state || null,
@@ -67,7 +68,7 @@ async function syncCustomerEquipmentsFromIluxWeb(tenantId, customerId, customerE
         serialNumber: eq.serialNumber || null,
         assetTag: eq.assetTag || null,
         sector,
-        installLocation: address,
+        installLocation,
         address,
         city: eq.city || null,
         state: eq.state || null,
@@ -360,12 +361,20 @@ async function syncCatalogFromLcdWeb(tenantId) {
       for (const eq of equips) {
         const eqExtId = String(eq.externalId || eq.id || eq.serialNumber || '').trim();
         if (!eqExtId) continue;
-        activeEquipmentExternalIds.add(eqExtId);
-        if (eq.id) activeEquipmentExternalIds.add(String(eq.id).trim());
-        if (eq.codigoLegado) activeEquipmentExternalIds.add(String(eq.codigoLegado).trim());
+        const eqIsActive = eq.isActive !== false;
+        if (eqIsActive) {
+          activeEquipmentExternalIds.add(eqExtId);
+          if (eq.id) activeEquipmentExternalIds.add(String(eq.id).trim());
+          if (eq.codigoLegado) activeEquipmentExternalIds.add(String(eq.codigoLegado).trim());
+        } else if (activeEquipmentExternalIds.has(eqExtId)) {
+          // Já processado como ativo em outro contrato deste cliente; não sobrescrever com inativo
+          continue;
+        }
 
         const equipmentType = mapEquipmentType(eq.type, eq.model);
-        const eqAddress = eq.address || eq.installLocation || null;
+        const cliFallbackAddr = [item.address, item.neighborhood].filter(Boolean).join(', ') || null;
+        const eqAddress = eq.address || cliFallbackAddr || eq.installLocation || null;
+        const eqInstallLocation = eq.installLocation || null;
         const eqSector = eq.sector || 'Geral';
 
         await prisma.crmEquipment.upsert({
@@ -384,12 +393,12 @@ async function syncCatalogFromLcdWeb(tenantId) {
             serialNumber: eq.serialNumber || null,
             assetTag: eq.assetTag || null,
             sector: eqSector,
-            installLocation: eq.installLocation || eqAddress,
+            installLocation: eqInstallLocation,
             address: eqAddress,
-            city: eq.city || null,
-            state: eq.state || null,
-            contractExternalId: eq.contractNumber || ct.number || ctExtId,
-            isActive: true,
+            city: eq.city || item.city || null,
+            state: eq.state || item.state || null,
+            contractExternalId: eqIsActive ? (eq.contractNumber || ct.number || ctExtId) : null,
+            isActive: eqIsActive,
             externalUpdatedAt: now,
           },
           create: {
@@ -403,17 +412,81 @@ async function syncCatalogFromLcdWeb(tenantId) {
             serialNumber: eq.serialNumber || null,
             assetTag: eq.assetTag || null,
             sector: eqSector,
-            installLocation: eq.installLocation || eqAddress,
+            installLocation: eqInstallLocation,
             address: eqAddress,
-            city: eq.city || null,
-            state: eq.state || null,
-            contractExternalId: eq.contractNumber || ct.number || ctExtId,
-            isActive: true,
+            city: eq.city || item.city || null,
+            state: eq.state || item.state || null,
+            contractExternalId: eqIsActive ? (eq.contractNumber || ct.number || ctExtId) : null,
+            isActive: eqIsActive,
             externalUpdatedAt: now,
           },
         });
         equipmentsSynced++;
       }
+    }
+
+    // Equipamentos diretos / avulsos vinculados ao cliente (sem contrato ativo)
+    const directEquips = Array.isArray(item.directEquipments) ? item.directEquipments : [];
+    for (const eq of directEquips) {
+      const eqExtId = String(eq.externalId || eq.id || eq.serialNumber || '').trim();
+      if (!eqExtId || activeEquipmentExternalIds.has(eqExtId)) continue;
+      const eqIsActive = eq.isActive !== false;
+      if (eqIsActive) {
+        activeEquipmentExternalIds.add(eqExtId);
+        if (eq.id) activeEquipmentExternalIds.add(String(eq.id).trim());
+        if (eq.codigoLegado) activeEquipmentExternalIds.add(String(eq.codigoLegado).trim());
+      }
+      const equipmentType = mapEquipmentType(eq.type, eq.model);
+      const cliFallbackAddr = [item.address, item.neighborhood].filter(Boolean).join(', ') || null;
+      const eqAddress = eq.address || cliFallbackAddr || eq.installLocation || null;
+      const eqInstallLocation = eq.installLocation || null;
+      const eqSector = eq.sector || 'Geral';
+
+      await prisma.crmEquipment.upsert({
+        where: {
+          tenantId_externalSource_externalId: {
+            tenantId,
+            externalSource: 'LCDDIGITALWEB',
+            externalId: eqExtId,
+          },
+        },
+        update: {
+          customerId: customer.id,
+          model: eq.model || 'Equipamento',
+          manufacturer: eq.manufacturer || null,
+          type: equipmentType,
+          serialNumber: eq.serialNumber || null,
+          assetTag: eq.assetTag || null,
+          sector: eqSector,
+          installLocation: eqInstallLocation,
+          address: eqAddress,
+          city: eq.city || item.city || null,
+          state: eq.state || item.state || null,
+          contractExternalId: null,
+          isActive: eqIsActive,
+          externalUpdatedAt: now,
+        },
+        create: {
+          tenantId,
+          customerId: customer.id,
+          externalSource: 'LCDDIGITALWEB',
+          externalId: eqExtId,
+          model: eq.model || 'Equipamento',
+          manufacturer: eq.manufacturer || null,
+          type: equipmentType,
+          serialNumber: eq.serialNumber || null,
+          assetTag: eq.assetTag || null,
+          sector: eqSector,
+          installLocation: eqInstallLocation,
+          address: eqAddress,
+          city: eq.city || item.city || null,
+          state: eq.state || item.state || null,
+          contractExternalId: null,
+          isActive: eqIsActive,
+          externalUpdatedAt: now,
+        },
+      });
+      equipmentsSynced++;
     }
 
     // Desativa contratos antigos do Firebird deste cliente para evitar contagem duplicada com o LCDWEB
@@ -429,16 +502,28 @@ async function syncCatalogFromLcdWeb(tenantId) {
       });
     }
 
-    // Reconcilia equipamentos inativos deste cliente
+    // Reconcilia equipamentos inativos e preenche endereço faltante com o endereço principal do cliente
+    const cliFallbackAddr = [item.address, item.neighborhood].filter(Boolean).join(', ') || null;
     const customerEquips = await prisma.crmEquipment.findMany({
-      where: { tenantId, customerId: customer.id, isActive: true },
-      select: { id: true, externalId: true },
+      where: { tenantId, customerId: customer.id },
+      select: { id: true, externalId: true, isActive: true, address: true, sector: true, city: true, state: true },
     });
     for (const oldEq of customerEquips) {
-      if (!activeEquipmentExternalIds.has(String(oldEq.externalId || '').trim())) {
+      const updates = {};
+      if (oldEq.isActive && !activeEquipmentExternalIds.has(String(oldEq.externalId || '').trim())) {
+        updates.isActive = false;
+      }
+      const addrClean = String(oldEq.address || '').trim();
+      const sectorClean = String(oldEq.sector || '').trim();
+      if (cliFallbackAddr && (!addrClean || (sectorClean && addrClean.toUpperCase() === sectorClean.toUpperCase()))) {
+        updates.address = cliFallbackAddr;
+      }
+      if (!oldEq.city && item.city) updates.city = item.city;
+      if (!oldEq.state && item.state) updates.state = item.state;
+      if (Object.keys(updates).length > 0) {
         await prisma.crmEquipment.update({
           where: { id: oldEq.id },
-          data: { isActive: false },
+          data: updates,
         });
       }
     }

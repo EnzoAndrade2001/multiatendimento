@@ -1653,7 +1653,26 @@ function sortLabel(sortBy) {
 
 function hasValue(value) { return value !== null && value !== undefined && value !== ''; }
 function joinLocation(item) { return [item.address, item.complement, item.neighborhood, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
-function equipmentLocation(item) { return [item.address, item.complement, pick(item, 'department', 'sector'), item.installLocation, [item.city, item.state].filter(Boolean).join(' / ')].filter(Boolean).join(' • '); }
+function equipmentLocation(item) {
+  const rawParts = [
+    item.address,
+    item.complement,
+    pick(item, 'department', 'sector'),
+    item.installLocation,
+    [item.city, item.state].filter(Boolean).join(' / '),
+  ].filter(Boolean);
+  const seen = new Set();
+  const unique = [];
+  for (const part of rawParts) {
+    const clean = String(part).trim();
+    if (!clean) continue;
+    const key = clean.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(clean);
+  }
+  return unique.join(' • ');
+}
 function equipmentOwnerLabel(item) {
   const owner = String(pick(item, 'ownerType', 'proprietario', 'tfproprietario') || '').trim().toUpperCase();
   if (owner === 'C' || owner === 'CLIENTE') return 'Cliente';
