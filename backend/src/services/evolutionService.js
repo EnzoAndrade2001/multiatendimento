@@ -589,6 +589,19 @@ async function fetchInstanceInfo(url, key, instanceName, options = {}) {
   }
 }
 
+async function logoutInstance(url, key, instanceName) {
+  const client = getClient(url, key, 30000);
+  const { data } = await client.delete(`/instance/logout/${instanceName}`);
+  return data;
+}
+
+// Reinicia a sessao Baileys da instancia (reconecta sem logout / sem QR).
+async function restartInstance(url, key, instanceName) {
+  const client = getClient(url, key, 30000);
+  const { data } = await client.post(`/instance/restart/${instanceName}`);
+  return data;
+}
+
 async function revokeMessage(url, key, instanceName, remoteJid, messageId) {
   const client = getClient(url, key);
   const jid = remoteJid.includes('@') ? remoteJid : `${remoteJid}@s.whatsapp.net`;
@@ -740,7 +753,7 @@ function resolveEvolutionConfig(tenantSettings, waInstance) {
 
 module.exports = {
   sendText, sendTemplate, findTemplates, sendMedia, sendAudio, sendMessage, getMediaBase64, saveMediaFile,
-  getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, revokeMessage, updateMessage,
+  getQrCode, getConnectionState, setWebhook, getWebhookCallbackUrl, createInstance, deleteInstance, isInstanceAlreadyInUse, fetchInstanceInfo, fetchProfilePicture, restartInstance, logoutInstance, revokeMessage, updateMessage,
   normalizePhoneNumber, samePhoneNumber, buildPhoneLookupCandidates, isGroupJid,
   findChats, findContacts, findMessages, findConversationJidsByMessageIds,
   getEvolutionErrorDetail,

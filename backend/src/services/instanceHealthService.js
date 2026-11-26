@@ -1,6 +1,8 @@
 const prisma = require('../lib/prisma');
 const evolution = require('./evolutionService');
 const { syncMissedMessages } = require('./syncMissedMessagesService');
+const inboundProbe = require('./inboundProbeService');
+const { sendSystemAlert } = require('./alertService');
 
 const DEFAULT_INTERVAL_MS = 30 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15 * 1000;
@@ -19,6 +21,13 @@ const RECONCILE_INTERVAL_MS = Math.max(
   Number(process.env.WEBHOOK_RECONCILE_INTERVAL_MS || 10 * 60 * 1000),
 );
 const HEALTH_EVENT_RETENTION_DAYS = 30;
+// Enquanto uma conexao segue sem receber, relembra o administrador.
+const NOT_RECEIVING_REMINDER_MS = Math.max(
+  30 * 60 * 1000,
+  Number(process.env.NOT_RECEIVING_REMINDER_MS || 2 * 60 * 60 * 1000),
+);
+const lastNotReceivingAlertAt = new Map();
+const incidentStartedAt = new Map();
 
 let io = null;
 let timer = null;
@@ -148,6 +157,100 @@ async function pruneHealthEvents() {
   }
 }
 
+function displayInstanceName(instance) {
+  const name = String(instance?.instanceName || '');
+  const prefix = `${instance?.tenantId || ''}_`;
+  return (instance?.tenantId && name.startsWith(prefix) ? name.slice(prefix.length) : name).toUpperCase();
+}
+
+function formatBrDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * "Conectada mas NAO recebe": a sessao esta open e envia, mas as mensagens de
+ * verificacao enviadas por outra conexao da empresa nao chegaram. Mantem
+ * status 'connected' (o envio continua funcionando e outras rotinas dependem
+ * disso) e sinaliza via healthStatus.
+ */
+function applyReceiveHealth(instance, state, health, healthError = null) {
+  if (state !== 'open') return { health, healthError };
+  if ((instance?.probeFailures || 0) < inboundProbe.FAILURES_TO_ALERT) return { health, healthError };
+  const since = formatBrDateTime(instance.lastInboundAt);
+  return {
+    health: { status: 'connected', healthStatus: 'not_receiving' },
+    healthError: `Conectada e enviando, mas NÃO está recebendo mensagens de clientes${since ? ` (última recebida em ${since})` : ''}. `
+      + 'As verificações automáticas enviadas para este número não chegaram. Recrie a sessão e leia o QR Code de novo.',
+  };
+}
+
+function notReceivingAlertText(instance) {
+  const since = formatBrDateTime(instance.lastInboundAt);
+  return `🚨 A conexão *${displayInstanceName(instance)}* (+${instance.phone || '?'}) está CONECTADA, mas NÃO está recebendo mensagens de clientes`
+    + `${since ? ` desde *${since}*` : ''}.\n\n`
+    + 'Os clientes estão escrevendo, as mensagens chegam só no celular e não aparecem no CRM.\n\n'
+    + '*O que fazer:*\n'
+    + '1. No celular desse número: WhatsApp > Aparelhos conectados > remova sessões antigas.\n'
+    + '2. No CRM: Conexões > "Recriar sessão" e leia o QR Code.';
+}
+
+async function onNotReceiving(instance) {
+  lastNotReceivingAlertAt.set(instance.id, Date.now());
+  incidentStartedAt.set(instance.id, Date.now());
+  console.error(`[instance-health] ${instance.instanceName} NÃO está recebendo mensagens (verificações falharam).`);
+  sendSystemAlert(instance.tenantId, notReceivingAlertText(instance)).catch(() => {});
+  // Tentativa unica de auto-recuperacao: reiniciar a sessao (sem logout).
+  try {
+    const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(instance.tenant?.settings, instance);
+    if (evolutionUrl && evolutionKey) {
+      await evolution.restartInstance(evolutionUrl, evolutionKey, instance.instanceName);
+      console.warn(`[instance-health] ${instance.instanceName}: sessão reiniciada automaticamente após falha de recebimento.`);
+    }
+  } catch (err) {
+    console.warn(`[instance-health] ${instance.instanceName}: falha ao reiniciar sessão: ${err.message}`);
+  }
+}
+
+function onReceivingRecovered(instance) {
+  lastNotReceivingAlertAt.delete(instance.id);
+  incidentStartedAt.delete(instance.id);
+  console.log(`[instance-health] ${instance.instanceName} voltou a receber mensagens.`);
+  sendSystemAlert(
+    instance.tenantId,
+    `✅ A conexão *${displayInstanceName(instance)}* (+${instance.phone || '?'}) voltou a receber mensagens. O sistema vai buscar as conversas das últimas 24h que ficaram para trás.`,
+  ).catch(() => {});
+  syncMissedMessages(instance.instanceName, { hours: 24, limitPerChat: 50, maxChats: 150 })
+    .catch((err) => console.warn(`[instance-health] recuperação pós-falha de ${instance.instanceName} falhou: ${err.message}`));
+}
+
+// O incidente segue as falhas de verificacao (probeFailures), NAO o
+// healthStatus: este oscila a cada reconexao (connection.update grava
+// unstable/healthy) e dispararia alerta + reinicio em loop.
+function handleReceiveTransition(before, after) {
+  if (!after) return;
+  const merged = { ...before, ...after };
+  const failing = (after.probeFailures || 0) >= inboundProbe.FAILURES_TO_ALERT;
+  const inIncident = lastNotReceivingAlertAt.has(after.id);
+  if (failing && !inIncident) {
+    onNotReceiving(merged).catch(() => {});
+  } else if (failing && inIncident) {
+    const last = lastNotReceivingAlertAt.get(after.id) || 0;
+    if (Date.now() - last >= NOT_RECEIVING_REMINDER_MS) {
+      lastNotReceivingAlertAt.set(after.id, Date.now());
+      sendSystemAlert(after.tenantId, `(Lembrete) ${notReceivingAlertText(merged)}`).catch(() => {});
+    }
+  } else if (!failing && inIncident) {
+    // So declara recuperada quando uma verificacao CHEGOU depois do inicio do
+    // incidente (recriar a sessao zera as falhas, mas ainda nao prova nada).
+    const startedAt = incidentStartedAt.get(after.id) || 0;
+    const okAt = after.probeOkAt ? new Date(after.probeOkAt).getTime() : 0;
+    if (okAt > startedAt) onReceivingRecovered(merged);
+  }
+}
+
 async function checkInstance(instance) {
   const checkedAt = new Date();
   if (String(process.env.LOCAL_DEMO || '').toLowerCase() === 'true') {
@@ -197,6 +300,8 @@ async function checkInstance(instance) {
       }
     }
 
+    ({ health, healthError } = applyReceiveHealth(instance, state, health, healthError));
+
     // Divergencia de numero: 'open', mas logada num numero diferente do
     // cadastrado -- alguem leu o QR com o aparelho errado. Foi assim que a
     // LCD-FINANCEIRO ficou dias sem receber sem nenhum alarme. O webhook
@@ -236,6 +341,7 @@ async function checkInstance(instance) {
         lastWebhookAt: updated.lastWebhookAt,
       });
     }
+    handleReceiveTransition(instance, updated);
     return updated;
   } catch (error) {
     const errText = String(error?.response?.data?.message || error?.message || 'Evolution sem resposta').slice(0, 500);
@@ -278,13 +384,21 @@ async function checkAllInstances() {
       where: { instanceName: { not: { startsWith: 'DELETED_' } } },
       include: { tenant: { include: { settings: true } } },
     });
+    const current = [];
     for (const instance of instances) {
       try {
         const updated = await checkInstance(instance);
         maybeReconcile(updated || instance);
+        current.push({ ...instance, ...(updated || {}) });
       } catch (error) {
+        current.push(instance);
         console.warn(`[instance-health] falha ao registrar ${instance.instanceName}: ${error.message}`);
       }
+    }
+    try {
+      await inboundProbe.runProbeCycle(current);
+    } catch (error) {
+      console.warn(`[inbound-probe] ciclo falhou: ${error.message}`);
     }
     await pruneHealthEvents();
   } catch (error) {
@@ -319,5 +433,6 @@ module.exports = {
   checkInstance,
   parseConnectionState,
   healthForState,
-  __testing: { parseConnectionState, healthForState, SILENCE_ALERT_MS },
+  applyReceiveHealth,
+  __testing: { parseConnectionState, healthForState, applyReceiveHealth, displayInstanceName, notReceivingAlertText, SILENCE_ALERT_MS },
 };

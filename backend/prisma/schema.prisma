@@ -438,6 +438,14 @@ model WaInstance {
   lastWebhookAt       DateTime?
   lastHealthCheckAt   DateTime?
   lastHealthError     String?
+  // Deteccao de "conectada mas nao recebe": ultima mensagem RECEBIDA de
+  // cliente (lastWebhookAt nao serve -- envios e acks mantem ele vivo) e a
+  // verificacao automatica (mensagem de teste entre conexoes da empresa).
+  lastInboundAt       DateTime?
+  probeToken          String?
+  probeSentAt         DateTime?
+  probeOkAt           DateTime?
+  probeFailures       Int                 @default(0)
   qrCode              String?
   provider            String              @default("evolution_qr")
   officialPhoneId     String?

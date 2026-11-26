@@ -1,7 +1,7 @@
 const prisma = require('../lib/prisma');
 const evolution = require('../services/evolutionService');
 const metaCloudApi = require('../services/metaCloudApiService');
-const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
+const { parseConnectionState, healthForState, applyReceiveHealth } = require('../services/instanceHealthService');
 const { syncMissedMessages } = require('../services/syncMissedMessagesService');
 const { importContactsFromWhatsApp } = require('../services/contactImportService');
 const { importChatHistory } = require('../services/chatHistoryImportService');
@@ -89,8 +89,10 @@ async function list(req, res) {
         const checkedAt = new Date();
         const data = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName, { timeout: 15000 });
         const state = parseConnectionState(data) || 'unknown';
-        const health = healthForState(state);
-        
+        // Mantem o alarme "conectada mas nao recebe" -- so o estado da conexao
+        // nao enxerga esse problema e apagaria o aviso a cada listagem.
+        const { health, healthError: receiveError } = applyReceiveHealth(inst, state, healthForState(state));
+
         let phoneStr = inst.phone;
         if (state === 'open' && !phoneStr && inst.provider !== 'evolution_official') {
           try {
@@ -111,7 +113,7 @@ async function list(req, res) {
             lastConnectionState: state,
             ...(inst.lastConnectionState !== state || inst.status !== health.status ? { lastConnectionAt: checkedAt } : {}),
             lastHealthCheckAt: checkedAt,
-            lastHealthError: state === 'unknown' ? 'Evolution respondeu sem informar o estado da conexão.' : null,
+            lastHealthError: receiveError || (state === 'unknown' ? 'Evolution respondeu sem informar o estado da conexão.' : null),
             phone: phoneStr
           }
         });
@@ -305,11 +307,21 @@ async function repair(req, res) {
     const { evolutionUrl, evolutionKey } = await getSettings(req.user.tenantId, inst);
     const diagnostics = [];
 
+    // Sessao "aberta" mas quebrada (nao recebe / numero errado): recriar e
+    // justamente a correcao -- faz logout antes de apagar.
+    const brokenOpenSession = ['not_receiving', 'wrong_number'].includes(inst.healthStatus);
     try {
       const stateData = await evolution.getConnectionState(evolutionUrl, evolutionKey, inst.instanceName);
       const state = stateData?.instance?.state || stateData?.state;
-      if (state === 'open') {
+      if (state === 'open' && !brokenOpenSession) {
         return res.status(400).json({ error: 'Esta conexao ja esta ativa. Desconecte pelo WhatsApp antes de recriar a sessao.' });
+      }
+      if (state === 'open' && brokenOpenSession) {
+        try {
+          await evolution.logoutInstance(evolutionUrl, evolutionKey, inst.instanceName);
+        } catch (err) {
+          diagnostics.push(`logout: ${err.response?.data?.message || err.message}`);
+        }
       }
     } catch (err) {
       diagnostics.push(`connectionState: ${err.response?.data?.message || err.message}`);
@@ -345,7 +357,11 @@ async function repair(req, res) {
 
     const updated = await prisma.waInstance.update({
       where: { id },
-      data: { status: 'disconnected', healthStatus: 'offline', lastConnectionState: 'close', lastHealthError: null, qrCode: null },
+      data: {
+        status: 'disconnected', healthStatus: 'offline', lastConnectionState: 'close', lastHealthError: null, qrCode: null,
+        // Sessao nova: a verificacao de recebimento recomeca do zero.
+        probeToken: null, probeSentAt: null, probeFailures: 0,
+      },
     });
 
     let qrData = null;

@@ -10,7 +10,8 @@ const technicalAssistantService = require('../services/technicalAssistantService
 const ticketSessionService = require('../services/ticketSessionService');
 const whatsappComplianceService = require('../services/whatsappComplianceService');
 const { classifyResponseOrigin } = require('../services/aiResponseAuditService');
-const { parseConnectionState, healthForState } = require('../services/instanceHealthService');
+const { parseConnectionState, healthForState, applyReceiveHealth } = require('../services/instanceHealthService');
+const inboundProbeService = require('../services/inboundProbeService');
 const {
   guardBotReply,
   isUnsafeOperationalClaim,
@@ -393,6 +394,10 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
   const { externalId, fromMe, remoteJid } = identity;
   const occurredAt = messageOccurredAt(msg);
 
+  // Mensagem de verificacao automatica de recebimento (entre conexoes da
+  // propria empresa): confirma a sonda e descarta -- nao vira ticket/mensagem.
+  if (await inboundProbeService.consumeProbeMessage(waInstance, msg, fromMe)) return;
+
   // Se já existe no banco, ignora (evita duplicar o que o sistema enviou)
   const existing = externalId ? await prisma.message.findFirst({
     where: { externalId, ticket: { tenantId: tenant.id } },
@@ -477,6 +482,7 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
     return;
   }
   if (!claimWebhookMessage(tenant.id, externalId)) return;
+  if (!fromMe && !isGroup) inboundProbeService.noteInbound(waInstance?.id, occurredAt);
   console.log(`[webhook] mensagem ${fromMe ? 'ENVIADA para' : 'RECEBIDA de'} ${require('../utils/privacy').maskPhone(phone)} ${media ? `[${media.type}]` : ''} | isHistorical: ${isHistorical}`);
 
   const phoneCandidates = evolutionService.buildPhoneLookupCandidates(phone);
@@ -937,6 +943,13 @@ async function handleWebhook(req, res) {
           scheduleDisconnectConfirmation(instance, waInstance.id);
         }
 
+        // Reconectar nao prova que voltou a RECEBER: mantem o alarme ate a
+        // proxima verificacao automatica chegar.
+        const receive = isConnected && !flagWrong
+          ? applyReceiveHealth(waInstance, state, { status: 'connected', healthStatus: 'healthy' })
+          : null;
+        const notReceiving = receive?.health.healthStatus === 'not_receiving';
+
         const wrongNumberError = wrongNumber
           ? `Sessao conectada no numero +${connectedNumber}, mas esta conexao esta cadastrada para +${waInstance.phone}. Releia o QR com o aparelho certo.`
           : stillWrongNumber
@@ -950,10 +963,10 @@ async function handleWebhook(req, res) {
               // Mostra a instabilidade imediatamente; a confirmação de 45s
               // continua evitando falso positivo de desconexão definitiva.
               status: flagWrong ? 'degraded' : isConnected ? 'connected' : state === 'connecting' || state === 'close' ? 'connecting' : 'degraded',
-              healthStatus: flagWrong ? 'wrong_number' : isConnected ? 'healthy' : state === 'connecting' || state === 'close' ? 'unstable' : 'degraded',
+              healthStatus: flagWrong ? 'wrong_number' : isConnected ? (notReceiving ? 'not_receiving' : 'healthy') : state === 'connecting' || state === 'close' ? 'unstable' : 'degraded',
               lastConnectionState: state,
               ...(waInstance.lastConnectionState !== state ? { lastConnectionAt: receivedAt } : {}),
-              lastHealthError: wrongNumberError,
+              lastHealthError: wrongNumberError || (notReceiving ? receive.healthError : null),
             } : {}),
             lastWebhookAt: receivedAt,
             lastHealthCheckAt: receivedAt,
@@ -968,7 +981,7 @@ async function handleWebhook(req, res) {
           data: {
             ...(data || {}),
             state: state || data?.state || 'unknown',
-            healthStatus: health?.healthStatus || updatedInstance.healthStatus,
+            healthStatus: notReceiving ? 'not_receiving' : (health?.healthStatus || updatedInstance.healthStatus),
             receivedAt: receivedAt.toISOString(),
           },
         });
@@ -1565,6 +1578,64 @@ async function handleBotReply(tenant, waInstance, ticket, contact, userMessage, 
  * Autenticado pelo mesmo WEBHOOK_SECRET do endpoint de webhook da Evolution
  * (ver middlewares/verifyWebhookSecret).
  */
+// A LCDWEB pode enviar por uma sessao PROPRIA da Evolution no mesmo numero de
+// uma conexao do CRM (ex.: "lcd-financeiro-lcd" = mesmo WhatsApp da conexao
+// "<tenant>_lcd-financeiro"). Pelo nome o CRM nao a conhece e respondia 404 em
+// todo espelhamento. Fallback: pergunta a Evolution qual numero esta logado
+// naquela sessao e usa a conexao do CRM com o mesmo numero. Cache de 10 min.
+const externalInstanceAliasCache = new Map();
+async function resolveExternalMessageInstance(instanceName) {
+  const direct = await prisma.waInstance.findFirst({ where: { instanceName } });
+  if (direct) return direct;
+
+  const cached = externalInstanceAliasCache.get(instanceName);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
+    return cached.id ? prisma.waInstance.findUnique({ where: { id: cached.id } }) : null;
+  }
+
+  let resolved = null;
+  try {
+    const settingsList = await prisma.tenantSettings.findMany({
+      select: { tenantId: true, evolutionUrl: true, evolutionKey: true },
+    });
+    const triedServers = new Set();
+    for (const settings of settingsList) {
+      const { evolutionUrl, evolutionKey } = evolutionService.resolveEvolutionConfig(settings, null);
+      if (!evolutionUrl || !evolutionKey) continue;
+      const serverKey = `${evolutionUrl}|${evolutionKey}`;
+      let ownerNumber = null;
+      if (!triedServers.has(serverKey)) {
+        triedServers.add(serverKey);
+        const info = await evolutionService.fetchInstanceInfo(evolutionUrl, evolutionKey, instanceName);
+        const owner = info?.ownerJid || info?.owner || info?.number;
+        ownerNumber = owner ? String(owner).split('@')[0].replace(/\D/g, '') : null;
+        // A mesma Evolution atende varias empresas: guarda o numero e compara
+        // com as conexoes de todas elas abaixo.
+        if (ownerNumber) {
+          const candidates = await prisma.waInstance.findMany({
+            where: { instanceName: { not: { startsWith: 'DELETED_' } }, phone: { not: null } },
+            orderBy: { lastConnectionAt: 'desc' },
+          });
+          const sameServer = candidates.filter((c) => {
+            const cfg = evolutionService.resolveEvolutionConfig(settingsList.find((s) => s.tenantId === c.tenantId), c);
+            return `${cfg.evolutionUrl}|${cfg.evolutionKey}` === serverKey;
+          });
+          resolved = sameServer.find((c) => evolutionService.samePhoneNumber(String(c.phone), ownerNumber)) || null;
+          if (resolved) break;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[external-message] falha ao resolver instância "${instanceName}" pelo número: ${err.message}`);
+  }
+
+  externalInstanceAliasCache.set(instanceName, { at: Date.now(), id: resolved?.id || null });
+  if (resolved) {
+    console.log(`[external-message] instância "${instanceName}" mapeada para ${resolved.instanceName} (mesmo número).`);
+  }
+  return resolved;
+}
+
 async function recordExternalMessage(req, res) {
   try {
     const { instanceName, phone, body, externalId, mediaUrl, mediaType, fileName, mediaBase64, mimeType } = req.body || {};
@@ -1576,7 +1647,7 @@ async function recordExternalMessage(req, res) {
       return res.status(400).json({ error: 'Informe body, mediaUrl ou mediaBase64.' });
     }
 
-    const waInstance = await prisma.waInstance.findFirst({ where: { instanceName } });
+    const waInstance = await resolveExternalMessageInstance(instanceName);
     if (!waInstance) return res.status(404).json({ error: `Instância "${instanceName}" não encontrada.` });
 
     const tenant = await prisma.tenant.findUnique({ where: { id: waInstance.tenantId } });
@@ -1679,5 +1750,6 @@ module.exports = {
     messageOccurredAt,
     shouldReopenResolvedTicket,
     mapWhatsappAck,
+    resolveExternalMessageInstance,
   },
 };

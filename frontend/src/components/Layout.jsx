@@ -52,6 +52,9 @@ const MOBILE_LINKS = [
 function getInstanceHealth(instance) {
   const state = String(instance?.state || instance?.lastConnectionState || '').toLowerCase();
   const health = String(instance?.healthStatus || '').toLowerCase();
+  // Conectada e enviando, mas sem RECEBER: precisa vir antes do "healthy",
+  // senão status=connected esconde o problema (incidente 25/11).
+  if (health === 'not_receiving') return 'not_receiving';
   if (instance?.status === 'connected' && (state === 'open' || health === 'healthy')) return 'healthy';
   if (state === 'connecting' || health === 'unstable' || instance?.status === 'connecting') return 'unstable';
   if (state === 'close' || health === 'offline' || instance?.status === 'disconnected') return 'offline';
@@ -351,6 +354,10 @@ export default function Layout() {
     () => unhealthyInstances.filter((instance) => getInstanceHealth(instance) === 'degraded'),
     [unhealthyInstances]
   );
+  const notReceivingInstances = React.useMemo(
+    () => unhealthyInstances.filter((instance) => getInstanceHealth(instance) === 'not_receiving'),
+    [unhealthyInstances]
+  );
   const disconnectedInstances = React.useMemo(
     () => unhealthyInstances.filter((instance) => getInstanceHealth(instance) === 'offline'),
     [unhealthyInstances]
@@ -548,6 +555,36 @@ export default function Layout() {
           </button>
         </div>
       ) : null}
+
+      {notReceivingInstances.length > 0 && (
+        <button
+          type="button"
+          className="layout-not-receiving-banner"
+          onClick={() => navigate('/connections')}
+          style={{
+            backgroundColor: 'var(--danger, #EF4444)',
+            color: '#fff',
+            padding: '0.65rem 1rem',
+            textAlign: 'center',
+            fontWeight: 700,
+            fontSize: isMobile ? '0.8rem' : '0.9rem',
+            zIndex: 91,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'var(--space-2)',
+            border: 'none',
+            width: '100%',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(239, 68, 68, 0.25)',
+          }}
+        >
+          <AlertTriangle size={16} />
+          {notReceivingInstances.length === 1
+            ? `A conexão ${notReceivingInstances[0].instanceName.split('_').pop().toUpperCase()} está conectada, mas NÃO está recebendo mensagens de clientes. Clique aqui e recrie a sessão.`
+            : `${notReceivingInstances.length} conexões estão conectadas, mas NÃO estão recebendo mensagens de clientes. Clique aqui e recrie as sessões.`}
+        </button>
+      )}
 
       {(unstableInstances.length > 0 || degradedInstances.length > 0) && (
         <div className="layout-health-banner" style={{

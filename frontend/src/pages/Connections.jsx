@@ -15,6 +15,11 @@ function getConnectionView(instance) {
   if (health === 'silent') {
     return { key: 'silent', label: 'Conectada, mas sem receber mensagens', pill: 'Sem eventos', color: 'var(--danger)', icon: <AlertTriangle size={20} /> };
   }
+  // Conectada e enviando, mas as verificações automáticas não chegaram: o
+  // WhatsApp parou de entregar mensagens para esta sessão (incidente 25/11).
+  if (health === 'not_receiving') {
+    return { key: 'not_receiving', label: 'Conectada, mas NÃO está recebendo', pill: 'Sem recebimento', color: 'var(--danger)', icon: <AlertTriangle size={20} /> };
+  }
   // Sessão ativa, porém no número errado (QR lido com o aparelho errado).
   if (health === 'wrong_number') {
     return { key: 'wrong_number', label: 'Conectada no número errado', pill: 'Número divergente', color: 'var(--danger)', icon: <AlertTriangle size={20} /> };
@@ -286,7 +291,7 @@ export default function Connections() {
                         <MessageSquare size={15} /> {importingHistoryId === inst.id ? 'Importando…' : 'Importar histórico de conversas'}
                       </button>
                     </>
-                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' || connectionView.key === 'wrong_number' ? (
+                  ) : connectionView.key === 'unstable' || connectionView.key === 'degraded' || connectionView.key === 'silent' || connectionView.key === 'wrong_number' || connectionView.key === 'not_receiving' ? (
                     <>
                       <div style={{ ...s.healthBox, borderColor: connectionView.key === 'unstable' ? 'var(--warning-border)' : 'var(--danger-border)', color: connectionView.color }}>
                         <AlertTriangle size={16} />
@@ -294,9 +299,10 @@ export default function Connections() {
                           connectionView.key === 'unstable' ? 'A Evolution está reconectando. Aguarde alguns segundos.'
                             : connectionView.key === 'silent' ? 'A sessão está conectada, mas o CRM parou de receber eventos da Evolution. Mensagens podem estar sendo perdidas — verifique a Evolution / o webhook.'
                               : connectionView.key === 'wrong_number' ? 'A sessão conectou num número diferente do cadastrado. Alguém leu o QR com o aparelho errado — recrie a sessão e leia o QR com o telefone certo.'
+                                : connectionView.key === 'not_receiving' ? 'A sessão está conectada e enviando, mas NÃO está recebendo mensagens de clientes — as verificações automáticas não chegaram. No celular, remova sessões antigas em "Aparelhos conectados" e recrie a sessão aqui.'
                                 : 'A Evolution não respondeu à última verificação.')}
                       </div>
-                      {connectionView.key === 'wrong_number' && !isOfficial ? (
+                      {(connectionView.key === 'wrong_number' || connectionView.key === 'not_receiving') && !isOfficial ? (
                         <div style={s.disconnectedActions}>
                           <button style={s.repairBtn} disabled={repairingId === inst.id} onClick={() => handleRepair(inst)}>
                             <RotateCcw size={16} /> {repairingId === inst.id ? 'Recriando...' : 'Recriar sessao'}
