@@ -197,21 +197,63 @@ function notReceivingAlertText(instance) {
     + '2. No CRM: Conexões > "Recriar sessão" e leia o QR Code.';
 }
 
+// Cada verificacao que nao chega -> reinicia a sessao (sem logout). O WhatsApp
+// segura as mensagens e as entrega na reconexao; depois buscamos o que ficou
+// para tras. Varios reinicios no mesmo dia -> recomenda recriar via QR.
+const AUTO_RESTART_MIN_GAP_MS = 10 * 60 * 1000;
+const RESTARTS_BEFORE_QR_ADVICE = 3;
+const lastAutoRestartAt = new Map();
+const restartsByDay = new Map();
+const qrAdviceSentDay = new Map();
+
+function brDayKey(ms = Date.now()) {
+  return new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+}
+
+async function restartAndRecover(instance, reason) {
+  const now = Date.now();
+  if (now - (lastAutoRestartAt.get(instance.id) || 0) < AUTO_RESTART_MIN_GAP_MS) return false;
+  const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(instance.tenant?.settings, instance);
+  if (!evolutionUrl || !evolutionKey) return false;
+  lastAutoRestartAt.set(instance.id, now);
+  try {
+    await evolution.restartInstance(evolutionUrl, evolutionKey, instance.instanceName);
+  } catch (err) {
+    console.warn(`[instance-health] ${instance.instanceName}: falha ao reiniciar sessão: ${err.message}`);
+    return false;
+  }
+  console.warn(`[instance-health] ${instance.instanceName}: sessão reiniciada automaticamente (${reason}).`);
+
+  const day = brDayKey(now);
+  const counter = restartsByDay.get(instance.id);
+  const count = counter && counter.day === day ? counter.count + 1 : 1;
+  restartsByDay.set(instance.id, { day, count });
+  if (count >= RESTARTS_BEFORE_QR_ADVICE && qrAdviceSentDay.get(instance.id) !== day) {
+    qrAdviceSentDay.set(instance.id, day);
+    sendSystemAlert(instance.tenantId,
+      `⚠️ A conexão *${displayInstanceName(instance)}* (+${instance.phone || '?'}) parou de receber ${count}x hoje e foi reiniciada automaticamente em cada vez. `
+      + 'Para resolver de vez: no celular, WhatsApp > Aparelhos conectados > remova as sessões antigas; depois no CRM, Conexões > "Recriar sessão" e leia o QR Code.',
+    ).catch(() => {});
+  }
+
+  // Depois que a sessao reabrir, busca o que o WhatsApp nao entregou.
+  setTimeout(() => {
+    syncMissedMessages(instance.instanceName, { hours: 12, limitPerChat: 30, maxChats: 100, surfaceLate: true })
+      .then((r) => console.log(`[instance-health] ${instance.instanceName}: recuperação pós-reinício -> ${r?.synced ?? 0} mensagens.`))
+      .catch((err) => console.warn(`[instance-health] recuperação pós-reinício de ${instance.instanceName} falhou: ${err.message}`));
+  }, 90 * 1000).unref?.();
+  return true;
+}
+
+inboundProbe.onProbeFailed((instance) => restartAndRecover(instance, 'verificação de recebimento não chegou'));
+
 async function onNotReceiving(instance) {
   lastNotReceivingAlertAt.set(instance.id, Date.now());
   incidentStartedAt.set(instance.id, Date.now());
   console.error(`[instance-health] ${instance.instanceName} NÃO está recebendo mensagens (verificações falharam).`);
   sendSystemAlert(instance.tenantId, notReceivingAlertText(instance)).catch(() => {});
-  // Tentativa unica de auto-recuperacao: reiniciar a sessao (sem logout).
-  try {
-    const { evolutionUrl, evolutionKey } = evolution.resolveEvolutionConfig(instance.tenant?.settings, instance);
-    if (evolutionUrl && evolutionKey) {
-      await evolution.restartInstance(evolutionUrl, evolutionKey, instance.instanceName);
-      console.warn(`[instance-health] ${instance.instanceName}: sessão reiniciada automaticamente após falha de recebimento.`);
-    }
-  } catch (err) {
-    console.warn(`[instance-health] ${instance.instanceName}: falha ao reiniciar sessão: ${err.message}`);
-  }
+  // O reinicio automatico ja acontece a cada verificacao que falha
+  // (restartAndRecover via inboundProbe.onProbeFailed).
 }
 
 function onReceivingRecovered(instance) {
@@ -222,7 +264,7 @@ function onReceivingRecovered(instance) {
     instance.tenantId,
     `✅ A conexão *${displayInstanceName(instance)}* (+${instance.phone || '?'}) voltou a receber mensagens. O sistema vai buscar as conversas das últimas 24h que ficaram para trás.`,
   ).catch(() => {});
-  syncMissedMessages(instance.instanceName, { hours: 24, limitPerChat: 50, maxChats: 150 })
+  syncMissedMessages(instance.instanceName, { hours: 24, limitPerChat: 50, maxChats: 150, surfaceLate: true })
     .catch((err) => console.warn(`[instance-health] recuperação pós-falha de ${instance.instanceName} falhou: ${err.message}`));
 }
 

@@ -85,6 +85,15 @@ function isHistoricalMessage(msg, eventName, nowMs = Date.now()) {
     || nowMs - messageOccurredAt(msg, new Date(nowMs)).getTime() > 5 * 60 * 1000;
 }
 
+// messages.upsert com atraso (> 5 min, < 48h): o WhatsApp segurou a mensagem
+// e so entregou agora (ex.: sessao "surda" ate reiniciar). Nao e historico de
+// sincronizacao (messages.set) -- o atendente precisa ver.
+function isLateDelivery(msg, eventName, nowMs = Date.now()) {
+  if (String(eventName || '').toLowerCase() === 'messages.set') return false;
+  const age = nowMs - messageOccurredAt(msg, new Date(nowMs)).getTime();
+  return age > 5 * 60 * 1000 && age < 48 * 60 * 60 * 1000;
+}
+
 function clearPendingConnectionCheck(instanceName) {
   const timer = pendingConnectionChecks.get(instanceName);
   if (timer) {
@@ -385,7 +394,7 @@ async function downloadMedia(evolutionUrl, evolutionKey, instanceName, msg, mess
 }
 
 async function processSingleMessage(msg, instance, waInstance, tenant, isHistorical, options = {}) {
-  const { forceResolvedOnCreate = false } = options;
+  const { forceResolvedOnCreate = false, lateDelivery = false } = options;
   const identity = getWebhookMessageIdentity(msg);
   if (!identity.valid) {
     console.warn(`[webhook] Ignorando messages.upsert sem identidade/direcao confiavel. instance=${instance || 'desconhecida'}`);
@@ -653,17 +662,21 @@ async function processSingleMessage(msg, instance, waInstance, tenant, isHistori
     if (sessionResult.startedNew) ticket.sessionStartedAt = sessionResult.session.startedAt;
   }
 
-  if (ticket.status === 'resolved' && shouldReopenResolvedTicket({ isHistorical, fromMe })) {
+  // Entrega atrasada (fila do WhatsApp liberada apos reconectar/reiniciar):
+  // a mensagem e nova para o atendente -- reabre/sobe o ticket, mas sem bot,
+  // fora-do-horario ou outras automacoes (isHistorical continua true).
+  const surfaceLate = isHistorical && lateDelivery && !fromMe && !isGroup;
+  if (ticket.status === 'resolved' && (shouldReopenResolvedTicket({ isHistorical, fromMe }) || surfaceLate)) {
     // Se o ticket já existia mas estava resolvido, REABRE ele para evitar duplicação na lista.
     // Reinicia sessionStartedAt: começa uma nova conversa reaproveitando a mesma linha.
     const useBotForInstance = shouldUseBotForInstance(instance, tenant.settings);
     ticket = await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { status: !isGroup && useBotForInstance ? 'bot' : 'pending', updatedAt: occurredAt, lastMessageAt: occurredAt, unreadCount: { increment: 1 } }
+      data: { status: !isGroup && useBotForInstance && !surfaceLate ? 'bot' : 'pending', updatedAt: occurredAt, lastMessageAt: occurredAt, unreadCount: { increment: 1 } }
     });
     if (io) io.to(tenant.id).emit('ticket_updated', ticket);
     console.log(`[webhook] Ticket ${ticket.id} reaberto para evitar duplicação.`);
-  } else if (!isHistorical && ticket.status !== 'resolved' && !fromMe) {
+  } else if ((!isHistorical || surfaceLate) && ticket.status !== 'resolved' && !fromMe) {
     // Incrementa unreadCount para mensagens de clientes em tickets já abertos
     const useBotForInstance = shouldUseBotForInstance(instance, tenant.settings);
     ticket = await prisma.ticket.update({
@@ -1134,7 +1147,8 @@ async function handleWebhook(req, res) {
 
       // Se o evento for messages.set ou a mensagem tiver mais de 5 minutos, é considerada histórica
       const isHistorical = isHistoricalMessage(msg, ev);
-      await processSingleMessage(msg, instance, waInstance, tenant, isHistorical);
+      const lateDelivery = isLateDelivery(msg, ev);
+      await processSingleMessage(msg, instance, waInstance, tenant, isHistorical, { lateDelivery });
     }
   } catch (err) {
     console.error('[webhook] erro:', err.message);
@@ -1747,6 +1761,7 @@ module.exports = {
     claimWebhookMessage,
     getWebhookMessageIdentity,
     isHistoricalMessage,
+    isLateDelivery,
     messageOccurredAt,
     shouldReopenResolvedTicket,
     mapWhatsappAck,

@@ -142,7 +142,9 @@ async function syncMissedMessages(instanceName, options = {}) {
             result.skipped += 1;
             continue;
           }
-          await processSingleMessage(message, instanceName, waInstance, waInstance.tenant, true);
+          await processSingleMessage(message, instanceName, waInstance, waInstance.tenant, true, {
+            lateDelivery: Boolean(options.surfaceLate),
+          });
           result.synced += 1;
         } catch (error) {
           result.errors += 1;

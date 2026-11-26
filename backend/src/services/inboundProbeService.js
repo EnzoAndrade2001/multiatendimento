@@ -34,6 +34,12 @@ const FAILURES_TO_ALERT = Math.max(1, Number(process.env.INBOUND_PROBE_FAILURES_
 const DEFAULT_WINDOW = { start: '08:00', end: '18:00', weekdays: [1, 2, 3, 4, 5] };
 
 const sendBackoff = new Map();
+let probeFailedHandler = null;
+
+/** Registrado pelo monitor de saude: chamado a cada verificacao que NAO chegou. */
+function onProbeFailed(fn) {
+  probeFailedHandler = typeof fn === 'function' ? fn : null;
+}
 const inboundNoteCache = new Map();
 
 function isEnabled() {
@@ -217,6 +223,9 @@ async function runProbeCycle(instances, nowMs = Date.now()) {
           if (await expireProbe(inst)) {
             inst.probeToken = null;
             inst.probeFailures = (inst.probeFailures || 0) + 1;
+            if (probeFailedHandler) {
+              Promise.resolve(probeFailedHandler(inst)).catch((err) => console.warn(`[inbound-probe] tratamento de falha: ${err.message}`));
+            }
           } else {
             skip.add(inst.id);
           }
@@ -244,6 +253,7 @@ module.exports = {
   consumeProbeMessage,
   noteInbound,
   runProbeCycle,
+  onProbeFailed,
   isEnabled,
   FAILURES_TO_ALERT,
   __testing: {

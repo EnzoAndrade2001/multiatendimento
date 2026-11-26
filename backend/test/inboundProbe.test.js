@@ -122,3 +122,29 @@ test('ciclo: expira sonda vencida e envia nova pela outra conexão', async (cont
   assert.equal(sent[0].phone, '555194412679');
   assert.ok(t.extractProbeToken({ message: { conversation: sent[0].text } }));
 });
+
+test('mensagem entregue com atraso (fila liberada no reinício) aparece para o atendente; sync de histórico não', () => {
+  const { __testing: w } = require('../src/controllers/webhookController');
+  const now = Date.now();
+  const at = (minAgo) => ({ messageTimestamp: Math.floor((now - minAgo * MIN) / 1000) });
+  assert.equal(w.isLateDelivery(at(1), 'messages.upsert', now), false, 'tempo real');
+  assert.equal(w.isLateDelivery(at(120), 'messages.upsert', now), true, 'atrasada 2h');
+  assert.equal(w.isLateDelivery(at(120), 'messages.set', now), false, 'histórico');
+  assert.equal(w.isLateDelivery(at(49 * 60), 'messages.upsert', now), false, 'antiga demais');
+});
+
+test('cada verificação que falha aciona o tratamento (reinício automático)', async (context) => {
+  const og = { updateMany: prisma.waInstance.updateMany, bh: prisma.businessHour.findUnique };
+  prisma.waInstance.updateMany = async () => ({ count: 1 });
+  prisma.businessHour.findUnique = async () => ({ active: false, start: '00:00', end: '00:01' });
+  const failed = [];
+  probe.onProbeFailed((inst) => { failed.push(inst.id); });
+  context.after(() => {
+    prisma.waInstance.updateMany = og.updateMany;
+    prisma.businessHour.findUnique = og.bh;
+    probe.onProbeFailed(null);
+  });
+  const now = Date.now();
+  await probe.runProbeCycle([INST({ probeToken: 'old', probeSentAt: new Date(now - t.PROBE_TIMEOUT_MS - MIN) })], now);
+  assert.deepEqual(failed, ['wa-a']);
+});
